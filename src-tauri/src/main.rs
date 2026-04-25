@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    sessions_vault_tmp_lib::run()
+    sessions_vault_lib::run()
 }

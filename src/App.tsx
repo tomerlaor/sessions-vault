@@ -8,8 +8,9 @@ function App() {
   const closeAbout = useCallback(() => setShowAbout(false), [])
 
   useEffect(() => {
-    const promise = listen('show-about', () => setShowAbout(true))
-    return () => { promise.then(unlisten => unlisten()) }
+    let unlisten: (() => void) | undefined
+    listen('show-about', () => setShowAbout(true)).then(fn => { unlisten = fn })
+    return () => { unlisten?.() }
   }, [])
 
   return (
