@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { getVersion } from '@tauri-apps/api/app'
-import { open } from '@tauri-apps/plugin-opener'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import './AboutWindow.css'
 
 interface Props {
@@ -72,13 +72,13 @@ export function AboutWindow({ onClose }: Props) {
           <div className="about-links">
             <button
               className="about-link"
-              onClick={() => open('https://www.apache.org/licenses/LICENSE-2.0').catch(console.error)}
+              onClick={() => openUrl('https://www.apache.org/licenses/LICENSE-2.0').catch(console.error)}
             >
               License ↗
             </button>
             <button
               className="about-link"
-              onClick={() => open('https://github.com/tomerlaor/sessions-vault').catch(console.error)}
+              onClick={() => openUrl('https://github.com/tomerlaor/sessions-vault').catch(console.error)}
             >
               GitHub ↗
             </button>
