@@ -20,7 +20,9 @@ pub fn run() {
         })
         .on_menu_event(|app, event| {
             if event.id() == "about" {
-                app.emit("show-about", ()).unwrap();
+                if let Err(e) = app.emit("show-about", ()) {
+                    eprintln!("[menu] failed to emit show-about: {e}");
+                }
             }
         })
         .run(tauri::generate_context!())
