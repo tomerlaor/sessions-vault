@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  rust:
+    name: Rust — fmt & clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if Cargo.toml exists
+        id: cargo_check
+        run: |
+          if [ -f "src-tauri/Cargo.toml" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install Rust toolchain
+        if: steps.cargo_check.outputs.exists == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: cargo fmt --check
+        if: steps.cargo_check.outputs.exists == 'true'
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: cargo clippy
+        if: steps.cargo_check.outputs.exists == 'true'
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+  frontend:
+    name: Frontend — prettier & eslint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if package.json exists
+        id: pkg_check
+        run: |
+          if [ -f "package.json" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Node.js
+        if: steps.pkg_check.outputs.exists == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.pkg_check.outputs.exists == 'true'
+        run: npm ci
+
+      - name: Prettier check
+        if: steps.pkg_check.outputs.exists == 'true'
+        run: npx prettier --check .
+
+      - name: ESLint
+        if: steps.pkg_check.outputs.exists == 'true'
+        run: npx eslint .
