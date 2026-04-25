@@ -11,7 +11,7 @@ export function AboutWindow({ onClose }: Props) {
   const [version, setVersion] = useState('...')
 
   useEffect(() => {
-    getVersion().then(setVersion)
+    getVersion().then(setVersion).catch(() => setVersion('unknown'))
   }, [])
 
   const handleKeyDown = useCallback(
@@ -26,7 +26,13 @@ export function AboutWindow({ onClose }: Props) {
 
   return (
     <div className="about-overlay" onClick={onClose}>
-      <div className="about-modal" onClick={e => e.stopPropagation()}>
+      <div
+        className="about-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="about-title"
+        onClick={e => e.stopPropagation()}
+      >
         <div className="about-tracks" aria-hidden="true">
           <div className="about-track" style={{ width: '78%' }} />
           <div className="about-track" style={{ width: '44%' }} />
@@ -57,7 +63,7 @@ export function AboutWindow({ onClose }: Props) {
             <rect x="26" y="52" width="26" height="8" rx="2" fill="#2a2a2a" />
           </svg>
 
-          <h1 className="about-name">
+          <h1 id="about-title" className="about-name">
             Sessions<span>Vault</span>
           </h1>
 
@@ -66,13 +72,13 @@ export function AboutWindow({ onClose }: Props) {
           <div className="about-links">
             <button
               className="about-link"
-              onClick={() => open('https://www.apache.org/licenses/LICENSE-2.0')}
+              onClick={() => open('https://www.apache.org/licenses/LICENSE-2.0').catch(console.error)}
             >
               License ↗
             </button>
             <button
               className="about-link"
-              onClick={() => open('https://github.com/tomerlaor/sessions-vault')}
+              onClick={() => open('https://github.com/tomerlaor/sessions-vault').catch(console.error)}
             >
               GitHub ↗
             </button>
