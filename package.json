@@ -1,5 +1,5 @@
 {
-  "name": "sessions-vault-tmp",
+  "name": "sessions-vault",
   "private": true,
   "version": "0.1.0",
   "type": "module",

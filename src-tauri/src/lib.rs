@@ -14,7 +14,8 @@ pub fn run() {
                 None::<&str>,
             )?;
             let help_menu = Submenu::with_items(app, "Help", true, &[&about_item])?;
-            let menu = Menu::with_items(app, &[&help_menu])?;
+            let menu = Menu::default(&app.handle())?;
+            menu.append(&help_menu)?;
             app.set_menu(menu)?;
             Ok(())
         })
