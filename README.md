@@ -27,6 +27,9 @@ Download the latest `.dmg` from the [Releases page](https://github.com/tomerlaor
 
 > SessionsVault is open source (Apache 2.0). The app is not yet notarized with Apple. [View the source](https://github.com/tomerlaor/sessions-vault) if you'd like to verify it yourself or build from source.
 
+---
+
+
 ## Features (v1)
 
 - **Scan & index** — point the app at your Music folder, get every project indexed with BPM, key, and track count extracted automatically from Ableton `.als` files
