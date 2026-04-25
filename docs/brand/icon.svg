@@ -1,0 +1,25 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Dark rounded square background -->
+  <rect width="512" height="512" rx="112" fill="#1a1a1a"/>
+
+  <!-- Arrangement-view bars mark, centered with padding -->
+  <!-- Track 1 -->
+  <rect x="72"  y="108" width="258" height="52" rx="12" fill="#ff5a00"/>
+  <rect x="348" y="108" width="92"  height="52" rx="12" fill="#ff5a00" opacity="0.28"/>
+
+  <!-- Track 2 -->
+  <rect x="72"  y="178" width="128" height="52" rx="12" fill="#2a2a2a"/>
+  <rect x="216" y="178" width="224" height="52" rx="12" fill="#2a2a2a"/>
+
+  <!-- Track 3 -->
+  <rect x="72"  y="248" width="192" height="52" rx="12" fill="#ff5a00" opacity="0.62"/>
+  <rect x="280" y="248" width="160" height="52" rx="12" fill="#2a2a2a"/>
+
+  <!-- Track 4 -->
+  <rect x="72"  y="318" width="86"  height="52" rx="12" fill="#2a2a2a"/>
+  <rect x="174" y="318" width="266" height="52" rx="12" fill="#ff5a00" opacity="0.88"/>
+
+  <!-- Track 5 -->
+  <rect x="72"  y="388" width="154" height="52" rx="12" fill="#ff5a00" opacity="0.38"/>
+  <rect x="242" y="388" width="198" height="52" rx="12" fill="#2a2a2a"/>
+</svg>
