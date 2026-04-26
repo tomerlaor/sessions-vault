@@ -85,7 +85,7 @@ export function AboutWindow({ onClose }: Props) {
           </div>
 
           <p className="about-built">Built with Tauri · React · Rust</p>
-          <p className="about-copy">© 2026 Tomer Laor. All rights reserved.</p>
+          <p className="about-copy">© 2026 Tomer Laor</p>
         </div>
       </div>
     </div>
