@@ -11,6 +11,7 @@ import { useProjects, useFilteredProjects } from './hooks/useProjects'
 import { useScanner } from './hooks/useScanner'
 import { useWatcher } from './hooks/useWatcher'
 import { getTags } from './db/queries/tags'
+import { updateProjectField } from './db/queries/projects'
 import type { Project, Tag } from './types'
 import type { Filter, Sort } from './hooks/useProjects'
 
@@ -65,6 +66,7 @@ export default function App() {
     projects.forEach(p => {
       if (p.status === 'archived') { c.archived++; return }
       if (p.status === 'draft') c.dirty++
+      if (p.rating != null && p.rating > 0) c.starred++
       c.daw[p.daw] = (c.daw[p.daw] ?? 0) + 1
     })
     return c
@@ -81,6 +83,11 @@ export default function App() {
     await invoke('open_in_daw', { path: p.filePath })
     showToast(`Opening ${p.title}…`)
   }
+  const onStar = useCallback(async (p: Project) => {
+    const next = p.rating != null && p.rating > 0 ? null : 1
+    await updateProjectField(p.id, 'rating', next)
+    reload()
+  }, [reload])
 
   return (
     <div className="app">
@@ -132,7 +139,8 @@ export default function App() {
           label={viewLabel[filter.view] ?? 'All projects'}
           onSelect={id => { setSelectedId(id); setShowDetail(true) }}
           onReveal={onReveal}
-          onOpen={onOpen} />
+          onOpen={onOpen}
+          onStar={onStar} />
 
         {showDetail && selected && (
           <DetailPanel

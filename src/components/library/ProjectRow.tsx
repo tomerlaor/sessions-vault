@@ -22,9 +22,11 @@ interface ProjectRowProps {
   onClick: () => void
   onReveal: () => void
   onOpen: () => void
+  onStar: () => void
 }
 
-export default function ProjectRow({ project: p, wave, art, selected, onClick, onReveal, onOpen }: ProjectRowProps) {
+export default function ProjectRow({ project: p, wave, art, selected, onClick, onReveal, onOpen, onStar }: ProjectRowProps) {
+  const starred = p.rating != null && p.rating > 0
   const daw = DAWS[p.daw] ?? { name: p.daw, color: '#888' }
   const modifiedDate = new Date(p.modifiedAt * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
@@ -65,6 +67,14 @@ export default function ProjectRow({ project: p, wave, art, selected, onClick, o
       </td>
       <td onClick={e => e.stopPropagation()}>
         <div className="row-actions">
+          <button
+            className="row-btn"
+            title={starred ? 'Unstar' : 'Star'}
+            onClick={onStar}
+            style={{ color: starred ? '#f5a623' : undefined, opacity: starred ? 1 : undefined }}
+          >
+            <Icon name="star" size={12} />
+          </button>
           <button className="row-btn" title="Open in DAW" onClick={onOpen}><Icon name="open" size={12} /></button>
           <button className="row-btn" title="Reveal in Finder" onClick={onReveal}><Icon name="folder" size={12} /></button>
           <button className="row-btn" title="More"><Icon name="dots" size={12} /></button>

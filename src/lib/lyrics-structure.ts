@@ -3,7 +3,7 @@ export interface LyricsSection {
   chords: string  // e.g. "Am - F - C - G"
 }
 
-const CHORD_RE = /^\[([A-G][b#]?(m|maj|min|dim|aug|sus|add|M)?[0-9]*)\]$/
+const CHORD_RE = /^\[([A-G][b#]?(?:sus[24]?(?:maj|min|m|M)?[0-9]*|(?:maj|min|dim|aug|dom|alt|add|m|M)?[0-9]*)(?:[b#][0-9]+)*(?:\/[A-G][b#]?)?)\]$/
 
 function isChordToken(token: string): boolean {
   return CHORD_RE.test(token)
@@ -12,8 +12,7 @@ function isChordToken(token: string): boolean {
 function isSectionHeader(line: string): boolean {
   const t = line.trim()
   if (!/^\[.+\]$/.test(t)) return false
-  const inner = t.slice(1, -1)
-  return !isChordToken(t) && !/^[A-G][b#]?(m|maj|min|dim|aug|sus|add|M)?[0-9]*$/.test(inner)
+  return !isChordToken(t)
 }
 
 function extractChordsFromLine(line: string): string[] {
