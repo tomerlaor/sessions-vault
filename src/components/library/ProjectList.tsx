@@ -36,10 +36,11 @@ interface ProjectListProps {
   onSelect: (id: string) => void
   onReveal: (p: Project) => void
   onOpen: (p: Project) => void
+  onStar: (p: Project) => void
   label: string
 }
 
-export default function ProjectList({ projects, selectedId, sort, setSort, onSelect, onReveal, onOpen, label }: ProjectListProps) {
+export default function ProjectList({ projects, selectedId, sort, setSort, onSelect, onReveal, onOpen, onStar, label }: ProjectListProps) {
   const sortIcon = (key: string) => sort.key === key ? (sort.dir === 'asc' ? '↑' : '↓') : ''
   const handleSort = (key: string) => {
     if (key === '__') return
@@ -72,7 +73,8 @@ export default function ProjectList({ projects, selectedId, sort, setSort, onSel
                 selected={p.id === selectedId}
                 onClick={() => onSelect(p.id)}
                 onReveal={() => onReveal(p)}
-                onOpen={() => onOpen(p)} />
+                onOpen={() => onOpen(p)}
+                onStar={() => onStar(p)} />
             ))}
             {projects.length === 0 && (
               <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)' }}>

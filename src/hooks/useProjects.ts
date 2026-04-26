@@ -41,7 +41,7 @@ export function useFilteredProjects(
       list = list.filter(p => p.status === 'archived')
     } else {
       list = list.filter(p => p.status !== 'archived')
-      if (filter.view === 'starred') list = list.filter(p => (p as any).starred)
+      if (filter.view === 'starred') list = list.filter(p => p.rating != null && p.rating > 0)
       if (filter.view === 'dirty')   list = list.filter(p => p.status === 'draft')
       if (filter.view === 'recent')  list = list.slice(0, 6)
     }
