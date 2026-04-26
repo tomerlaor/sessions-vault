@@ -55,7 +55,7 @@ function ChordRow({ line, rtl }: { line: string; rtl: boolean }) {
           }}>
             {seg.chord ?? ''}
           </span>
-          <span style={{ fontSize: 13, lineHeight: '22px', color: 'var(--text-0)' }}>
+          <span style={{ fontSize: 13, lineHeight: '22px', color: 'var(--text-0)', whiteSpace: 'pre' }}>
             {seg.text || (seg.chord ? '  ' : '')}
           </span>
         </span>
