@@ -137,3 +137,57 @@ A standard desktop modal containing:
 - [ ] Share in relevant communities:
   - Reddit: r/ableton, r/WeAreTheMusicMakers, r/rust, r/tauri
   - Personal social/dev channels if relevant
+
+---
+
+## Section 8: Versioning Strategy
+
+- **Scheme:** Semver — `vMAJOR.MINOR.PATCH`
+- **Source of truth:** version in `tauri.conf.json` — Tauri syncs to `Cargo.toml` and `package.json` at build time
+- **Automation:** `release-please` GitHub Action watches `main` for conventional commits, opens a Release PR with bumped version + auto-generated `CHANGELOG.md`
+- **Version bump rules:**
+  - `feat:` → minor bump (e.g. `v0.2.0`)
+  - `fix:` → patch bump (e.g. `v0.1.1`)
+  - `feat!:` or `BREAKING CHANGE:` → major bump (e.g. `v1.0.0`)
+  - `chore:`, `docs:`, `ci:` → no bump
+- **Release flow:** merge Release PR → tag created → build workflow fires → `.dmg` attached to GitHub Release
+
+### Files
+
+- [ ] Create `.github/workflows/release-please.yml` — runs on push to `main`, manages Release PRs
+- [ ] Create `release-please-config.json` — configures release-please for a Tauri monorepo layout
+- [ ] `CHANGELOG.md` — auto-generated and maintained by release-please
+
+---
+
+## Section 9: Release Build Workflow (macOS)
+
+- **Trigger:** push of tags matching `v*.*.*`
+- **Runner:** `macos-latest`
+- **Build tool:** `tauri-apps/tauri-action`
+- **Signing:** ad-hoc (`codesign --deep --force --sign -`) — removes "damaged" error on Apple Silicon; Gatekeeper warning still appears, right-click → Open workaround documented in README
+- **Output:** `SessionsVault_x.x.x_universal.dmg` (universal binary — Intel + Apple Silicon)
+- **Distribution:** binary attached to GitHub Release automatically
+
+### Files
+
+- [ ] Create `.github/workflows/release-build.yml` — triggered by version tags, builds and signs `.dmg`, attaches to release
+
+---
+
+## Section 10: Installation Instructions
+
+Add **Install** section to `README.md` (above "Building Locally"):
+
+```markdown
+## Install
+
+Download the latest `.dmg` from the [Releases page](https://github.com/tomerlaor/sessions-vault/releases).
+
+1. Open the `.dmg` and drag **SessionsVault** to your Applications folder
+2. On first launch, macOS may show *"SessionsVault can't be opened because it is from an unidentified developer"*
+3. To bypass: right-click the app icon → **Open** → **Open** again in the dialog
+4. You only need to do this once — subsequent launches work normally
+
+> SessionsVault is open source (Apache 2.0). The app is not yet notarized with Apple. [View the source](https://github.com/tomerlaor/sessions-vault) if you'd like to verify it yourself or build from source.
+```
