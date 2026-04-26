@@ -43,7 +43,14 @@ pub fn rename_project(old_path: String, new_name: String) -> Result<String, Stri
         format!("{}.{}", new_name, ext)
     };
     let new_path = parent.join(&new_filename);
-    if new_path.exists() {
+    let conflict = std::fs::read_dir(parent)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .any(|e| e.file_name().to_string_lossy() == new_filename.as_str())
+        })
+        .unwrap_or(false);
+    if conflict {
         return Err(format!("A file named '{}' already exists", new_filename));
     }
     std::fs::rename(path, &new_path).map_err(|e| e.to_string())?;
