@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import type { Project } from '../../../types'
 
 interface Props {
@@ -6,14 +6,20 @@ interface Props {
   onUpdate: (field: string, value: unknown) => void
 }
 
-// Detect Hebrew / Arabic characters
+const CHORD_RE = /\[([A-G][b#]?(?:sus[24]?(?:maj|min|m|M)?[0-9]*|(?:maj|min|dim|aug|dom|alt|add|m|M)?[0-9]*)(?:[b#][0-9]+)*(?:\/[A-G][b#]?)?)\]/g
+
+function extractUniqueChords(text: string): string[] {
+  const seen = new Set<string>()
+  for (const m of text.matchAll(CHORD_RE)) seen.add(m[1])
+  return [...seen]
+}
+
 function detectRtl(text: string) {
   return /[֐-׿؀-ۿ]/.test(text)
 }
 
 interface Segment { chord?: string; text: string }
 
-// "[Am]Hello [F]world" → [{chord:'Am', text:'Hello '}, {chord:'F', text:'world'}]
 function parseChordLine(line: string): Segment[] {
   const parts = line.split(/(\[[^\]]+\])/)
   const result: Segment[] = []
@@ -38,7 +44,7 @@ function ChordRow({ line, rtl }: { line: string; rtl: boolean }) {
   const hasChords = segments.some(s => s.chord)
 
   if (!hasChords) {
-    return <p style={{ margin: '0 0 2px', color: 'var(--text-0)' }}>{line || ' '}</p>
+    return <p style={{ margin: '0 0 2px', color: 'var(--text-0)' }}>{line || ' '}</p>
   }
 
   return (
@@ -56,7 +62,7 @@ function ChordRow({ line, rtl }: { line: string; rtl: boolean }) {
             {seg.chord ?? ''}
           </span>
           <span style={{ fontSize: 13, lineHeight: '22px', color: 'var(--text-0)', whiteSpace: 'pre' }}>
-            {seg.text || (seg.chord ? '  ' : '')}
+            {seg.text || (seg.chord ? '  ' : '')}
           </span>
         </span>
       ))}
@@ -72,8 +78,7 @@ function LyricsView({ text, rtl }: { text: string; rtl: boolean }) {
       {lines.map((line, i) => {
         const trimmed = line.trim()
 
-        // [Section Name] — whole line is a section header
-        if (/^\[[^\]]+\]$/.test(trimmed) && !trimmed.slice(1, -1).match(/^[A-G][b#]?(m|maj|min|dim|aug|sus|add|M)?[0-9]*/)) {
+        if (/^\[[^\]]+\]$/.test(trimmed) && !/^\[([A-G][b#]?(?:sus[24]?(?:maj|min|m|M)?[0-9]*|(?:maj|min|dim|aug|dom|alt|add|m|M)?[0-9]*)(?:[b#][0-9]+)*(?:\/[A-G][b#]?)?)\]$/.test(trimmed)) {
           return (
             <div key={i} className="section">
               {trimmed.slice(1, -1)}
@@ -81,7 +86,6 @@ function LyricsView({ text, rtl }: { text: string; rtl: boolean }) {
           )
         }
 
-        // (Remark) — whole line is a remark
         if (/^\(.+\)$/.test(trimmed)) {
           return (
             <div key={i} style={{
@@ -93,7 +97,6 @@ function LyricsView({ text, rtl }: { text: string; rtl: boolean }) {
           )
         }
 
-        // Line with inline chords or plain text
         return <ChordRow key={i} line={line} rtl={rtl} />
       })}
     </div>
@@ -101,13 +104,16 @@ function LyricsView({ text, rtl }: { text: string; rtl: boolean }) {
 }
 
 export default function LyricsTab({ project: p, onUpdate }: Props) {
-  const [editing, setEditing]   = useState(false)
-  const [draft, setDraft]       = useState('')
+  const [editing, setEditing]       = useState(false)
+  const [draft, setDraft]           = useState('')
   const [rtlOverride, setRtlOverride] = useState<boolean | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const text = p.lyrics ?? ''
   const autoRtl = useMemo(() => detectRtl(text || draft), [text, draft])
   const rtl = rtlOverride !== null ? rtlOverride : autoRtl
+
+  const knownChords = useMemo(() => extractUniqueChords(draft), [draft])
 
   const startEdit = () => {
     setDraft(text)
@@ -117,6 +123,20 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
   const handleDone = async () => {
     await onUpdate('lyrics', draft)
     setEditing(false)
+  }
+
+  const insertChord = (chord: string) => {
+    const el = textareaRef.current
+    if (!el) return
+    const start = el.selectionStart
+    const end = el.selectionEnd
+    const token = `[${chord}]`
+    const next = draft.slice(0, start) + token + draft.slice(end)
+    setDraft(next)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(start + token.length, start + token.length)
+    })
   }
 
   return (
@@ -138,7 +158,28 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
 
       {editing ? (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+          {knownChords.length > 0 && (
+            <div style={{
+              display: 'flex', flexWrap: 'wrap', gap: 6, padding: '8px 12px',
+              borderBottom: '1px solid var(--line)', background: 'var(--bg-1)',
+            }}>
+              {knownChords.map(chord => (
+                <button
+                  key={chord}
+                  onClick={() => insertChord(chord)}
+                  style={{
+                    padding: '2px 8px', borderRadius: 4, border: '1px solid var(--line)',
+                    background: 'var(--bg-2)', color: '#7c9fff',
+                    fontSize: 11, fontWeight: 700, cursor: 'pointer', lineHeight: '18px',
+                  }}
+                >
+                  {chord}
+                </button>
+              ))}
+            </div>
+          )}
           <textarea
+            ref={textareaRef}
             className="description-input"
             dir={rtl ? 'rtl' : 'ltr'}
             style={{
