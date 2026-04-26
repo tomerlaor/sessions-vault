@@ -90,8 +90,20 @@ export default function App() {
           <div className="dot r"/><div className="dot y"/><div className="dot g"/>
         </div>
         <div className="title">
-          <Icon name="drive" size={12} style={{ display:'inline-block', verticalAlign:'middle', marginRight:6, color:'var(--accent)' }} />
-          <b>Sessions</b> <span style={{ opacity: 0.6 }}>— DAW Project Manager</span>
+          <svg width="18" height="22" viewBox="6 6 60 68" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
+            <rect x="8"  y="8"  width="40" height="9" rx="2.5" fill="#ff5a00"/>
+            <rect x="52" y="8"  width="14" height="9" rx="2.5" fill="#ff5a00" opacity="0.3"/>
+            <rect x="8"  y="21" width="20" height="9" rx="2.5" fill="rgba(255,255,255,0.14)"/>
+            <rect x="32" y="21" width="34" height="9" rx="2.5" fill="rgba(255,255,255,0.14)"/>
+            <rect x="8"  y="34" width="30" height="9" rx="2.5" fill="#ff5a00" opacity="0.6"/>
+            <rect x="42" y="34" width="24" height="9" rx="2.5" fill="rgba(255,255,255,0.14)"/>
+            <rect x="8"  y="47" width="14" height="9" rx="2.5" fill="rgba(255,255,255,0.14)"/>
+            <rect x="26" y="47" width="40" height="9" rx="2.5" fill="#ff5a00" opacity="0.85"/>
+            <rect x="8"  y="60" width="24" height="9" rx="2.5" fill="#ff5a00" opacity="0.35"/>
+            <rect x="36" y="60" width="30" height="9" rx="2.5" fill="rgba(255,255,255,0.14)"/>
+          </svg>
+          <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.01em', color: 'var(--text-0)' }}>Sessions</span>
+          <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.01em', color: '#ff5a00' }}>Vault</span>
         </div>
         <div className="search">
           <Icon name="search" size={12} style={{ color: 'var(--text-2)' }} />
