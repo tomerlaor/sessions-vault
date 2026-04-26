@@ -39,7 +39,7 @@ Download the latest `.dmg` from the [Releases page](https://github.com/tomerlaor
 - **Cloud backup** — Dropbox, Google Drive, and S3-compatible providers with versioned snapshots
 - **Non-destructive** — never touches your original project files
 
-Full requirements: [REQUIREMENTS_1.md](./REQUIREMENTS_1.md)
+Full requirements: [REQUIREMENTS_1.md](./docs/REQUIREMENTS_1.md)
 
 ---
 
@@ -58,12 +58,16 @@ Full requirements: [REQUIREMENTS_1.md](./REQUIREMENTS_1.md)
 
 ## Building Locally
 
-> _Build instructions will be added once the project is scaffolded._
+**Requirements:**
+- [Rust](https://rustup.rs) 1.75+
+- [Node.js](https://nodejs.org) 20+
 
-Requirements (coming soon):
-- Rust 1.75+
-- Node.js 20+
-- Tauri CLI
+```bash
+git clone https://github.com/tomerlaor/sessions-vault.git
+cd sessions-vault
+npm install
+npm run tauri dev
+```
 
 ---
 
@@ -80,7 +84,7 @@ Requirements (coming soon):
 
 ## Contributing
 
-Contributions are welcome. Please read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a PR.
+Contributions are welcome. Please read [CONTRIBUTING.md](./docs/CONTRIBUTING.md) before opening a PR.
 
 ## License
 
