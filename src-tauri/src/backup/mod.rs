@@ -3,7 +3,7 @@ pub mod local;
 
 use sha2::{Digest, Sha256};
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
@@ -36,7 +36,13 @@ fn sanitize(s: &str) -> String {
 
 /// Creates a zip of the .als file and its .dawmgr sidecar (if present).
 /// The zip is placed in the system temp dir; caller is responsible for cleanup.
-pub fn zip_project(als_path: &Path, title: &str) -> Result<PathBuf, String> {
+pub fn zip_project(
+    als_path: &Path,
+    title: &str,
+    lyrics: Option<&str>,
+    tabs: Option<&str>,
+    todos: Option<&str>,
+) -> Result<PathBuf, String> {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -78,6 +84,15 @@ pub fn zip_project(als_path: &Path, title: &str) -> Result<PathBuf, String> {
             zip.start_file(&rel, opts).map_err(|e| e.to_string())?;
             let mut f = File::open(p).map_err(|e| e.to_string())?;
             std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
+        }
+    }
+
+    for (name, content) in [("lyrics.txt", lyrics), ("tabs.txt", tabs), ("todos.txt", todos)] {
+        if let Some(s) = content {
+            if !s.trim().is_empty() {
+                zip.start_file(name, opts).map_err(|e| e.to_string())?;
+                zip.write_all(s.as_bytes()).map_err(|e| e.to_string())?;
+            }
         }
     }
 

@@ -91,6 +91,17 @@ pub fn store_secret(key: String, value: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_secret(key: String) -> Result<Option<String>, String> {
+    // In dev, allow overriding via env var to avoid repeated keychain prompts
+    // (macOS revokes "Always Allow" on every recompile during development).
+    // E.g. set ANTHROPIC_API_KEY in your shell before running `cargo tauri dev`.
+    #[cfg(debug_assertions)]
+    {
+        let env_key = key.to_uppercase().replace('-', "_");
+        if let Ok(val) = std::env::var(&env_key) {
+            return Ok(Some(val));
+        }
+    }
+
     let entry = keyring::Entry::new(KEYCHAIN_SERVICE, &key).map_err(|e| e.to_string())?;
     match entry.get_password() {
         Ok(v) => Ok(Some(v)),
@@ -135,9 +146,19 @@ pub async fn backup_local(
     file_path: String,
     title: String,
     destination_dir: String,
+    lyrics: Option<String>,
+    tabs: Option<String>,
+    todos: Option<String>,
 ) -> Result<BackupResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        backup::local::backup_to_local(&file_path, &title, &destination_dir)
+        backup::local::backup_to_local(
+            &file_path,
+            &title,
+            &destination_dir,
+            lyrics.as_deref(),
+            tabs.as_deref(),
+            todos.as_deref(),
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -166,6 +187,9 @@ pub async fn backup_gdrive(
     file_path: String,
     title: String,
     access_token: String,
+    lyrics: Option<String>,
+    tabs: Option<String>,
+    todos: Option<String>,
 ) -> Result<BackupResult, String> {
     // Create zip in blocking thread
     let (zip_path, checksum, size_bytes) = tauri::async_runtime::spawn_blocking({
@@ -173,7 +197,13 @@ pub async fn backup_gdrive(
         let title = title.clone();
         move || -> Result<_, String> {
             let als = Path::new(&file_path);
-            let zip = backup::zip_project(als, &title)?;
+            let zip = backup::zip_project(
+                als,
+                &title,
+                lyrics.as_deref(),
+                tabs.as_deref(),
+                todos.as_deref(),
+            )?;
             let checksum = backup::checksum_file(&zip)?;
             let size = std::fs::metadata(&zip).map_err(|e| e.to_string())?.len();
             Ok((zip, checksum, size))

@@ -87,6 +87,9 @@ export default function HistoryTab({ project: p }: Props) {
         filePath: p.filePath,
         title: p.title,
         destinationDir: cfg.destination,
+        lyrics: p.lyrics || null,
+        tabs: p.tabs || null,
+        todos: p.todos || null,
       })
       await insertBackup({
         projectId: p.id, provider: 'local',
@@ -149,11 +152,17 @@ export default function HistoryTab({ project: p }: Props) {
         result = await invoke<BackupResult>('backup_local', {
           filePath: p.filePath, title: p.title,
           destinationDir: folderCfg.destination,
+          lyrics: p.lyrics || null,
+          tabs: p.tabs || null,
+          todos: p.todos || null,
         })
       } else {
         const accessToken = await ensureFreshToken(apiCfg!)
         result = await invoke<BackupResult>('backup_gdrive', {
           filePath: p.filePath, title: p.title, accessToken,
+          lyrics: p.lyrics || null,
+          tabs: p.tabs || null,
+          todos: p.todos || null,
         })
       }
 

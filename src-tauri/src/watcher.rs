@@ -32,6 +32,9 @@ pub fn start(paths: Vec<String>, app: AppHandle) {
                     }
 
                     if path.exists() {
+                        if crate::scanner::is_backup_path(path) {
+                            continue;
+                        }
                         let ext = path.extension()
                             .and_then(|e| e.to_str())
                             .unwrap_or("");

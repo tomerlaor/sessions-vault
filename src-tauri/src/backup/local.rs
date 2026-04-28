@@ -4,9 +4,12 @@ pub fn backup_to_local(
     file_path: &str,
     title: &str,
     dest_dir: &str,
+    lyrics: Option<&str>,
+    tabs: Option<&str>,
+    todos: Option<&str>,
 ) -> Result<super::BackupResult, String> {
     let als_path = Path::new(file_path);
-    let zip_tmp = super::zip_project(als_path, title)?;
+    let zip_tmp = super::zip_project(als_path, title, lyrics, tabs, todos)?;
 
     let dest_dir = Path::new(dest_dir);
     if !dest_dir.exists() {

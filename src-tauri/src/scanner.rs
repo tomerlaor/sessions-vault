@@ -50,7 +50,7 @@ pub fn scan_folder(root: &str) -> Vec<ProjectMetadata> {
         .collect()
 }
 
-fn is_backup_path(path: &Path) -> bool {
+pub fn is_backup_path(path: &Path) -> bool {
     path.components().any(|c| {
         c.as_os_str().eq_ignore_ascii_case("Backup")
     })
