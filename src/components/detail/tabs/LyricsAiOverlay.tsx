@@ -92,6 +92,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
         setAiConfig(ai)
         setCfg(lyricsAI)
       })
+      return () => clearTimeout(tagTimerRef.current)
     }, [])
 
     useEffect(() => {
@@ -105,7 +106,12 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
     }, [project.id])
 
     useEffect(() => {
-      if (!cfg.enabled || !aiConfig) return
+      if (!cfg.enabled || !aiConfig) {
+        setGhostText('')
+        setCurrentSuggestion(null)
+        setStatus('idle')
+        return
+      }
 
       let aborted = false
       clearTimeout(debounceRef.current)
@@ -215,8 +221,8 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
         logStyleEvent({ projectId: project.id, suggestionText: text, mode, accepted: true, tag: null }),
       ])
 
-      triggerProfileRegenIfNeeded(null)
-      triggerProfileRegenIfNeeded(project.id)
+      await triggerProfileRegenIfNeeded(null)
+      await triggerProfileRegenIfNeeded(project.id)
     }, [onInsert, project.id, triggerProfileRegenIfNeeded])
 
     const handleReject = useCallback(async (text: string, mode: LyricSuggestionMode) => {
@@ -226,9 +232,10 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
       setPopupItems([])
 
       if (cfg.feedbackMode === 'tagged') {
-        const eventId = await logStyleEvent({
-          projectId: project.id, suggestionText: text, mode, accepted: false, tag: null,
-        })
+        const [eventId] = await Promise.all([
+          logStyleEvent({ projectId: project.id, suggestionText: text, mode, accepted: false, tag: null }),
+          logStyleEvent({ projectId: null,        suggestionText: text, mode, accepted: false, tag: null }),
+        ])
         setPendingTagEventId(eventId)
         setTagChipVisible(true)
         clearTimeout(tagTimerRef.current)

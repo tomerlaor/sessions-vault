@@ -130,23 +130,25 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
     setEditing(false)
   }
 
-  const handleOverlayInsert = (text: string, mode: LyricSuggestionMode) => {
+  const handleOverlayInsert = (suggestion: string, mode: LyricSuggestionMode) => {
     const ta = textareaRef.current
+    const lineEnd  = draft.indexOf('\n', selectionStart)
+    const insertAt = lineEnd === -1 ? draft.length : lineEnd
     setDraft(prev => {
       if (mode === 'completion') {
-        return prev.slice(0, selectionStart) + text + prev.slice(selectionStart)
+        return prev.slice(0, selectionStart) + suggestion + prev.slice(selectionStart)
       }
       if (mode === 'alternative') {
-        return prev.slice(0, selectionStart) + text + prev.slice(selectionEnd)
+        return prev.slice(0, selectionStart) + suggestion + prev.slice(selectionEnd)
       }
       // next_line: insert after current line
-      const lineEnd  = prev.indexOf('\n', selectionStart)
-      const insertAt = lineEnd === -1 ? prev.length : lineEnd
-      return prev.slice(0, insertAt) + '\n' + text + prev.slice(insertAt)
+      return prev.slice(0, insertAt) + '\n' + suggestion + prev.slice(insertAt)
     })
     if (ta) {
       requestAnimationFrame(() => {
-        const newCursor = selectionStart + text.length
+        const newCursor = mode === 'next_line'
+          ? insertAt + 1 + suggestion.length
+          : selectionStart + suggestion.length
         ta.focus()
         ta.setSelectionRange(newCursor, newCursor)
       })
