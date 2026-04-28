@@ -1,4 +1,4 @@
-import { generateObject, generateText } from 'ai'
+import { generateObject, generateText, streamText } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { z } from 'zod'
@@ -113,4 +113,55 @@ Return exactly ${input.instruments.length} part(s), one per requested instrument
   })
 
   return result.object
+}
+
+// ── Lyrics AI ─────────────────────────────────────────────────────────────────
+
+export async function* streamLyricsSuggestion(
+  cfg: AIConfig,
+  system: string,
+  prompt: string,
+): AsyncGenerator<string> {
+  const provider = buildProvider(cfg)
+  const result = streamText({ model: provider, system, prompt, maxOutputTokens: 80 })
+  for await (const chunk of result.textStream) {
+    yield chunk
+  }
+}
+
+export const popupSuggestionsSchema = z.object({
+  suggestions: z.array(z.object({
+    mode: z.enum(['completion', 'alternative', 'next_line']),
+    text: z.string(),
+  })),
+})
+
+export type PopupSuggestions = z.infer<typeof popupSuggestionsSchema>
+
+export async function generatePopupSuggestions(
+  cfg: AIConfig,
+  system: string,
+  prompt: string,
+): Promise<PopupSuggestions> {
+  const provider = buildProvider(cfg)
+  const result = await generateObject({
+    model: provider,
+    schema: popupSuggestionsSchema,
+    system,
+    prompt,
+  })
+  return result.object
+}
+
+export async function generateStyleSummary(
+  cfg: AIConfig,
+  recentAccepted: string[],
+): Promise<string> {
+  const provider = buildProvider(cfg)
+  const result = await generateText({
+    model: provider,
+    prompt: `Analyse the following song lyric lines written by a musician. Write a 1-2 sentence description of their lyric writing style — focus on rhyme scheme, line length, imagery, tone, and vocabulary register. Be concise and specific.\n\nLines:\n${recentAccepted.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\nDescription:`,
+    maxOutputTokens: 60,
+  })
+  return result.text.trim()
 }
