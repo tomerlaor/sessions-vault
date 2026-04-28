@@ -45,9 +45,9 @@ function buildSongContext(
   timeSignature: string | null,
 ): string {
   const parts = [`Song: "${title}"`]
-  if (bpm) parts.push(`BPM: ${bpm}`)
-  if (key) parts.push(`Key: ${key}`)
-  if (timeSignature) parts.push(`Time: ${timeSignature}`)
+  if (bpm !== null) parts.push(`BPM: ${bpm}`)
+  if (key !== null) parts.push(`Key: ${key}`)
+  if (timeSignature !== null) parts.push(`Time: ${timeSignature}`)
   return parts.join(' · ')
 }
 
