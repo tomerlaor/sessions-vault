@@ -81,6 +81,22 @@ async function runMigrations(raw: Database): Promise<void> {
     config_json TEXT NOT NULL
   )`, [])
 
+  await raw.execute(`CREATE TABLE IF NOT EXISTS lyric_style_events (
+    id TEXT PRIMARY KEY,
+    project_id TEXT,
+    suggestion_text TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    accepted INTEGER NOT NULL,
+    tag TEXT,
+    created_at INTEGER NOT NULL
+  )`, [])
+
+  await raw.execute(`CREATE TABLE IF NOT EXISTS lyric_style_profile (
+    id TEXT PRIMARY KEY,
+    summary_text TEXT NOT NULL,
+    last_updated_at INTEGER NOT NULL
+  )`, [])
+
   // Remove projects that live inside an Ableton Backup folder (case-insensitive, any depth)
   await raw.execute(
     `DELETE FROM projects WHERE file_path LIKE '%/Backup/%' OR file_path LIKE '%\\Backup\\%'`,

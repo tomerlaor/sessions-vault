@@ -57,3 +57,19 @@ export const backupConfigs = sqliteTable('backup_configs', {
   id:         text('id').primaryKey(),           // 'local' | 'gdrive'
   configJson: text('config_json').notNull(),
 })
+
+export const lyricStyleEvents = sqliteTable('lyric_style_events', {
+  id:             text('id').primaryKey(),
+  projectId:      text('project_id'),
+  suggestionText: text('suggestion_text').notNull(),
+  mode:           text('mode').notNull(),
+  accepted:       integer('accepted').notNull(),
+  tag:            text('tag'),
+  createdAt:      integer('created_at').notNull(),
+})
+
+export const lyricStyleProfile = sqliteTable('lyric_style_profile', {
+  id:            text('id').primaryKey(),
+  summaryText:   text('summary_text').notNull(),
+  lastUpdatedAt: integer('last_updated_at').notNull(),
+})
