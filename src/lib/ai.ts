@@ -123,6 +123,7 @@ export async function* streamLyricsSuggestion(
   prompt: string,
 ): AsyncGenerator<string> {
   const provider = buildProvider(cfg)
+  // streamText is intentionally not awaited — result.textStream is consumed lazily
   const result = streamText({ model: provider, system, prompt, maxOutputTokens: 80 })
   for await (const chunk of result.textStream) {
     yield chunk
@@ -157,6 +158,7 @@ export async function generateStyleSummary(
   cfg: AIConfig,
   recentAccepted: string[],
 ): Promise<string> {
+  if (recentAccepted.length === 0) return ''
   const provider = buildProvider(cfg)
   const result = await generateText({
     model: provider,
