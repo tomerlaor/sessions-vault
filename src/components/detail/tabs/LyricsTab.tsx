@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef } from 'react'
-import type { Project } from '../../../types'
+import type { Project, LyricSuggestionMode } from '../../../types'
+import LyricsAiOverlay, { type LyricsAiOverlayHandle } from './LyricsAiOverlay'
 
 interface Props {
   project: Project
@@ -108,6 +109,10 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
   const [draft, setDraft]           = useState('')
   const [rtlOverride, setRtlOverride] = useState<boolean | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const overlayRef  = useRef<LyricsAiOverlayHandle>(null)
+  const [selectionStart, setSelectionStart] = useState(0)
+  const [selectionEnd,   setSelectionEnd]   = useState(0)
+  const [scrollTop,      setScrollTop]      = useState(0)
 
   const text = p.lyrics ?? ''
   const autoRtl = useMemo(() => detectRtl(text || draft), [text, draft])
@@ -123,6 +128,29 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
   const handleDone = async () => {
     await onUpdate('lyrics', draft)
     setEditing(false)
+  }
+
+  const handleOverlayInsert = (text: string, mode: LyricSuggestionMode) => {
+    const ta = textareaRef.current
+    setDraft(prev => {
+      if (mode === 'completion') {
+        return prev.slice(0, selectionStart) + text + prev.slice(selectionStart)
+      }
+      if (mode === 'alternative') {
+        return prev.slice(0, selectionStart) + text + prev.slice(selectionEnd)
+      }
+      // next_line: insert after current line
+      const lineEnd  = prev.indexOf('\n', selectionStart)
+      const insertAt = lineEnd === -1 ? prev.length : lineEnd
+      return prev.slice(0, insertAt) + '\n' + text + prev.slice(insertAt)
+    })
+    if (ta) {
+      requestAnimationFrame(() => {
+        const newCursor = selectionStart + text.length
+        ta.focus()
+        ta.setSelectionRange(newCursor, newCursor)
+      })
+    }
   }
 
   const insertChord = (chord: string) => {
@@ -178,17 +206,45 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
               ))}
             </div>
           )}
-          <textarea
-            ref={textareaRef}
-            className="description-input"
-            dir={rtl ? 'rtl' : 'ltr'}
-            style={{
-              border: 'none', borderRadius: 0, minHeight: 240,
-              background: 'var(--bg-0)', textAlign: rtl ? 'right' : 'left',
-            }}
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-          />
+          <div style={{ position: 'relative' }}>
+            <LyricsAiOverlay
+              ref={overlayRef}
+              draft={draft}
+              selectionStart={selectionStart}
+              selectionEnd={selectionEnd}
+              scrollTop={scrollTop}
+              project={p}
+              onInsert={handleOverlayInsert}
+            />
+            <textarea
+              ref={textareaRef}
+              className="description-input"
+              dir={rtl ? 'rtl' : 'ltr'}
+              style={{
+                border: 'none', borderRadius: 0, minHeight: 240,
+                background: 'transparent', textAlign: rtl ? 'right' : 'left',
+                position: 'relative', zIndex: 1,
+              }}
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              onSelect={e => {
+                setSelectionStart(e.currentTarget.selectionStart)
+                setSelectionEnd(e.currentTarget.selectionEnd)
+              }}
+              onScroll={e => setScrollTop(e.currentTarget.scrollTop)}
+              onKeyDown={e => {
+                if (e.key === 'Tab') {
+                  if (overlayRef.current?.hasSuggestion()) {
+                    e.preventDefault()
+                    overlayRef.current.acceptSuggestion()
+                    return
+                  }
+                } else {
+                  overlayRef.current?.dismissSuggestion()
+                }
+              }}
+            />
+          </div>
           <div style={{
             padding: '6px 12px', fontSize: 10, color: 'var(--text-3)',
             borderTop: '1px solid var(--line)', background: 'var(--bg-1)',
