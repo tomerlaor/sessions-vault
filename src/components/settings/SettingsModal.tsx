@@ -7,8 +7,10 @@ import {
   getGDriveFolderConfig, setGDriveFolderConfig,
 } from '../../db/queries/backups'
 import { getAIConfig, setAIConfig } from '../../db/queries/ai'
+import { getLyricsAIConfig, setLyricsAIConfig, clearStyleMemory } from '../../db/queries/lyrics-ai'
 import { testAIConnection, OPENAI_MODELS, ANTHROPIC_MODELS } from '../../lib/ai'
-import type { LocalConfig, GDriveConfig, AIConfig, AIProvider } from '../../types'
+import type { LocalConfig, GDriveConfig, AIConfig, AIProvider, LyricsAIConfig } from '../../types'
+import LyricsAiSettings from './LyricsAiSettings'
 import Icon from '../shared/Icon'
 
 interface GDriveTokens {
@@ -65,6 +67,12 @@ export default function SettingsModal({ onClose }: Props) {
   const [aiCfg, setAiCfg] = useState<AIConfig>({
     provider: 'openai', apiKey: '', baseUrl: '', model: '',
   })
+  const [lyricsAICfg, setLyricsAICfgState] = useState<LyricsAIConfig>({
+    enabled: false,
+    mode: 'inline',
+    enabledModes: ['completion'],
+    feedbackMode: 'minimal',
+  })
   const [aiTesting, setAiTesting]   = useState(false)
   const [aiTestResult, setAiTestResult] = useState<'ok' | 'error' | null>(null)
   const [aiTestErr, setAiTestErr]   = useState<string | null>(null)
@@ -76,12 +84,14 @@ export default function SettingsModal({ onClose }: Props) {
       getGDriveConfig(),
       invoke<string[]>('detect_gdrive_paths'),
       getAIConfig(),
-    ]).then(([lc, gf, gc, paths, ai]) => {
+      getLyricsAIConfig(),
+    ]).then(([lc, gf, gc, paths, ai, lyricsAI]) => {
       setLocalCfg(lc)
       setGDriveFolderCfg(gf)
       setGdriveCfg(gc)
       setDetectedPaths(paths)
       if (ai) setAiCfg(ai)
+      setLyricsAICfgState(lyricsAI)
     })
   }, [])
 
@@ -150,6 +160,15 @@ export default function SettingsModal({ onClose }: Props) {
     setAiCfg(next)
     setAiTestResult(null)
     await setAIConfig(next)
+  }, [])
+
+  const handleLyricsAIChange = useCallback(async (next: LyricsAIConfig) => {
+    setLyricsAICfgState(next)
+    await setLyricsAIConfig(next)
+  }, [])
+
+  const handleClearGlobalMemory = useCallback(async () => {
+    await clearStyleMemory(null)
   }, [])
 
   const handleTestAI = useCallback(async () => {
@@ -430,6 +449,19 @@ export default function SettingsModal({ onClose }: Props) {
                 )}
               </div>
             </div>
+          </section>
+
+          <div style={{ height: 1, background: 'var(--line)' }} />
+
+          {/* ── Lyrics AI ── */}
+          <section>
+            <SectionTitle>Lyrics AI</SectionTitle>
+            <Hint>AI-powered autocomplete and brainstorm suggestions while writing lyrics. Uses your AI assistant settings above.</Hint>
+            <LyricsAiSettings
+              cfg={lyricsAICfg}
+              onChange={handleLyricsAIChange}
+              onClearGlobalMemory={handleClearGlobalMemory}
+            />
           </section>
         </div>
       </div>
