@@ -1,4 +1,4 @@
-import { eq, desc, and, isNull } from 'drizzle-orm'
+import { eq, desc, and, isNull, sql } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { getDb } from '../client'
 import { lyricStyleEvents, lyricStyleProfile, backupConfigs } from '../schema'
@@ -81,10 +81,10 @@ export async function countAcceptedEvents(projectId: string | null): Promise<num
     ? isNull(lyricStyleEvents.projectId)
     : eq(lyricStyleEvents.projectId, projectId)
   const rows = await db
-    .select({ id: lyricStyleEvents.id })
+    .select({ count: sql<number>`count(*)` })
     .from(lyricStyleEvents)
     .where(and(scopeCondition, eq(lyricStyleEvents.accepted, 1)))
-  return rows.length
+  return rows[0]?.count ?? 0
 }
 
 export async function getStyleProfile(id: string): Promise<string | null> {
