@@ -11,9 +11,11 @@
 A local-first, free and open-source desktop app for music creators to organise, search, and back up DAW projects. The single most critical v1 capability is **project discovery and metadata extraction** — scan folders, parse Ableton `.als` files deeply, and present a searchable library.
 
 ### Target user
+
 Bedroom producers and hobbyist-to-prosumer musicians who accumulate dozens to hundreds of DAW projects and lose them to drive failures or forgotten folder names. Primary DAW: Ableton Live.
 
 ### v1 Non-goals
+
 - No audio playback, no DAW functionality
 - No collaboration or multi-user features
 - No cloud backup (v2)
@@ -23,17 +25,18 @@ Bedroom producers and hobbyist-to-prosumer musicians who accumulate dozens to hu
 
 ## 2. Platform & Tech Stack
 
-| Layer | Choice | Reason |
-|---|---|---|
-| Desktop shell | Tauri 2.x | Small binary (<15MB), native perf, <2s cold start |
-| Frontend | React + TypeScript + Tailwind | Fast iteration, large contributor pool |
-| ORM / DB | Drizzle ORM + `tauri-plugin-sql` → SQLite | Type-safe, schema-as-code, lives in TypeScript |
-| Rust backend | Tauri commands | Scan, parse `.als`, watch folders — I/O heavy work only |
-| File watching | `notify` crate | OS-native FSEvents/inotify/ReadDirectoryChangesW |
-| Search | Drizzle queries + SQLite FTS5 | Sub-100ms on 10k projects |
-| Monetisation | Free and open source | Maximise adoption, community DAW parser contributions |
+| Layer         | Choice                                    | Reason                                                  |
+| ------------- | ----------------------------------------- | ------------------------------------------------------- |
+| Desktop shell | Tauri 2.x                                 | Small binary (<15MB), native perf, <2s cold start       |
+| Frontend      | React + TypeScript + Tailwind             | Fast iteration, large contributor pool                  |
+| ORM / DB      | Drizzle ORM + `tauri-plugin-sql` → SQLite | Type-safe, schema-as-code, lives in TypeScript          |
+| Rust backend  | Tauri commands                            | Scan, parse `.als`, watch folders — I/O heavy work only |
+| File watching | `notify` crate                            | OS-native FSEvents/inotify/ReadDirectoryChangesW        |
+| Search        | Drizzle queries + SQLite FTS5             | Sub-100ms on 10k projects                               |
+| Monetisation  | Free and open source                      | Maximise adoption, community DAW parser contributions   |
 
 ### Why Rust for the backend
+
 - `.als` parsing (gzip + XML) at scan time is CPU + I/O heavy — no GC pauses
 - `notify` crate hooks into OS-native file watch APIs with minimal battery drain
 - Tauri requires Rust — the question is scope, not whether
@@ -75,42 +78,48 @@ File change detected
 ## 4. Data Model (Drizzle Schema)
 
 ```typescript
-export const projects = sqliteTable('projects', {
-  id:            text('id').primaryKey(),              // nanoid
-  filePath:      text('file_path').notNull().unique(),
-  fileHash:      text('file_hash'),
-  title:         text('title').notNull(),              // user-editable display name
-  daw:           text('daw').notNull(),                // 'ableton' | 'logic' | 'flstudio' ...
-  dawVersion:    text('daw_version'),
-  bpm:           real('bpm'),                          // null if not extractable
-  key:           text('key'),                          // e.g. 'G minor'
-  timeSignature: text('time_signature'),               // e.g. '4/4'
-  trackCount:    integer('track_count'),
-  sizeBytes:     integer('size_bytes'),
-  status:        text('status').default('draft'),      // draft | mixed | released | archived
-  rating:        integer('rating'),                    // 1–5, nullable
-  notes:         text('notes'),
-  createdAt:     integer('created_at', { mode: 'timestamp' }),
-  modifiedAt:    integer('modified_at', { mode: 'timestamp' }),
-  lastScannedAt: integer('last_scanned_at', { mode: 'timestamp' }),
-})
+export const projects = sqliteTable("projects", {
+  id: text("id").primaryKey(), // nanoid
+  filePath: text("file_path").notNull().unique(),
+  fileHash: text("file_hash"),
+  title: text("title").notNull(), // user-editable display name
+  daw: text("daw").notNull(), // 'ableton' | 'logic' | 'flstudio' ...
+  dawVersion: text("daw_version"),
+  bpm: real("bpm"), // null if not extractable
+  key: text("key"), // e.g. 'G minor'
+  timeSignature: text("time_signature"), // e.g. '4/4'
+  trackCount: integer("track_count"),
+  sizeBytes: integer("size_bytes"),
+  status: text("status").default("draft"), // draft | mixed | released | archived
+  rating: integer("rating"), // 1–5, nullable
+  notes: text("notes"),
+  createdAt: integer("created_at", { mode: "timestamp" }),
+  modifiedAt: integer("modified_at", { mode: "timestamp" }),
+  lastScannedAt: integer("last_scanned_at", { mode: "timestamp" }),
+});
 
-export const tags = sqliteTable('tags', {
-  id:    text('id').primaryKey(),
-  name:  text('name').notNull().unique(),
-  color: text('color').notNull(),
-})
+export const tags = sqliteTable("tags", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  color: text("color").notNull(),
+});
 
-export const projectTags = sqliteTable('project_tags', {
-  projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
-  tagId:     text('tag_id').references(() => tags.id, { onDelete: 'cascade' }),
-}, t => ({ pk: primaryKey({ columns: [t.projectId, t.tagId] }) }))
+export const projectTags = sqliteTable(
+  "project_tags",
+  {
+    projectId: text("project_id").references(() => projects.id, {
+      onDelete: "cascade",
+    }),
+    tagId: text("tag_id").references(() => tags.id, { onDelete: "cascade" }),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.projectId, t.tagId] }) }),
+);
 
-export const watchedFolders = sqliteTable('watched_folders', {
-  id:      text('id').primaryKey(),
-  path:    text('path').notNull().unique(),
-  addedAt: integer('added_at', { mode: 'timestamp' }),
-})
+export const watchedFolders = sqliteTable("watched_folders", {
+  id: text("id").primaryKey(),
+  path: text("path").notNull().unique(),
+  addedAt: integer("added_at", { mode: "timestamp" }),
+});
 ```
 
 Plugins, samples, attachments, and backup records are deferred to v2 — kept out of v1 schema intentionally.
@@ -156,6 +165,7 @@ pub struct ProjectMetadata {
 ```
 
 ### DAW detection & parsing strategy
+
 - `.als` → full metadata extraction (Ableton, primary)
 - `.alp` → basic (Ableton Live Pack — no XML access)
 - `.logicx`, `.flp`, `.ptx`, `.cpr` → filesystem metadata only (name, size, dates)
@@ -207,25 +217,25 @@ src/
 
 ## 7. DAW Support Matrix (v1)
 
-| DAW | Extension | BPM | Key | Plugins | Tracks | Notes |
-|---|---|---|---|---|---|---|
-| Ableton Live | `.als` | ✅ | ✅ (Live 11+) | ✅ | ✅ | Primary, full extraction |
-| Logic Pro | `.logicx` | — | — | — | — | Name + date + size only |
-| FL Studio | `.flp` | — | — | — | — | Name + date + size only |
-| Pro Tools | `.ptx` | — | — | — | — | Name + date + size only |
-| Cubase | `.cpr` | — | — | — | — | Name + date + size only |
-| Reaper | `.rpp` | — | — | — | — | Plain text — v2 candidate |
+| DAW          | Extension | BPM | Key           | Plugins | Tracks | Notes                     |
+| ------------ | --------- | --- | ------------- | ------- | ------ | ------------------------- |
+| Ableton Live | `.als`    | ✅  | ✅ (Live 11+) | ✅      | ✅     | Primary, full extraction  |
+| Logic Pro    | `.logicx` | —   | —             | —       | —      | Name + date + size only   |
+| FL Studio    | `.flp`    | —   | —             | —       | —      | Name + date + size only   |
+| Pro Tools    | `.ptx`    | —   | —             | —       | —      | Name + date + size only   |
+| Cubase       | `.cpr`    | —   | —             | —       | —      | Name + date + size only   |
+| Reaper       | `.rpp`    | —   | —             | —       | —      | Plain text — v2 candidate |
 
 ---
 
 ## 8. Performance Targets
 
-| Metric | Target |
-|---|---|
-| Initial scan — 1,000 projects | < 30s |
-| Search / filter — 10,000 projects | < 100ms |
-| App cold start | < 2s to interactive UI |
-| Idle memory — 5,000 projects | < 300MB |
+| Metric                            | Target                 |
+| --------------------------------- | ---------------------- |
+| Initial scan — 1,000 projects     | < 30s                  |
+| Search / filter — 10,000 projects | < 100ms                |
+| App cold start                    | < 2s to interactive UI |
+| Idle memory — 5,000 projects      | < 300MB                |
 
 ---
 

@@ -24,13 +24,13 @@ pub struct ProjectMetadata {
 }
 
 pub const DAW_EXTENSIONS: &[(&str, &str)] = &[
-    ("als",       "ableton"),
-    ("alp",       "ableton"),
-    ("logicx",    "logic"),
-    ("flp",       "fl"),
-    ("ptx",       "protools"),
-    ("cpr",       "cubase"),
-    ("rpp",       "reaper"),
+    ("als", "ableton"),
+    ("alp", "ableton"),
+    ("logicx", "logic"),
+    ("flp", "fl"),
+    ("ptx", "protools"),
+    ("cpr", "cubase"),
+    ("rpp", "reaper"),
     ("bwproject", "bitwig"),
 ];
 
@@ -51,9 +51,8 @@ pub fn scan_folder(root: &str) -> Vec<ProjectMetadata> {
 }
 
 pub fn is_backup_path(path: &Path) -> bool {
-    path.components().any(|c| {
-        c.as_os_str().eq_ignore_ascii_case("Backup")
-    })
+    path.components()
+        .any(|c| c.as_os_str().eq_ignore_ascii_case("Backup"))
 }
 
 pub fn build_metadata_pub(path: &Path, daw: &str) -> Result<ProjectMetadata, std::io::Error> {
@@ -79,7 +78,16 @@ fn build_metadata(path: &Path, daw: &str) -> Result<ProjectMetadata, std::io::Er
 
     let (bpm, key, time_signature, track_count, duration_secs, daw_version) = if daw == "ableton" {
         crate::parser::ableton::parse(path)
-            .map(|m| (m.bpm, m.key, m.time_signature, m.track_count, m.duration_secs, m.daw_version))
+            .map(|m| {
+                (
+                    m.bpm,
+                    m.key,
+                    m.time_signature,
+                    m.track_count,
+                    m.duration_secs,
+                    m.daw_version,
+                )
+            })
             .unwrap_or((None, None, None, None, None, None))
     } else {
         (None, None, None, None, None, None)
@@ -107,7 +115,9 @@ fn hash_file(path: &Path) -> Result<String, std::io::Error> {
     let mut buf = [0u8; 65536];
     loop {
         let n = file.read(&mut buf)?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         hasher.update(&buf[..n]);
     }
     Ok(hex::encode(hasher.finalize()))
@@ -125,7 +135,10 @@ mod tests {
         let sub = dir.path().join("project_folder");
         std::fs::create_dir(&sub).unwrap();
         let als_path = sub.join("my_track.als");
-        std::fs::File::create(&als_path).unwrap().write_all(b"fake").unwrap();
+        std::fs::File::create(&als_path)
+            .unwrap()
+            .write_all(b"fake")
+            .unwrap();
 
         let results = scan_folder(dir.path().to_str().unwrap());
         assert_eq!(results.len(), 1);
@@ -145,7 +158,10 @@ mod tests {
     fn title_derived_from_filename() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("my-cool_track.als");
-        std::fs::File::create(&path).unwrap().write_all(b"x").unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(b"x")
+            .unwrap();
         let results = scan_folder(dir.path().to_str().unwrap());
         assert!(results[0].file_path.contains("my-cool_track"));
     }

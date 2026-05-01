@@ -8,11 +8,11 @@ Thanks for your interest in contributing. Here's everything you need to know.
 
 ## Branch Naming
 
-| Type | Pattern | Example |
-|---|---|---|
-| Feature | `feature/<short-name>` | `feature/ableton-parser` |
-| Bug fix | `fix/<short-name>` | `fix/scan-crash-on-symlink` |
-| Chore / config | `chore/<short-name>` | `chore/update-dependencies` |
+| Type           | Pattern                | Example                     |
+| -------------- | ---------------------- | --------------------------- |
+| Feature        | `feature/<short-name>` | `feature/ableton-parser`    |
+| Bug fix        | `fix/<short-name>`     | `fix/scan-crash-on-symlink` |
+| Chore / config | `chore/<short-name>`   | `chore/update-dependencies` |
 
 Always branch off `dev`, not `main`.
 
@@ -26,12 +26,14 @@ Always branch off `dev`, not `main`.
 ## Code Style
 
 **Rust:** Format with `rustfmt` before committing.
+
 ```bash
 cargo fmt
 cargo clippy -- -D warnings
 ```
 
 **TypeScript / React:** Format with Prettier, lint with ESLint.
+
 ```bash
 npx prettier --write .
 npx eslint .

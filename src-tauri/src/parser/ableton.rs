@@ -48,21 +48,24 @@ pub fn parse(path: &Path) -> Option<ProjectMetadata> {
                     "Ableton" => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"MajorVersion" {
-                                fields.daw_version = Some(
-                                    String::from_utf8_lossy(&attr.value).into_owned()
-                                );
+                                fields.daw_version =
+                                    Some(String::from_utf8_lossy(&attr.value).into_owned());
                             }
                         }
                     }
-                    "Tempo" => { in_tempo_manual = true; }
-                    "TimeSignature" => { in_time_sig = true; }
+                    "Tempo" => {
+                        in_tempo_manual = true;
+                    }
+                    "TimeSignature" => {
+                        in_time_sig = true;
+                    }
                     "MidiClip" | "AudioClip" => {
                         // Session clips use Time="-63072000"; arrangement clips have real positions
                         let is_arrangement = e.attributes().flatten().any(|a| {
-                            a.key.as_ref() == b"Time" &&
-                            std::str::from_utf8(&a.value)
-                                .map(|v| v.parse::<f64>().map(|t| t >= 0.0).unwrap_or(false))
-                                .unwrap_or(false)
+                            a.key.as_ref() == b"Time"
+                                && std::str::from_utf8(&a.value)
+                                    .map(|v| v.parse::<f64>().map(|t| t >= 0.0).unwrap_or(false))
+                                    .unwrap_or(false)
                         });
                         in_arrangement_clip = is_arrangement;
                     }
@@ -115,7 +118,8 @@ pub fn parse(path: &Path) -> Option<ProjectMetadata> {
                     "RootNote" if in_scale_info => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"Value" {
-                                scale_root = std::str::from_utf8(&attr.value).ok()
+                                scale_root = std::str::from_utf8(&attr.value)
+                                    .ok()
                                     .and_then(|v| v.parse().ok());
                             }
                         }
@@ -123,9 +127,8 @@ pub fn parse(path: &Path) -> Option<ProjectMetadata> {
                     "Name" if in_scale_info => {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"Value" {
-                                scale_name = Some(
-                                    String::from_utf8_lossy(&attr.value).into_owned()
-                                );
+                                scale_name =
+                                    Some(String::from_utf8_lossy(&attr.value).into_owned());
                             }
                         }
                     }
@@ -144,8 +147,12 @@ pub fn parse(path: &Path) -> Option<ProjectMetadata> {
                     }
                     // Global ScaleInformation → followed by <InKey>
                     // Per-clip ScaleInformation → followed by <IsInKey>
-                    "InKey"   => { fields.key = pending_key.take(); }
-                    "IsInKey" => { pending_key = None; }
+                    "InKey" => {
+                        fields.key = pending_key.take();
+                    }
+                    "IsInKey" => {
+                        pending_key = None;
+                    }
                     _ => {}
                 }
             }
@@ -153,7 +160,9 @@ pub fn parse(path: &Path) -> Option<ProjectMetadata> {
                 let name_bytes = e.name();
                 let tag = std::str::from_utf8(name_bytes.as_ref()).unwrap_or("");
                 match tag {
-                    "MidiClip" | "AudioClip" => { in_arrangement_clip = false; }
+                    "MidiClip" | "AudioClip" => {
+                        in_arrangement_clip = false;
+                    }
                     "ScaleInformation" if in_scale_info => {
                         pending_key = build_key_string(scale_root, scale_name.as_deref());
                         in_scale_info = false;
@@ -167,7 +176,10 @@ pub fn parse(path: &Path) -> Option<ProjectMetadata> {
         }
     }
 
-    let time_signature = match (fields.time_signature_numerator, fields.time_signature_denominator) {
+    let time_signature = match (
+        fields.time_signature_numerator,
+        fields.time_signature_denominator,
+    ) {
         (Some(n), Some(d)) => Some(format!("{n}/{d}")),
         _ => None,
     };
@@ -185,7 +197,11 @@ pub fn parse(path: &Path) -> Option<ProjectMetadata> {
         bpm: fields.bpm,
         key: fields.key,
         time_signature,
-        track_count: if fields.track_count > 0 { Some(fields.track_count) } else { None },
+        track_count: if fields.track_count > 0 {
+            Some(fields.track_count)
+        } else {
+            None
+        },
         duration_secs,
         size_bytes: 0,
         created_at: 0,
@@ -193,7 +209,9 @@ pub fn parse(path: &Path) -> Option<ProjectMetadata> {
     })
 }
 
-const NOTE_NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const NOTE_NAMES: [&str; 12] = [
+    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+];
 
 fn build_key_string(root: Option<i32>, scale: Option<&str>) -> Option<String> {
     let note = NOTE_NAMES.get(root? as usize)?;

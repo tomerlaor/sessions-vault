@@ -30,7 +30,13 @@ pub struct GDriveTokens {
 
 fn sanitize(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -87,7 +93,11 @@ pub fn zip_project(
         }
     }
 
-    for (name, content) in [("lyrics.txt", lyrics), ("tabs.txt", tabs), ("todos.txt", todos)] {
+    for (name, content) in [
+        ("lyrics.txt", lyrics),
+        ("tabs.txt", tabs),
+        ("todos.txt", todos),
+    ] {
         if let Some(s) = content {
             if !s.trim().is_empty() {
                 zip.start_file(name, opts).map_err(|e| e.to_string())?;

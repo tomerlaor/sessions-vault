@@ -6,7 +6,10 @@ use tauri::{AppHandle, Emitter};
 #[tauri::command]
 pub fn scan_folder(path: String, app: AppHandle) -> Vec<ProjectMetadata> {
     let results = scanner::scan_folder(&path);
-    let _ = app.emit("scan:complete", serde_json::json!({ "folder": path, "count": results.len() }));
+    let _ = app.emit(
+        "scan:complete",
+        serde_json::json!({ "folder": path, "count": results.len() }),
+    );
     results
 }
 
@@ -129,9 +132,17 @@ pub fn detect_gdrive_paths() -> Vec<String> {
     let mut found = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&cloud_storage) {
         for entry in entries.flatten() {
-            if entry.file_name().to_string_lossy().starts_with("GoogleDrive-") {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("GoogleDrive-")
+            {
                 let my_drive = entry.path().join("My Drive");
-                let path = if my_drive.exists() { my_drive } else { entry.path() };
+                let path = if my_drive.exists() {
+                    my_drive
+                } else {
+                    entry.path()
+                };
                 found.push(path.to_string_lossy().into_owned());
             }
         }

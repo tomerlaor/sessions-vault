@@ -83,7 +83,7 @@ The project is pre-development with a complete requirements document. This is th
 
 - [ ] Use **SessionsVault** as the official app name throughout all files (README, CONTRIBUTING, LICENSE header, `tauri.conf.json` when scaffolded)
 - [ ] GitHub repo name: `sessions-vault` (kebab-case convention)
-- [ ] Tagline: *"Your DAW projects, organized."*
+- [ ] Tagline: _"Your DAW projects, organized."_
 
 ### Brand Assets (`docs/brand/`)
 
@@ -107,7 +107,7 @@ A standard desktop modal containing:
 - Horizontal logo lockup (`logo.svg`) at the top
 - App name: **SessionsVault**
 - Version number (dynamic, pulled from `tauri.conf.json`)
-- Tagline: *"Your DAW projects, organized."*
+- Tagline: _"Your DAW projects, organized."_
 - Copyright: `© 2026 Tomer Laor. All rights reserved.`
 - License: `Apache 2.0` — with a clickable link to the full license text (opens in browser)
 - GitHub repo link
@@ -185,7 +185,7 @@ Add **Install** section to `README.md` (above "Building Locally"):
 Download the latest `.dmg` from the [Releases page](https://github.com/tomerlaor/sessions-vault/releases).
 
 1. Open the `.dmg` and drag **SessionsVault** to your Applications folder
-2. On first launch, macOS may show *"SessionsVault can't be opened because it is from an unidentified developer"*
+2. On first launch, macOS may show _"SessionsVault can't be opened because it is from an unidentified developer"_
 3. To bypass: right-click the app icon → **Open** → **Open** again in the dialog
 4. You only need to do this once — subsequent launches work normally
 

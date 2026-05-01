@@ -20,18 +20,20 @@ Make the BPM, Key, and Time Signature cells in the Overview tab's Details grid c
 Handles the click-to-edit pattern for BPM and Time Signature (plain text/number inputs).
 
 **Props:**
+
 ```ts
 interface Props {
-  label: string
-  value: string | number | null
-  type: 'text' | 'number'
-  min?: number
-  max?: number
-  onSave: (value: string | number | null) => void
+  label: string;
+  value: string | number | null;
+  type: "text" | "number";
+  min?: number;
+  max?: number;
+  onSave: (value: string | number | null) => void;
 }
 ```
 
 **Behavior:**
+
 - Closed: displays `value ?? '—'` with a `cursor: text` pointer on hover
 - Open: replaces value with an `<input>` (auto-focused, pre-filled with current value)
 - Enter or blur → calls `onSave(parsedValue)` and closes
@@ -44,17 +46,19 @@ interface Props {
 **Location:** `src/components/shared/KeyPicker.tsx`
 
 **Props:**
+
 ```ts
 interface Props {
-  value: string | null   // e.g. "G minor", "C# major", null
-  onSave: (value: string | null) => void
+  value: string | null; // e.g. "G minor", "C# major", null
+  onSave: (value: string | null) => void;
 }
 ```
 
 **Behavior:**
+
 - Closed: displays `value ?? '—'` with cursor text on hover
 - Open: a small inline panel showing:
-  - 12 root note buttons in chromatic order: C  C#  D  D#  E  F  F#  G  G#  A  A#  B
+  - 12 root note buttons in chromatic order: C C# D D# E F F# G G# A A# B
   - Major / Minor toggle (two buttons)
   - Clicking a root note while mode is selected → commits `"<root> <mode>"` and closes
   - Clicking mode toggle alone → stays open (must pick root to commit)
@@ -72,12 +76,25 @@ Replace the static Details grid with individual `EditableCell` and `KeyPicker` c
 
 ```tsx
 <div className="meta-grid">
-  <EditableCell label="BPM" value={p.bpm} type="number" min={20} max={300}
-    onSave={v => onUpdate('bpm', v)} />
-  <KeyPicker value={p.key} onSave={v => onUpdate('key', v)} />
-  <EditableCell label="Time" value={p.timeSignature} type="text"
-    onSave={v => onUpdate('timeSignature', v)} />
-  <div><div className="lbl">Tracks</div><div className="val">{p.trackCount ?? '—'}</div></div>
+  <EditableCell
+    label="BPM"
+    value={p.bpm}
+    type="number"
+    min={20}
+    max={300}
+    onSave={(v) => onUpdate("bpm", v)}
+  />
+  <KeyPicker value={p.key} onSave={(v) => onUpdate("key", v)} />
+  <EditableCell
+    label="Time"
+    value={p.timeSignature}
+    type="text"
+    onSave={(v) => onUpdate("timeSignature", v)}
+  />
+  <div>
+    <div className="lbl">Tracks</div>
+    <div className="val">{p.trackCount ?? "—"}</div>
+  </div>
 </div>
 ```
 

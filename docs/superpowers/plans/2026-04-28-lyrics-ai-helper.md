@@ -14,25 +14,26 @@
 
 ## File Map
 
-| Action | File | Purpose |
-|---|---|---|
-| Modify | `src/db/schema.ts` | Add `lyricStyleEvents` + `lyricStyleProfile` tables |
-| Modify | `src/db/client.ts` | Add `CREATE TABLE IF NOT EXISTS` migrations |
-| Modify | `src/types/index.ts` | Add `LyricsAIConfig`, `LyricSuggestionMode`, `LyricFeedbackMode`, `LyricDisplayMode`, `LyricRejectionTag` |
-| Create | `src/db/queries/lyrics-ai.ts` | CRUD for events, profiles, and lyrics-AI config |
-| Create | `src/lib/lyrics-ai.ts` | Pure prompt-builder functions + mode-determination logic |
-| Create | `tests/lyrics-ai.test.ts` | Unit tests for pure functions in `src/lib/lyrics-ai.ts` |
-| Modify | `src/lib/ai.ts` | Add `streamLyricsSuggestion`, `generatePopupSuggestions`, `generateStyleSummary` |
-| Create | `src/components/settings/LyricsAiSettings.tsx` | Settings section component |
-| Modify | `src/components/settings/SettingsModal.tsx` | Wire in `LyricsAiSettings` |
-| Create | `src/components/detail/tabs/LyricsAiOverlay.tsx` | Ghost-text backdrop + popup + orchestration |
-| Modify | `src/components/detail/tabs/LyricsTab.tsx` | Cursor tracking, scroll sync, Tab key, overlay integration |
+| Action | File                                             | Purpose                                                                                                   |
+| ------ | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| Modify | `src/db/schema.ts`                               | Add `lyricStyleEvents` + `lyricStyleProfile` tables                                                       |
+| Modify | `src/db/client.ts`                               | Add `CREATE TABLE IF NOT EXISTS` migrations                                                               |
+| Modify | `src/types/index.ts`                             | Add `LyricsAIConfig`, `LyricSuggestionMode`, `LyricFeedbackMode`, `LyricDisplayMode`, `LyricRejectionTag` |
+| Create | `src/db/queries/lyrics-ai.ts`                    | CRUD for events, profiles, and lyrics-AI config                                                           |
+| Create | `src/lib/lyrics-ai.ts`                           | Pure prompt-builder functions + mode-determination logic                                                  |
+| Create | `tests/lyrics-ai.test.ts`                        | Unit tests for pure functions in `src/lib/lyrics-ai.ts`                                                   |
+| Modify | `src/lib/ai.ts`                                  | Add `streamLyricsSuggestion`, `generatePopupSuggestions`, `generateStyleSummary`                          |
+| Create | `src/components/settings/LyricsAiSettings.tsx`   | Settings section component                                                                                |
+| Modify | `src/components/settings/SettingsModal.tsx`      | Wire in `LyricsAiSettings`                                                                                |
+| Create | `src/components/detail/tabs/LyricsAiOverlay.tsx` | Ghost-text backdrop + popup + orchestration                                                               |
+| Modify | `src/components/detail/tabs/LyricsTab.tsx`       | Cursor tracking, scroll sync, Tab key, overlay integration                                                |
 
 ---
 
 ## Task 1: DB schema, migration, and types
 
 **Files:**
+
 - Modify: `src/db/schema.ts`
 - Modify: `src/db/client.ts`
 - Modify: `src/types/index.ts`
@@ -42,21 +43,21 @@
 Open `src/db/schema.ts`. After the `backupConfigs` table definition, add:
 
 ```ts
-export const lyricStyleEvents = sqliteTable('lyric_style_events', {
-  id:             text('id').primaryKey(),
-  projectId:      text('project_id'),
-  suggestionText: text('suggestion_text').notNull(),
-  mode:           text('mode').notNull(),
-  accepted:       integer('accepted').notNull(),
-  tag:            text('tag'),
-  createdAt:      integer('created_at').notNull(),
-})
+export const lyricStyleEvents = sqliteTable("lyric_style_events", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id"),
+  suggestionText: text("suggestion_text").notNull(),
+  mode: text("mode").notNull(),
+  accepted: integer("accepted").notNull(),
+  tag: text("tag"),
+  createdAt: integer("created_at").notNull(),
+});
 
-export const lyricStyleProfile = sqliteTable('lyric_style_profile', {
-  id:            text('id').primaryKey(),
-  summaryText:   text('summary_text').notNull(),
-  lastUpdatedAt: integer('last_updated_at').notNull(),
-})
+export const lyricStyleProfile = sqliteTable("lyric_style_profile", {
+  id: text("id").primaryKey(),
+  summaryText: text("summary_text").notNull(),
+  lastUpdatedAt: integer("last_updated_at").notNull(),
+});
 ```
 
 - [ ] **Step 2: Add migrations to client.ts**
@@ -64,7 +65,8 @@ export const lyricStyleProfile = sqliteTable('lyric_style_profile', {
 In `src/db/client.ts`, inside `runMigrations()`, add after the `backup_configs` migration block:
 
 ```ts
-await raw.execute(`CREATE TABLE IF NOT EXISTS lyric_style_events (
+await raw.execute(
+  `CREATE TABLE IF NOT EXISTS lyric_style_events (
   id TEXT PRIMARY KEY,
   project_id TEXT,
   suggestion_text TEXT NOT NULL,
@@ -72,13 +74,18 @@ await raw.execute(`CREATE TABLE IF NOT EXISTS lyric_style_events (
   accepted INTEGER NOT NULL,
   tag TEXT,
   created_at INTEGER NOT NULL
-)`, [])
+)`,
+  [],
+);
 
-await raw.execute(`CREATE TABLE IF NOT EXISTS lyric_style_profile (
+await raw.execute(
+  `CREATE TABLE IF NOT EXISTS lyric_style_profile (
   id TEXT PRIMARY KEY,
   summary_text TEXT NOT NULL,
   last_updated_at INTEGER NOT NULL
-)`, [])
+)`,
+  [],
+);
 ```
 
 - [ ] **Step 3: Add types to types/index.ts**
@@ -86,16 +93,20 @@ await raw.execute(`CREATE TABLE IF NOT EXISTS lyric_style_profile (
 At the bottom of `src/types/index.ts`, add:
 
 ```ts
-export type LyricSuggestionMode = 'completion' | 'alternative' | 'next_line'
-export type LyricFeedbackMode = 'minimal' | 'tagged'
-export type LyricDisplayMode = 'inline' | 'popup'
-export type LyricRejectionTag = 'too_cheesy' | 'good_rhyme' | 'wrong_vibe' | 'other'
+export type LyricSuggestionMode = "completion" | "alternative" | "next_line";
+export type LyricFeedbackMode = "minimal" | "tagged";
+export type LyricDisplayMode = "inline" | "popup";
+export type LyricRejectionTag =
+  | "too_cheesy"
+  | "good_rhyme"
+  | "wrong_vibe"
+  | "other";
 
 export interface LyricsAIConfig {
-  enabled: boolean
-  mode: LyricDisplayMode
-  enabledModes: LyricSuggestionMode[]
-  feedbackMode: LyricFeedbackMode
+  enabled: boolean;
+  mode: LyricDisplayMode;
+  enabledModes: LyricSuggestionMode[];
+  feedbackMode: LyricFeedbackMode;
 }
 ```
 
@@ -111,6 +122,7 @@ git commit -m "feat: add lyric style memory DB tables and types"
 ## Task 2: DB query layer
 
 **Files:**
+
 - Create: `src/db/queries/lyrics-ai.ts`
 
 - [ ] **Step 1: Create the query file**
@@ -118,49 +130,59 @@ git commit -m "feat: add lyric style memory DB tables and types"
 Create `src/db/queries/lyrics-ai.ts` with the full content below:
 
 ```ts
-import { eq, desc, and, isNull } from 'drizzle-orm'
-import { nanoid } from 'nanoid'
-import { getDb } from '../client'
-import { lyricStyleEvents, lyricStyleProfile, backupConfigs } from '../schema'
-import type { LyricsAIConfig, LyricSuggestionMode, LyricRejectionTag } from '../../types'
+import { eq, desc, and, isNull } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { getDb } from "../client";
+import { lyricStyleEvents, lyricStyleProfile, backupConfigs } from "../schema";
+import type {
+  LyricsAIConfig,
+  LyricSuggestionMode,
+  LyricRejectionTag,
+} from "../../types";
 
-const LYRICS_AI_CONFIG_ID = 'lyrics_ai'
+const LYRICS_AI_CONFIG_ID = "lyrics_ai";
 
 const DEFAULT_LYRICS_AI_CONFIG: LyricsAIConfig = {
   enabled: false,
-  mode: 'inline',
-  enabledModes: ['completion'],
-  feedbackMode: 'minimal',
-}
+  mode: "inline",
+  enabledModes: ["completion"],
+  feedbackMode: "minimal",
+};
 
 export async function getLyricsAIConfig(): Promise<LyricsAIConfig> {
-  const db = await getDb()
-  const rows = await db.select().from(backupConfigs).where(eq(backupConfigs.id, LYRICS_AI_CONFIG_ID))
-  if (!rows[0]) return DEFAULT_LYRICS_AI_CONFIG
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(backupConfigs)
+    .where(eq(backupConfigs.id, LYRICS_AI_CONFIG_ID));
+  if (!rows[0]) return DEFAULT_LYRICS_AI_CONFIG;
   try {
-    return { ...DEFAULT_LYRICS_AI_CONFIG, ...JSON.parse(rows[0].configJson) }
+    return { ...DEFAULT_LYRICS_AI_CONFIG, ...JSON.parse(rows[0].configJson) };
   } catch {
-    return DEFAULT_LYRICS_AI_CONFIG
+    return DEFAULT_LYRICS_AI_CONFIG;
   }
 }
 
 export async function setLyricsAIConfig(cfg: LyricsAIConfig): Promise<void> {
-  const db = await getDb()
+  const db = await getDb();
   await db
     .insert(backupConfigs)
     .values({ id: LYRICS_AI_CONFIG_ID, configJson: JSON.stringify(cfg) })
-    .onConflictDoUpdate({ target: backupConfigs.id, set: { configJson: JSON.stringify(cfg) } })
+    .onConflictDoUpdate({
+      target: backupConfigs.id,
+      set: { configJson: JSON.stringify(cfg) },
+    });
 }
 
 export async function logStyleEvent(event: {
-  projectId: string | null
-  suggestionText: string
-  mode: LyricSuggestionMode
-  accepted: boolean
-  tag: LyricRejectionTag | null
+  projectId: string | null;
+  suggestionText: string;
+  mode: LyricSuggestionMode;
+  accepted: boolean;
+  tag: LyricRejectionTag | null;
 }): Promise<string> {
-  const db = await getDb()
-  const id = nanoid()
+  const db = await getDb();
+  const id = nanoid();
   await db.insert(lyricStyleEvents).values({
     id,
     projectId: event.projectId,
@@ -169,67 +191,89 @@ export async function logStyleEvent(event: {
     accepted: event.accepted ? 1 : 0,
     tag: event.tag ?? null,
     createdAt: Math.floor(Date.now() / 1000),
-  })
-  return id
+  });
+  return id;
 }
 
-export async function updateEventTag(id: string, tag: LyricRejectionTag): Promise<void> {
-  const db = await getDb()
-  await db.update(lyricStyleEvents).set({ tag }).where(eq(lyricStyleEvents.id, id))
+export async function updateEventTag(
+  id: string,
+  tag: LyricRejectionTag,
+): Promise<void> {
+  const db = await getDb();
+  await db
+    .update(lyricStyleEvents)
+    .set({ tag })
+    .where(eq(lyricStyleEvents.id, id));
 }
 
 export async function getRecentAccepted(
   projectId: string | null,
   limit = 20,
 ): Promise<string[]> {
-  const db = await getDb()
-  const scopeCondition = projectId === null
-    ? isNull(lyricStyleEvents.projectId)
-    : eq(lyricStyleEvents.projectId, projectId)
+  const db = await getDb();
+  const scopeCondition =
+    projectId === null
+      ? isNull(lyricStyleEvents.projectId)
+      : eq(lyricStyleEvents.projectId, projectId);
   const rows = await db
     .select({ suggestionText: lyricStyleEvents.suggestionText })
     .from(lyricStyleEvents)
     .where(and(scopeCondition, eq(lyricStyleEvents.accepted, 1)))
     .orderBy(desc(lyricStyleEvents.createdAt))
-    .limit(limit)
-  return rows.map(r => r.suggestionText)
+    .limit(limit);
+  return rows.map((r) => r.suggestionText);
 }
 
-export async function countAcceptedEvents(projectId: string | null): Promise<number> {
-  const db = await getDb()
-  const scopeCondition = projectId === null
-    ? isNull(lyricStyleEvents.projectId)
-    : eq(lyricStyleEvents.projectId, projectId)
+export async function countAcceptedEvents(
+  projectId: string | null,
+): Promise<number> {
+  const db = await getDb();
+  const scopeCondition =
+    projectId === null
+      ? isNull(lyricStyleEvents.projectId)
+      : eq(lyricStyleEvents.projectId, projectId);
   const rows = await db
     .select({ id: lyricStyleEvents.id })
     .from(lyricStyleEvents)
-    .where(and(scopeCondition, eq(lyricStyleEvents.accepted, 1)))
-  return rows.length
+    .where(and(scopeCondition, eq(lyricStyleEvents.accepted, 1)));
+  return rows.length;
 }
 
 export async function getStyleProfile(id: string): Promise<string | null> {
-  const db = await getDb()
-  const rows = await db.select().from(lyricStyleProfile).where(eq(lyricStyleProfile.id, id))
-  return rows[0]?.summaryText ?? null
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(lyricStyleProfile)
+    .where(eq(lyricStyleProfile.id, id));
+  return rows[0]?.summaryText ?? null;
 }
 
-export async function upsertStyleProfile(id: string, summaryText: string): Promise<void> {
-  const db = await getDb()
-  const now = Math.floor(Date.now() / 1000)
+export async function upsertStyleProfile(
+  id: string,
+  summaryText: string,
+): Promise<void> {
+  const db = await getDb();
+  const now = Math.floor(Date.now() / 1000);
   await db
     .insert(lyricStyleProfile)
     .values({ id, summaryText, lastUpdatedAt: now })
-    .onConflictDoUpdate({ target: lyricStyleProfile.id, set: { summaryText, lastUpdatedAt: now } })
+    .onConflictDoUpdate({
+      target: lyricStyleProfile.id,
+      set: { summaryText, lastUpdatedAt: now },
+    });
 }
 
-export async function clearStyleMemory(projectId: string | null): Promise<void> {
-  const db = await getDb()
-  const scopeCondition = projectId === null
-    ? isNull(lyricStyleEvents.projectId)
-    : eq(lyricStyleEvents.projectId, projectId)
-  await db.delete(lyricStyleEvents).where(scopeCondition)
-  const profileId = projectId ?? 'global'
-  await db.delete(lyricStyleProfile).where(eq(lyricStyleProfile.id, profileId))
+export async function clearStyleMemory(
+  projectId: string | null,
+): Promise<void> {
+  const db = await getDb();
+  const scopeCondition =
+    projectId === null
+      ? isNull(lyricStyleEvents.projectId)
+      : eq(lyricStyleEvents.projectId, projectId);
+  await db.delete(lyricStyleEvents).where(scopeCondition);
+  const profileId = projectId ?? "global";
+  await db.delete(lyricStyleProfile).where(eq(lyricStyleProfile.id, profileId));
 }
 ```
 
@@ -245,6 +289,7 @@ git commit -m "feat: add lyrics AI DB query layer"
 ## Task 3: Prompt builder + tests
 
 **Files:**
+
 - Create: `src/lib/lyrics-ai.ts`
 - Create: `tests/lyrics-ai.test.ts`
 
@@ -253,108 +298,131 @@ git commit -m "feat: add lyrics AI DB query layer"
 Create `tests/lyrics-ai.test.ts`:
 
 ```ts
-import { describe, it, expect } from 'vitest'
-import { buildLyricsSuggestionPrompt, buildLyricsPopupPrompt, determineSuggestionMode } from '../src/lib/lyrics-ai'
+import { describe, it, expect } from "vitest";
+import {
+  buildLyricsSuggestionPrompt,
+  buildLyricsPopupPrompt,
+  determineSuggestionMode,
+} from "../src/lib/lyrics-ai";
 
-describe('buildLyricsSuggestionPrompt', () => {
+describe("buildLyricsSuggestionPrompt", () => {
   const base = {
-    lyrics: 'verse one\n',
-    currentLine: 'verse one',
+    lyrics: "verse one\n",
+    currentLine: "verse one",
     selectionStart: 9,
     selectionEnd: 9,
-    title: 'My Song',
+    title: "My Song",
     bpm: 120,
-    key: 'C Major',
-    timeSignature: '4/4',
+    key: "C Major",
+    timeSignature: "4/4",
     globalProfile: null,
     projectProfile: null,
     recentAccepted: [],
-    mode: 'completion' as const,
-  }
+    mode: "completion" as const,
+  };
 
-  it('includes song metadata in system prompt', () => {
-    const { system } = buildLyricsSuggestionPrompt(base)
-    expect(system).toContain('My Song')
-    expect(system).toContain('120')
-    expect(system).toContain('C Major')
-    expect(system).toContain('4/4')
-  })
+  it("includes song metadata in system prompt", () => {
+    const { system } = buildLyricsSuggestionPrompt(base);
+    expect(system).toContain("My Song");
+    expect(system).toContain("120");
+    expect(system).toContain("C Major");
+    expect(system).toContain("4/4");
+  });
 
-  it('includes style context when profiles are set', () => {
+  it("includes style context when profiles are set", () => {
     const { system } = buildLyricsSuggestionPrompt({
       ...base,
-      globalProfile: 'ABAB rhyme, dark imagery',
-      projectProfile: 'introspective',
-    })
-    expect(system).toContain('ABAB rhyme, dark imagery')
-    expect(system).toContain('introspective')
-  })
+      globalProfile: "ABAB rhyme, dark imagery",
+      projectProfile: "introspective",
+    });
+    expect(system).toContain("ABAB rhyme, dark imagery");
+    expect(system).toContain("introspective");
+  });
 
-  it('omits style context block when both profiles are null', () => {
-    const { system } = buildLyricsSuggestionPrompt(base)
-    expect(system).not.toContain('style context')
-  })
+  it("omits style context block when both profiles are null", () => {
+    const { system } = buildLyricsSuggestionPrompt(base);
+    expect(system).not.toContain("style context");
+  });
 
-  it('includes recent accepted examples', () => {
+  it("includes recent accepted examples", () => {
     const { system } = buildLyricsSuggestionPrompt({
       ...base,
-      recentAccepted: ['burning like the sun', 'cold as winter rain'],
-    })
-    expect(system).toContain('burning like the sun')
-    expect(system).toContain('cold as winter rain')
-  })
+      recentAccepted: ["burning like the sun", "cold as winter rain"],
+    });
+    expect(system).toContain("burning like the sun");
+    expect(system).toContain("cold as winter rain");
+  });
 
-  it('puts full lyrics and current line in the user prompt', () => {
-    const { prompt } = buildLyricsSuggestionPrompt(base)
-    expect(prompt).toContain('verse one')
-    expect(prompt).toContain('Current line')
-  })
-})
+  it("puts full lyrics and current line in the user prompt", () => {
+    const { prompt } = buildLyricsSuggestionPrompt(base);
+    expect(prompt).toContain("verse one");
+    expect(prompt).toContain("Current line");
+  });
+});
 
-describe('buildLyricsPopupPrompt', () => {
-  it('lists all enabled modes in system prompt', () => {
+describe("buildLyricsPopupPrompt", () => {
+  it("lists all enabled modes in system prompt", () => {
     const { system } = buildLyricsPopupPrompt({
-      lyrics: '', currentLine: '', selectionStart: 0, selectionEnd: 0,
-      title: 'Song', bpm: null, key: null, timeSignature: null,
-      globalProfile: null, projectProfile: null, recentAccepted: [],
-      enabledModes: ['completion', 'next_line'],
-    })
-    expect(system).toContain('completion')
-    expect(system).toContain('next_line')
-    expect(system).not.toContain('alternative')
-  })
-})
+      lyrics: "",
+      currentLine: "",
+      selectionStart: 0,
+      selectionEnd: 0,
+      title: "Song",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      enabledModes: ["completion", "next_line"],
+    });
+    expect(system).toContain("completion");
+    expect(system).toContain("next_line");
+    expect(system).not.toContain("alternative");
+  });
+});
 
-describe('determineSuggestionMode', () => {
-  it('returns alternative when text is selected and mode is enabled', () => {
-    expect(determineSuggestionMode('hello world', 0, 5, ['completion', 'alternative', 'next_line']))
-      .toBe('alternative')
-  })
+describe("determineSuggestionMode", () => {
+  it("returns alternative when text is selected and mode is enabled", () => {
+    expect(
+      determineSuggestionMode("hello world", 0, 5, [
+        "completion",
+        "alternative",
+        "next_line",
+      ]),
+    ).toBe("alternative");
+  });
 
-  it('returns completion when cursor is mid-line', () => {
-    expect(determineSuggestionMode('hello wor', 9, 9, ['completion', 'next_line']))
-      .toBe('completion')
-  })
+  it("returns completion when cursor is mid-line", () => {
+    expect(
+      determineSuggestionMode("hello wor", 9, 9, ["completion", "next_line"]),
+    ).toBe("completion");
+  });
 
-  it('returns next_line when cursor is at end of a complete line', () => {
+  it("returns next_line when cursor is at end of a complete line", () => {
     // 'hello world\n' — cursor at index 11 (end of "hello world", before \n)
-    expect(determineSuggestionMode('hello world\n', 11, 11, ['completion', 'next_line']))
-      .toBe('next_line')
-  })
+    expect(
+      determineSuggestionMode("hello world\n", 11, 11, [
+        "completion",
+        "next_line",
+      ]),
+    ).toBe("next_line");
+  });
 
-  it('returns null when enabledModes is empty', () => {
-    expect(determineSuggestionMode('hello', 5, 5, [])).toBeNull()
-  })
+  it("returns null when enabledModes is empty", () => {
+    expect(determineSuggestionMode("hello", 5, 5, [])).toBeNull();
+  });
 
-  it('falls back to completion when alternative is disabled but text is selected', () => {
-    expect(determineSuggestionMode('hello world', 0, 5, ['completion']))
-      .toBe('completion')
-  })
+  it("falls back to completion when alternative is disabled but text is selected", () => {
+    expect(determineSuggestionMode("hello world", 0, 5, ["completion"])).toBe(
+      "completion",
+    );
+  });
 
-  it('returns first enabled mode as last resort', () => {
-    expect(determineSuggestionMode('', 0, 0, ['next_line'])).toBe('next_line')
-  })
-})
+  it("returns first enabled mode as last resort", () => {
+    expect(determineSuggestionMode("", 0, 0, ["next_line"])).toBe("next_line");
+  });
+});
 ```
 
 - [ ] **Step 2: Run tests — expect failures**
@@ -368,44 +436,53 @@ Expected: FAIL with "Cannot find module '../src/lib/lyrics-ai'"
 - [ ] **Step 3: Create src/lib/lyrics-ai.ts**
 
 ```ts
-import type { LyricSuggestionMode } from '../types'
+import type { LyricSuggestionMode } from "../types";
 
 export interface LyricsSuggestionInput {
-  lyrics: string
-  currentLine: string
-  selectionStart: number
-  selectionEnd: number
-  title: string
-  bpm: number | null
-  key: string | null
-  timeSignature: string | null
-  globalProfile: string | null
-  projectProfile: string | null
-  recentAccepted: string[]
-  mode: LyricSuggestionMode
+  lyrics: string;
+  currentLine: string;
+  selectionStart: number;
+  selectionEnd: number;
+  title: string;
+  bpm: number | null;
+  key: string | null;
+  timeSignature: string | null;
+  globalProfile: string | null;
+  projectProfile: string | null;
+  recentAccepted: string[];
+  mode: LyricSuggestionMode;
 }
 
-export interface LyricsPopupInput extends Omit<LyricsSuggestionInput, 'mode'> {
-  enabledModes: LyricSuggestionMode[]
+export interface LyricsPopupInput extends Omit<LyricsSuggestionInput, "mode"> {
+  enabledModes: LyricSuggestionMode[];
 }
 
 const MODE_INSTRUCTIONS: Record<LyricSuggestionMode, string> = {
-  completion: 'Complete the current partial line. Return only the completion text (not the part already written). One line max.',
-  alternative: 'Suggest an alternative phrasing for the selected text. Return only the alternative. One line max.',
-  next_line: 'Suggest the next line that would follow naturally. Return only that one line.',
-}
+  completion:
+    "Complete the current partial line. Return only the completion text (not the part already written). One line max.",
+  alternative:
+    "Suggest an alternative phrasing for the selected text. Return only the alternative. One line max.",
+  next_line:
+    "Suggest the next line that would follow naturally. Return only that one line.",
+};
 
-function buildStyleContext(globalProfile: string | null, projectProfile: string | null): string {
-  if (!globalProfile && !projectProfile) return ''
-  const parts: string[] = []
-  if (globalProfile) parts.push(`Global: ${globalProfile}`)
-  if (projectProfile) parts.push(`This song: ${projectProfile}`)
-  return `\nYour style context:\n${parts.join('\n')}\n`
+function buildStyleContext(
+  globalProfile: string | null,
+  projectProfile: string | null,
+): string {
+  if (!globalProfile && !projectProfile) return "";
+  const parts: string[] = [];
+  if (globalProfile) parts.push(`Global: ${globalProfile}`);
+  if (projectProfile) parts.push(`This song: ${projectProfile}`);
+  return `\nYour style context:\n${parts.join("\n")}\n`;
 }
 
 function buildRecentExamples(recentAccepted: string[]): string {
-  if (recentAccepted.length === 0) return ''
-  return `\nRecent lines the user accepted:\n${recentAccepted.slice(0, 5).map(t => `- ${t}`).join('\n')}\n`
+  if (recentAccepted.length === 0) return "";
+  return `\nRecent lines the user accepted:\n${recentAccepted
+    .slice(0, 5)
+    .map((t) => `- ${t}`)
+    .join("\n")}\n`;
 }
 
 function buildSongContext(
@@ -414,48 +491,54 @@ function buildSongContext(
   key: string | null,
   timeSignature: string | null,
 ): string {
-  const parts = [`Song: "${title}"`]
-  if (bpm) parts.push(`BPM: ${bpm}`)
-  if (key) parts.push(`Key: ${key}`)
-  if (timeSignature) parts.push(`Time: ${timeSignature}`)
-  return parts.join(' · ')
+  const parts = [`Song: "${title}"`];
+  if (bpm) parts.push(`BPM: ${bpm}`);
+  if (key) parts.push(`Key: ${key}`);
+  if (timeSignature) parts.push(`Time: ${timeSignature}`);
+  return parts.join(" · ");
 }
 
-export function buildLyricsSuggestionPrompt(input: LyricsSuggestionInput): { system: string; prompt: string } {
+export function buildLyricsSuggestionPrompt(input: LyricsSuggestionInput): {
+  system: string;
+  prompt: string;
+} {
   const system = [
-    'You are a lyrics co-writer. You help musicians by offering short, focused suggestions that match their style.',
+    "You are a lyrics co-writer. You help musicians by offering short, focused suggestions that match their style.",
     buildStyleContext(input.globalProfile, input.projectProfile),
     buildRecentExamples(input.recentAccepted),
     buildSongContext(input.title, input.bpm, input.key, input.timeSignature),
-    '',
+    "",
     MODE_INSTRUCTIONS[input.mode],
-    'Never explain or add commentary. Return only the raw lyric text.',
-  ].join('\n')
+    "Never explain or add commentary. Return only the raw lyric text.",
+  ].join("\n");
 
-  const prompt = `Full lyrics so far:\n${input.lyrics || '(empty)'}\n\nCurrent line: "${input.currentLine}"`
+  const prompt = `Full lyrics so far:\n${input.lyrics || "(empty)"}\n\nCurrent line: "${input.currentLine}"`;
 
-  return { system, prompt }
+  return { system, prompt };
 }
 
-export function buildLyricsPopupPrompt(input: LyricsPopupInput): { system: string; prompt: string } {
+export function buildLyricsPopupPrompt(input: LyricsPopupInput): {
+  system: string;
+  prompt: string;
+} {
   const modeList = input.enabledModes
-    .map(m => `- ${m}: ${MODE_INSTRUCTIONS[m]}`)
-    .join('\n')
+    .map((m) => `- ${m}: ${MODE_INSTRUCTIONS[m]}`)
+    .join("\n");
 
   const system = [
-    'You are a lyrics co-writer. You help musicians by offering short, focused suggestions that match their style.',
+    "You are a lyrics co-writer. You help musicians by offering short, focused suggestions that match their style.",
     buildStyleContext(input.globalProfile, input.projectProfile),
     buildRecentExamples(input.recentAccepted),
     buildSongContext(input.title, input.bpm, input.key, input.timeSignature),
-    '',
-    'Generate one suggestion for each of the following types:',
+    "",
+    "Generate one suggestion for each of the following types:",
     modeList,
-    'Never explain or add commentary. Return only raw lyric text for each.',
-  ].join('\n')
+    "Never explain or add commentary. Return only raw lyric text for each.",
+  ].join("\n");
 
-  const prompt = `Full lyrics so far:\n${input.lyrics || '(empty)'}\n\nCurrent line: "${input.currentLine}"`
+  const prompt = `Full lyrics so far:\n${input.lyrics || "(empty)"}\n\nCurrent line: "${input.currentLine}"`;
 
-  return { system, prompt }
+  return { system, prompt };
 }
 
 export function determineSuggestionMode(
@@ -464,29 +547,32 @@ export function determineSuggestionMode(
   selectionEnd: number,
   enabledModes: LyricSuggestionMode[],
 ): LyricSuggestionMode | null {
-  if (enabledModes.length === 0) return null
+  if (enabledModes.length === 0) return null;
 
-  if (selectionStart !== selectionEnd && enabledModes.includes('alternative')) {
-    return 'alternative'
+  if (selectionStart !== selectionEnd && enabledModes.includes("alternative")) {
+    return "alternative";
   }
 
-  const textBeforeCursor = draft.slice(0, selectionStart)
-  const lineStart = textBeforeCursor.lastIndexOf('\n') + 1
-  const lineEnd = draft.indexOf('\n', selectionStart)
-  const currentLine = draft.slice(lineStart, lineEnd === -1 ? undefined : lineEnd)
-  const posInLine = selectionStart - lineStart
+  const textBeforeCursor = draft.slice(0, selectionStart);
+  const lineStart = textBeforeCursor.lastIndexOf("\n") + 1;
+  const lineEnd = draft.indexOf("\n", selectionStart);
+  const currentLine = draft.slice(
+    lineStart,
+    lineEnd === -1 ? undefined : lineEnd,
+  );
+  const posInLine = selectionStart - lineStart;
 
-  if (posInLine < currentLine.length && enabledModes.includes('completion')) {
-    return 'completion'
+  if (posInLine < currentLine.length && enabledModes.includes("completion")) {
+    return "completion";
   }
 
-  if (currentLine.trim().length > 0 && enabledModes.includes('next_line')) {
-    return 'next_line'
+  if (currentLine.trim().length > 0 && enabledModes.includes("next_line")) {
+    return "next_line";
   }
 
-  if (enabledModes.includes('completion')) return 'completion'
+  if (enabledModes.includes("completion")) return "completion";
 
-  return enabledModes[0]
+  return enabledModes[0];
 }
 ```
 
@@ -510,6 +596,7 @@ git commit -m "feat: add lyrics prompt builder with tests"
 ## Task 4: AI SDK wrappers
 
 **Files:**
+
 - Modify: `src/lib/ai.ts`
 
 - [ ] **Step 1: Add imports to ai.ts**
@@ -517,7 +604,7 @@ git commit -m "feat: add lyrics prompt builder with tests"
 At the top of `src/lib/ai.ts`, update the import from `'ai'`:
 
 ```ts
-import { generateObject, generateText, streamText } from 'ai'
+import { generateObject, generateText, streamText } from "ai";
 ```
 
 Also add to the existing zod import (it's already imported).
@@ -527,7 +614,7 @@ Also add to the existing zod import (it's already imported).
 Add to the imports in `src/lib/ai.ts`:
 
 ```ts
-import type { AIConfig, LyricSuggestionMode } from '../types'
+import type { AIConfig, LyricSuggestionMode } from "../types";
 ```
 
 (Replace the existing `import type { AIConfig, Instrument } from '../types'` — add `LyricSuggestionMode` to it.)
@@ -542,48 +629,50 @@ export async function* streamLyricsSuggestion(
   system: string,
   prompt: string,
 ): AsyncGenerator<string> {
-  const provider = buildProvider(cfg)
-  const result = streamText({ model: provider, system, prompt, maxTokens: 80 })
+  const provider = buildProvider(cfg);
+  const result = streamText({ model: provider, system, prompt, maxTokens: 80 });
   for await (const chunk of result.textStream) {
-    yield chunk
+    yield chunk;
   }
 }
 
 export const popupSuggestionsSchema = z.object({
-  suggestions: z.array(z.object({
-    mode: z.enum(['completion', 'alternative', 'next_line']),
-    text: z.string(),
-  })),
-})
+  suggestions: z.array(
+    z.object({
+      mode: z.enum(["completion", "alternative", "next_line"]),
+      text: z.string(),
+    }),
+  ),
+});
 
-export type PopupSuggestions = z.infer<typeof popupSuggestionsSchema>
+export type PopupSuggestions = z.infer<typeof popupSuggestionsSchema>;
 
 export async function generatePopupSuggestions(
   cfg: AIConfig,
   system: string,
   prompt: string,
 ): Promise<PopupSuggestions> {
-  const provider = buildProvider(cfg)
+  const provider = buildProvider(cfg);
   const result = await generateObject({
     model: provider,
     schema: popupSuggestionsSchema,
     system,
     prompt,
-  })
-  return result.object
+  });
+  return result.object;
 }
 
 export async function generateStyleSummary(
   cfg: AIConfig,
   recentAccepted: string[],
 ): Promise<string> {
-  const provider = buildProvider(cfg)
+  const provider = buildProvider(cfg);
   const result = await generateText({
     model: provider,
-    prompt: `Analyse the following song lyric lines written by a musician. Write a 1-2 sentence description of their lyric writing style — focus on rhyme scheme, line length, imagery, tone, and vocabulary register. Be concise and specific.\n\nLines:\n${recentAccepted.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\nDescription:`,
+    prompt: `Analyse the following song lyric lines written by a musician. Write a 1-2 sentence description of their lyric writing style — focus on rhyme scheme, line length, imagery, tone, and vocabulary register. Be concise and specific.\n\nLines:\n${recentAccepted.map((t, i) => `${i + 1}. ${t}`).join("\n")}\n\nDescription:`,
     maxTokens: 60,
-  })
-  return result.text.trim()
+  });
+  return result.text.trim();
 }
 ```
 
@@ -607,6 +696,7 @@ git commit -m "feat: add streamLyricsSuggestion, generatePopupSuggestions, gener
 ## Task 5: Lyrics AI settings component
 
 **Files:**
+
 - Create: `src/components/settings/LyricsAiSettings.tsx`
 
 - [ ] **Step 1: Create the component**
@@ -614,63 +704,87 @@ git commit -m "feat: add streamLyricsSuggestion, generatePopupSuggestions, gener
 Create `src/components/settings/LyricsAiSettings.tsx`:
 
 ```tsx
-import type { LyricsAIConfig, LyricSuggestionMode } from '../../types'
+import type { LyricsAIConfig, LyricSuggestionMode } from "../../types";
 
 interface Props {
-  cfg: LyricsAIConfig
-  onChange: (next: LyricsAIConfig) => void
-  onClearGlobalMemory: () => void
+  cfg: LyricsAIConfig;
+  onChange: (next: LyricsAIConfig) => void;
+  onClearGlobalMemory: () => void;
 }
 
 const SUGGESTION_MODES: { id: LyricSuggestionMode; label: string }[] = [
-  { id: 'completion',  label: 'Line completion'       },
-  { id: 'next_line',   label: 'Next line'              },
-  { id: 'alternative', label: 'Alternative phrasing'   },
-]
+  { id: "completion", label: "Line completion" },
+  { id: "next_line", label: "Next line" },
+  { id: "alternative", label: "Alternative phrasing" },
+];
 
-export default function LyricsAiSettings({ cfg, onChange, onClearGlobalMemory }: Props) {
+export default function LyricsAiSettings({
+  cfg,
+  onChange,
+  onClearGlobalMemory,
+}: Props) {
   const toggle = (field: keyof LyricsAIConfig, value: unknown) =>
-    onChange({ ...cfg, [field]: value })
+    onChange({ ...cfg, [field]: value });
 
   const toggleMode = (mode: LyricSuggestionMode) => {
     const next = cfg.enabledModes.includes(mode)
-      ? cfg.enabledModes.filter(m => m !== mode)
-      : [...cfg.enabledModes, mode]
-    onChange({ ...cfg, enabledModes: next })
-  }
+      ? cfg.enabledModes.filter((m) => m !== mode)
+      : [...cfg.enabledModes, mode];
+    onChange({ ...cfg, enabledModes: next });
+  };
 
   const Row = ({ children }: { children: React.ReactNode }) => (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 10,
+      }}
+    >
       {children}
     </div>
-  )
+  );
 
   const Label = ({ children }: { children: React.ReactNode }) => (
-    <span style={{ fontSize: 12, color: 'var(--text-1)' }}>{children}</span>
-  )
+    <span style={{ fontSize: 12, color: "var(--text-1)" }}>{children}</span>
+  );
 
-  const ToggleBtn = ({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) => (
+  const ToggleBtn = ({
+    active,
+    onClick,
+    children,
+  }: {
+    active: boolean;
+    onClick: () => void;
+    children: React.ReactNode;
+  }) => (
     <button
       onClick={onClick}
       style={{
-        padding: '3px 10px', fontSize: 11, borderRadius: 4,
-        border: '1px solid var(--line-2)',
-        background: active ? 'var(--accent)' : 'var(--bg-2)',
-        color: active ? '#1a0a00' : 'var(--text-2)',
+        padding: "3px 10px",
+        fontSize: 11,
+        borderRadius: 4,
+        border: "1px solid var(--line-2)",
+        background: active ? "var(--accent)" : "var(--bg-2)",
+        color: active ? "#1a0a00" : "var(--text-2)",
         fontWeight: active ? 700 : 400,
       }}
     >
       {children}
     </button>
-  )
+  );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
       {/* Master toggle */}
       <Row>
         <Label>AI suggestions</Label>
-        <ToggleBtn active={cfg.enabled} onClick={() => toggle('enabled', !cfg.enabled)}>
-          {cfg.enabled ? 'On' : 'Off'}
+        <ToggleBtn
+          active={cfg.enabled}
+          onClick={() => toggle("enabled", !cfg.enabled)}
+        >
+          {cfg.enabled ? "On" : "Off"}
         </ToggleBtn>
       </Row>
 
@@ -679,11 +793,17 @@ export default function LyricsAiSettings({ cfg, onChange, onClearGlobalMemory }:
           {/* Suggestion mode */}
           <Row>
             <Label>Appearance</Label>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <ToggleBtn active={cfg.mode === 'inline'} onClick={() => toggle('mode', 'inline')}>
+            <div style={{ display: "flex", gap: 4 }}>
+              <ToggleBtn
+                active={cfg.mode === "inline"}
+                onClick={() => toggle("mode", "inline")}
+              >
                 Inline
               </ToggleBtn>
-              <ToggleBtn active={cfg.mode === 'popup'} onClick={() => toggle('mode', 'popup')}>
+              <ToggleBtn
+                active={cfg.mode === "popup"}
+                onClick={() => toggle("mode", "popup")}
+              >
                 Popup
               </ToggleBtn>
             </div>
@@ -691,17 +811,35 @@ export default function LyricsAiSettings({ cfg, onChange, onClearGlobalMemory }:
 
           {/* Enabled suggestion types */}
           <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>Suggestion types</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div
+              style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 6 }}
+            >
+              Suggestion types
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               {SUGGESTION_MODES.map(({ id, label }) => (
-                <label key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <label
+                  key={id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    cursor: "pointer",
+                  }}
+                >
                   <input
                     type="checkbox"
                     checked={cfg.enabledModes.includes(id)}
                     onChange={() => toggleMode(id)}
-                    style={{ accentColor: 'var(--accent)', width: 13, height: 13 }}
+                    style={{
+                      accentColor: "var(--accent)",
+                      width: 13,
+                      height: 13,
+                    }}
                   />
-                  <span style={{ fontSize: 12, color: 'var(--text-1)' }}>{label}</span>
+                  <span style={{ fontSize: 12, color: "var(--text-1)" }}>
+                    {label}
+                  </span>
                 </label>
               ))}
             </div>
@@ -710,19 +848,33 @@ export default function LyricsAiSettings({ cfg, onChange, onClearGlobalMemory }:
           {/* Feedback mode */}
           <Row>
             <Label>Feedback style</Label>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <ToggleBtn active={cfg.feedbackMode === 'minimal'} onClick={() => toggle('feedbackMode', 'minimal')}>
+            <div style={{ display: "flex", gap: 4 }}>
+              <ToggleBtn
+                active={cfg.feedbackMode === "minimal"}
+                onClick={() => toggle("feedbackMode", "minimal")}
+              >
                 Minimal
               </ToggleBtn>
-              <ToggleBtn active={cfg.feedbackMode === 'tagged'} onClick={() => toggle('feedbackMode', 'tagged')}>
+              <ToggleBtn
+                active={cfg.feedbackMode === "tagged"}
+                onClick={() => toggle("feedbackMode", "tagged")}
+              >
                 Tagged
               </ToggleBtn>
             </div>
           </Row>
 
           {/* Memory reset */}
-          <div style={{ marginTop: 4, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
-            <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6 }}>
+          <div
+            style={{
+              marginTop: 4,
+              paddingTop: 10,
+              borderTop: "1px solid var(--line)",
+            }}
+          >
+            <div
+              style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 6 }}
+            >
               Style memory helps the AI match your writing style over time.
             </div>
             <button
@@ -736,7 +888,7 @@ export default function LyricsAiSettings({ cfg, onChange, onClearGlobalMemory }:
         </>
       )}
     </div>
-  )
+  );
 }
 ```
 
@@ -752,6 +904,7 @@ git commit -m "feat: add LyricsAiSettings component"
 ## Task 6: Wire settings into SettingsModal
 
 **Files:**
+
 - Modify: `src/components/settings/SettingsModal.tsx`
 
 - [ ] **Step 1: Add import at the top of SettingsModal.tsx**
@@ -759,9 +912,13 @@ git commit -m "feat: add LyricsAiSettings component"
 Add these imports after the existing imports:
 
 ```ts
-import LyricsAiSettings from './LyricsAiSettings'
-import { getLyricsAIConfig, setLyricsAIConfig, clearStyleMemory } from '../../db/queries/lyrics-ai'
-import type { LyricsAIConfig } from '../../types'
+import LyricsAiSettings from "./LyricsAiSettings";
+import {
+  getLyricsAIConfig,
+  setLyricsAIConfig,
+  clearStyleMemory,
+} from "../../db/queries/lyrics-ai";
+import type { LyricsAIConfig } from "../../types";
 ```
 
 - [ ] **Step 2: Add state for lyricsAICfg**
@@ -771,10 +928,10 @@ In the `SettingsModal` component body, after the `aiCfg` state declarations, add
 ```ts
 const [lyricsAICfg, setLyricsAICfgState] = useState<LyricsAIConfig>({
   enabled: false,
-  mode: 'inline',
-  enabledModes: ['completion'],
-  feedbackMode: 'minimal',
-})
+  mode: "inline",
+  enabledModes: ["completion"],
+  feedbackMode: "minimal",
+});
 ```
 
 - [ ] **Step 3: Load lyricsAICfg in the existing useEffect**
@@ -787,18 +944,19 @@ useEffect(() => {
     getLocalConfig(),
     getGDriveFolderConfig(),
     getGDriveConfig(),
-    invoke<string[]>('detect_gdrive_paths'),
+    invoke<string[]>("detect_gdrive_paths"),
     getAIConfig(),
-    getLyricsAIConfig(),           // ← add this
-  ]).then(([lc, gf, gc, paths, ai, lyricsAI]) => {  // ← add lyricsAI
-    setLocalCfg(lc)
-    setGDriveFolderCfg(gf)
-    setGdriveCfg(gc)
-    setDetectedPaths(paths)
-    if (ai) setAiCfg(ai)
-    setLyricsAICfgState(lyricsAI)  // ← add this
-  })
-}, [])
+    getLyricsAIConfig(), // ← add this
+  ]).then(([lc, gf, gc, paths, ai, lyricsAI]) => {
+    // ← add lyricsAI
+    setLocalCfg(lc);
+    setGDriveFolderCfg(gf);
+    setGdriveCfg(gc);
+    setDetectedPaths(paths);
+    if (ai) setAiCfg(ai);
+    setLyricsAICfgState(lyricsAI); // ← add this
+  });
+}, []);
 ```
 
 - [ ] **Step 4: Add save handler**
@@ -807,13 +965,13 @@ After `handleSaveAI`, add:
 
 ```ts
 const handleLyricsAIChange = useCallback(async (next: LyricsAIConfig) => {
-  setLyricsAICfgState(next)
-  await setLyricsAIConfig(next)
-}, [])
+  setLyricsAICfgState(next);
+  await setLyricsAIConfig(next);
+}, []);
 
 const handleClearGlobalMemory = useCallback(async () => {
-  await clearStyleMemory(null)
-}, [])
+  await clearStyleMemory(null);
+}, []);
 ```
 
 - [ ] **Step 5: Add the settings section to the JSX**
@@ -854,6 +1012,7 @@ git commit -m "feat: wire LyricsAiSettings into SettingsModal"
 ## Task 7: LyricsAiOverlay component
 
 **Files:**
+
 - Create: `src/components/detail/tabs/LyricsAiOverlay.tsx`
 
 - [ ] **Step 1: Create the component**
@@ -861,8 +1020,15 @@ git commit -m "feat: wire LyricsAiSettings into SettingsModal"
 Create `src/components/detail/tabs/LyricsAiOverlay.tsx`:
 
 ```tsx
-import { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef } from 'react'
-import { getAIConfig } from '../../../db/queries/ai'
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useImperativeHandle,
+  forwardRef,
+} from "react";
+import { getAIConfig } from "../../../db/queries/ai";
 import {
   getLyricsAIConfig,
   getStyleProfile,
@@ -871,125 +1037,151 @@ import {
   countAcceptedEvents,
   getRecentAccepted,
   upsertStyleProfile,
-} from '../../../db/queries/lyrics-ai'
+} from "../../../db/queries/lyrics-ai";
 import {
   streamLyricsSuggestion,
   generatePopupSuggestions,
   generateStyleSummary,
-} from '../../../lib/ai'
+} from "../../../lib/ai";
 import {
   buildLyricsSuggestionPrompt,
   buildLyricsPopupPrompt,
   determineSuggestionMode,
-} from '../../../lib/lyrics-ai'
+} from "../../../lib/lyrics-ai";
 import type {
   Project,
   AIConfig,
   LyricsAIConfig,
   LyricSuggestionMode,
   LyricRejectionTag,
-} from '../../../types'
+} from "../../../types";
 
 export interface LyricsAiOverlayHandle {
-  hasSuggestion: () => boolean
-  acceptSuggestion: () => void
-  dismissSuggestion: () => void
+  hasSuggestion: () => boolean;
+  acceptSuggestion: () => void;
+  dismissSuggestion: () => void;
 }
 
 interface PopupItem {
-  mode: LyricSuggestionMode
-  text: string
+  mode: LyricSuggestionMode;
+  text: string;
 }
 
 interface Props {
-  draft: string
-  selectionStart: number
-  selectionEnd: number
-  scrollTop: number
-  project: Project
-  onInsert: (text: string, mode: LyricSuggestionMode) => void
+  draft: string;
+  selectionStart: number;
+  selectionEnd: number;
+  scrollTop: number;
+  project: Project;
+  onInsert: (text: string, mode: LyricSuggestionMode) => void;
 }
 
 const DEFAULT_CFG: LyricsAIConfig = {
   enabled: false,
-  mode: 'inline',
-  enabledModes: ['completion'],
-  feedbackMode: 'minimal',
-}
+  mode: "inline",
+  enabledModes: ["completion"],
+  feedbackMode: "minimal",
+};
 
 const BACKDROP_STYLE: React.CSSProperties = {
-  fontFamily: 'var(--font-sans)',
-  fontSize: '12.5px',
-  lineHeight: '1.55',
-  letterSpacing: '-0.005em',
-  padding: '10px 12px',
-  whiteSpace: 'pre-wrap',
-  wordWrap: 'break-word',
-  width: '100%',
-  boxSizing: 'border-box',
-}
+  fontFamily: "var(--font-sans)",
+  fontSize: "12.5px",
+  lineHeight: "1.55",
+  letterSpacing: "-0.005em",
+  padding: "10px 12px",
+  whiteSpace: "pre-wrap",
+  wordWrap: "break-word",
+  width: "100%",
+  boxSizing: "border-box",
+};
 
-const REJECTION_TAGS: LyricRejectionTag[] = ['too_cheesy', 'good_rhyme', 'wrong_vibe', 'other']
+const REJECTION_TAGS: LyricRejectionTag[] = [
+  "too_cheesy",
+  "good_rhyme",
+  "wrong_vibe",
+  "other",
+];
 
 const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
-  ({ draft, selectionStart, selectionEnd, scrollTop, project, onInsert }, ref) => {
-    const [aiConfig, setAiConfig]           = useState<AIConfig | null>(null)
-    const [cfg, setCfg]                     = useState<LyricsAIConfig>(DEFAULT_CFG)
-    const [globalProfile, setGlobalProfile] = useState<string | null>(null)
-    const [projectProfile, setProjectProfile] = useState<string | null>(null)
+  (
+    { draft, selectionStart, selectionEnd, scrollTop, project, onInsert },
+    ref,
+  ) => {
+    const [aiConfig, setAiConfig] = useState<AIConfig | null>(null);
+    const [cfg, setCfg] = useState<LyricsAIConfig>(DEFAULT_CFG);
+    const [globalProfile, setGlobalProfile] = useState<string | null>(null);
+    const [projectProfile, setProjectProfile] = useState<string | null>(null);
 
-    const [ghostText, setGhostText]             = useState('')
-    const [currentSuggestion, setCurrentSuggestion] = useState<string | null>(null)
-    const [currentMode, setCurrentMode]         = useState<LyricSuggestionMode | null>(null)
-    const [status, setStatus]                   = useState<'idle' | 'loading' | 'streaming' | 'ready' | 'error'>('idle')
-    const [popupItems, setPopupItems]           = useState<PopupItem[]>([])
+    const [ghostText, setGhostText] = useState("");
+    const [currentSuggestion, setCurrentSuggestion] = useState<string | null>(
+      null,
+    );
+    const [currentMode, setCurrentMode] = useState<LyricSuggestionMode | null>(
+      null,
+    );
+    const [status, setStatus] = useState<
+      "idle" | "loading" | "streaming" | "ready" | "error"
+    >("idle");
+    const [popupItems, setPopupItems] = useState<PopupItem[]>([]);
 
-    const [tagChipVisible, setTagChipVisible]   = useState(false)
-    const [pendingTagEventId, setPendingTagEventId] = useState<string | null>(null)
+    const [tagChipVisible, setTagChipVisible] = useState(false);
+    const [pendingTagEventId, setPendingTagEventId] = useState<string | null>(
+      null,
+    );
 
-    const abortedRef     = useRef(false)
-    const debounceRef    = useRef<ReturnType<typeof setTimeout>>()
-    const tagTimerRef    = useRef<ReturnType<typeof setTimeout>>()
+    const abortedRef = useRef(false);
+    const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+    const tagTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
     // Load AI config + lyrics AI config once on mount
     useEffect(() => {
-      Promise.all([getAIConfig(), getLyricsAIConfig()]).then(([ai, lyricsAI]) => {
-        setAiConfig(ai)
-        setCfg(lyricsAI)
-      })
-    }, [])
+      Promise.all([getAIConfig(), getLyricsAIConfig()]).then(
+        ([ai, lyricsAI]) => {
+          setAiConfig(ai);
+          setCfg(lyricsAI);
+        },
+      );
+    }, []);
 
     // Reload per-project style profile when project changes
     useEffect(() => {
       Promise.all([
-        getStyleProfile('global'),
+        getStyleProfile("global"),
         getStyleProfile(project.id),
       ]).then(([g, p]) => {
-        setGlobalProfile(g)
-        setProjectProfile(p)
-      })
-    }, [project.id])
+        setGlobalProfile(g);
+        setProjectProfile(p);
+      });
+    }, [project.id]);
 
     // Debounced suggestion trigger
     useEffect(() => {
-      if (!cfg.enabled || !aiConfig) return
+      if (!cfg.enabled || !aiConfig) return;
 
-      let aborted = false
-      clearTimeout(debounceRef.current)
+      let aborted = false;
+      clearTimeout(debounceRef.current);
 
       debounceRef.current = setTimeout(async () => {
-        const mode = determineSuggestionMode(draft, selectionStart, selectionEnd, cfg.enabledModes)
-        if (!mode) return
+        const mode = determineSuggestionMode(
+          draft,
+          selectionStart,
+          selectionEnd,
+          cfg.enabledModes,
+        );
+        if (!mode) return;
 
-        abortedRef.current = false
-        setCurrentMode(mode)
+        abortedRef.current = false;
+        setCurrentMode(mode);
 
-        const textBeforeCursor = draft.slice(0, selectionStart)
-        const lineStart        = textBeforeCursor.lastIndexOf('\n') + 1
-        const lineEnd          = draft.indexOf('\n', selectionStart)
-        const currentLine      = draft.slice(lineStart, lineEnd === -1 ? undefined : lineEnd)
+        const textBeforeCursor = draft.slice(0, selectionStart);
+        const lineStart = textBeforeCursor.lastIndexOf("\n") + 1;
+        const lineEnd = draft.indexOf("\n", selectionStart);
+        const currentLine = draft.slice(
+          lineStart,
+          lineEnd === -1 ? undefined : lineEnd,
+        );
 
-        const recentAccepted = await getRecentAccepted(project.id, 5)
+        const recentAccepted = await getRecentAccepted(project.id, 5);
 
         const baseInput = {
           lyrics: draft,
@@ -1003,199 +1195,300 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
           globalProfile,
           projectProfile,
           recentAccepted,
-        }
+        };
 
-        if (cfg.mode === 'popup') {
-          setStatus('loading')
+        if (cfg.mode === "popup") {
+          setStatus("loading");
           try {
             const { system, prompt } = buildLyricsPopupPrompt({
               ...baseInput,
               enabledModes: cfg.enabledModes,
-            })
-            const result = await generatePopupSuggestions(aiConfig, system, prompt)
+            });
+            const result = await generatePopupSuggestions(
+              aiConfig,
+              system,
+              prompt,
+            );
             if (!aborted) {
-              setPopupItems(result.suggestions)
-              setStatus('ready')
+              setPopupItems(result.suggestions);
+              setStatus("ready");
             }
           } catch {
             if (!aborted) {
-              setStatus('error')
-              setTimeout(() => setStatus('idle'), 3000)
+              setStatus("error");
+              setTimeout(() => setStatus("idle"), 3000);
             }
           }
         } else {
           // inline streaming
-          setGhostText('')
-          setCurrentSuggestion(null)
-          setStatus('loading')
+          setGhostText("");
+          setCurrentSuggestion(null);
+          setStatus("loading");
           try {
-            const { system, prompt } = buildLyricsSuggestionPrompt({ ...baseInput, mode })
-            let accumulated = ''
-            for await (const chunk of streamLyricsSuggestion(aiConfig, system, prompt)) {
-              if (aborted) break
-              accumulated += chunk
-              setGhostText(accumulated)
-              setStatus('streaming')
+            const { system, prompt } = buildLyricsSuggestionPrompt({
+              ...baseInput,
+              mode,
+            });
+            let accumulated = "";
+            for await (const chunk of streamLyricsSuggestion(
+              aiConfig,
+              system,
+              prompt,
+            )) {
+              if (aborted) break;
+              accumulated += chunk;
+              setGhostText(accumulated);
+              setStatus("streaming");
             }
             if (!aborted && accumulated) {
-              setCurrentSuggestion(accumulated)
-              setStatus('ready')
+              setCurrentSuggestion(accumulated);
+              setStatus("ready");
             } else if (!aborted) {
-              setStatus('idle')
+              setStatus("idle");
             }
           } catch {
             if (!aborted) {
-              setGhostText('')
-              setStatus('error')
-              setTimeout(() => setStatus('idle'), 3000)
+              setGhostText("");
+              setStatus("error");
+              setTimeout(() => setStatus("idle"), 3000);
             }
           }
         }
-      }, 800)
+      }, 800);
 
       return () => {
-        clearTimeout(debounceRef.current)
-        aborted = true
-      }
-    }, [draft, selectionStart, selectionEnd, cfg, aiConfig, project, globalProfile, projectProfile])
+        clearTimeout(debounceRef.current);
+        aborted = true;
+      };
+    }, [
+      draft,
+      selectionStart,
+      selectionEnd,
+      cfg,
+      aiConfig,
+      project,
+      globalProfile,
+      projectProfile,
+    ]);
 
-    const triggerProfileRegenIfNeeded = useCallback(async (scopeId: string | null) => {
-      if (!aiConfig) return
-      const count = await countAcceptedEvents(scopeId)
-      if (count > 0 && count % 5 === 0) {
-        const recent  = await getRecentAccepted(scopeId, 20)
-        const summary = await generateStyleSummary(aiConfig, recent)
-        const profileId = scopeId ?? 'global'
-        await upsertStyleProfile(profileId, summary)
-        if (scopeId === null) setGlobalProfile(summary)
-        else setProjectProfile(summary)
-      }
-    }, [aiConfig])
-
-    const handleAccept = useCallback(async (text: string, mode: LyricSuggestionMode) => {
-      onInsert(text, mode)
-      setGhostText('')
-      setCurrentSuggestion(null)
-      setStatus('idle')
-      setPopupItems([])
-
-      await Promise.all([
-        logStyleEvent({ projectId: null,       suggestionText: text, mode, accepted: true, tag: null }),
-        logStyleEvent({ projectId: project.id, suggestionText: text, mode, accepted: true, tag: null }),
-      ])
-
-      triggerProfileRegenIfNeeded(null)
-      triggerProfileRegenIfNeeded(project.id)
-    }, [onInsert, project.id, triggerProfileRegenIfNeeded])
-
-    const handleReject = useCallback(async (text: string, mode: LyricSuggestionMode) => {
-      setGhostText('')
-      setCurrentSuggestion(null)
-      setStatus('idle')
-      setPopupItems([])
-
-      if (cfg.feedbackMode === 'tagged') {
-        const eventId = await logStyleEvent({
-          projectId: project.id, suggestionText: text, mode, accepted: false, tag: null,
-        })
-        setPendingTagEventId(eventId)
-        setTagChipVisible(true)
-        clearTimeout(tagTimerRef.current)
-        tagTimerRef.current = setTimeout(() => {
-          setTagChipVisible(false)
-          setPendingTagEventId(null)
-        }, 3000)
-      }
-    }, [cfg.feedbackMode, project.id])
-
-    useImperativeHandle(ref, () => ({
-      hasSuggestion: () => cfg.mode === 'inline' && !!currentSuggestion,
-      acceptSuggestion: () => {
-        if (currentSuggestion && currentMode) handleAccept(currentSuggestion, currentMode)
-      },
-      dismissSuggestion: () => {
-        abortedRef.current = true
-        if (currentSuggestion && currentMode) {
-          handleReject(currentSuggestion, currentMode)
-        } else {
-          setGhostText('')
-          setCurrentSuggestion(null)
-          setStatus('idle')
+    const triggerProfileRegenIfNeeded = useCallback(
+      async (scopeId: string | null) => {
+        if (!aiConfig) return;
+        const count = await countAcceptedEvents(scopeId);
+        if (count > 0 && count % 5 === 0) {
+          const recent = await getRecentAccepted(scopeId, 20);
+          const summary = await generateStyleSummary(aiConfig, recent);
+          const profileId = scopeId ?? "global";
+          await upsertStyleProfile(profileId, summary);
+          if (scopeId === null) setGlobalProfile(summary);
+          else setProjectProfile(summary);
         }
       },
-    }), [cfg.mode, currentSuggestion, currentMode, handleAccept, handleReject])
+      [aiConfig],
+    );
 
-    if (!cfg.enabled) return null
+    const handleAccept = useCallback(
+      async (text: string, mode: LyricSuggestionMode) => {
+        onInsert(text, mode);
+        setGhostText("");
+        setCurrentSuggestion(null);
+        setStatus("idle");
+        setPopupItems([]);
+
+        await Promise.all([
+          logStyleEvent({
+            projectId: null,
+            suggestionText: text,
+            mode,
+            accepted: true,
+            tag: null,
+          }),
+          logStyleEvent({
+            projectId: project.id,
+            suggestionText: text,
+            mode,
+            accepted: true,
+            tag: null,
+          }),
+        ]);
+
+        triggerProfileRegenIfNeeded(null);
+        triggerProfileRegenIfNeeded(project.id);
+      },
+      [onInsert, project.id, triggerProfileRegenIfNeeded],
+    );
+
+    const handleReject = useCallback(
+      async (text: string, mode: LyricSuggestionMode) => {
+        setGhostText("");
+        setCurrentSuggestion(null);
+        setStatus("idle");
+        setPopupItems([]);
+
+        if (cfg.feedbackMode === "tagged") {
+          const eventId = await logStyleEvent({
+            projectId: project.id,
+            suggestionText: text,
+            mode,
+            accepted: false,
+            tag: null,
+          });
+          setPendingTagEventId(eventId);
+          setTagChipVisible(true);
+          clearTimeout(tagTimerRef.current);
+          tagTimerRef.current = setTimeout(() => {
+            setTagChipVisible(false);
+            setPendingTagEventId(null);
+          }, 3000);
+        }
+      },
+      [cfg.feedbackMode, project.id],
+    );
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        hasSuggestion: () => cfg.mode === "inline" && !!currentSuggestion,
+        acceptSuggestion: () => {
+          if (currentSuggestion && currentMode)
+            handleAccept(currentSuggestion, currentMode);
+        },
+        dismissSuggestion: () => {
+          abortedRef.current = true;
+          if (currentSuggestion && currentMode) {
+            handleReject(currentSuggestion, currentMode);
+          } else {
+            setGhostText("");
+            setCurrentSuggestion(null);
+            setStatus("idle");
+          }
+        },
+      }),
+      [cfg.mode, currentSuggestion, currentMode, handleAccept, handleReject],
+    );
+
+    if (!cfg.enabled) return null;
 
     return (
       <>
         {/* Inline ghost text backdrop */}
-        {cfg.mode === 'inline' && (
-          <div style={{
-            position: 'absolute', inset: 0,
-            overflow: 'hidden', pointerEvents: 'none', zIndex: 0,
-          }}>
-            <div style={{
-              ...BACKDROP_STYLE,
-              transform: `translateY(-${scrollTop}px)`,
-              color: 'transparent',
-            }}>
+        {cfg.mode === "inline" && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              overflow: "hidden",
+              pointerEvents: "none",
+              zIndex: 0,
+            }}
+          >
+            <div
+              style={{
+                ...BACKDROP_STYLE,
+                transform: `translateY(-${scrollTop}px)`,
+                color: "transparent",
+              }}
+            >
               {draft}
-              {status === 'loading' && !ghostText && (
-                <span style={{ color: 'var(--accent)', opacity: 0.4 }}>…</span>
+              {status === "loading" && !ghostText && (
+                <span style={{ color: "var(--accent)", opacity: 0.4 }}>…</span>
               )}
               {ghostText && (
-                <span style={{ color: 'var(--accent)', opacity: 0.4 }}>{ghostText}</span>
+                <span style={{ color: "var(--accent)", opacity: 0.4 }}>
+                  {ghostText}
+                </span>
               )}
             </div>
           </div>
         )}
 
         {/* Popup suggestions panel */}
-        {cfg.mode === 'popup' && (status === 'loading' || status === 'ready') && (
-          <div style={{
-            position: 'absolute', left: 0, right: 0, top: '100%', marginTop: 4,
-            zIndex: 20, background: 'var(--bg-2)',
-            border: '1px solid var(--line-2)', borderRadius: 8,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.4)', overflow: 'hidden',
-          }}>
-            {status === 'loading' && (
-              <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--text-3)' }}>
-                Thinking…
-              </div>
-            )}
-            {status === 'ready' && popupItems.map((item, i) => (
-              <button
-                key={i}
-                onClick={() => handleAccept(item.text, item.mode)}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'flex-start', gap: 10,
-                  padding: '9px 12px', textAlign: 'left',
-                  borderBottom: i < popupItems.length - 1 ? '1px solid var(--line)' : 'none',
-                  background: 'transparent',
-                }}
-              >
-                <span style={{
-                  fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
-                  color: 'var(--accent)', flexShrink: 0, paddingTop: 2,
-                }}>
-                  {item.mode.replace('_', ' ')}
-                </span>
-                <span style={{ fontSize: 12.5, color: 'var(--text-0)', lineHeight: 1.5 }}>
-                  {item.text}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
+        {cfg.mode === "popup" &&
+          (status === "loading" || status === "ready") && (
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                top: "100%",
+                marginTop: 4,
+                zIndex: 20,
+                background: "var(--bg-2)",
+                border: "1px solid var(--line-2)",
+                borderRadius: 8,
+                boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+                overflow: "hidden",
+              }}
+            >
+              {status === "loading" && (
+                <div
+                  style={{
+                    padding: "10px 12px",
+                    fontSize: 12,
+                    color: "var(--text-3)",
+                  }}
+                >
+                  Thinking…
+                </div>
+              )}
+              {status === "ready" &&
+                popupItems.map((item, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleAccept(item.text, item.mode)}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 10,
+                      padding: "9px 12px",
+                      textAlign: "left",
+                      borderBottom:
+                        i < popupItems.length - 1
+                          ? "1px solid var(--line)"
+                          : "none",
+                      background: "transparent",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: "0.06em",
+                        textTransform: "uppercase",
+                        color: "var(--accent)",
+                        flexShrink: 0,
+                        paddingTop: 2,
+                      }}
+                    >
+                      {item.mode.replace("_", " ")}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 12.5,
+                        color: "var(--text-0)",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {item.text}
+                    </span>
+                  </button>
+                ))}
+            </div>
+          )}
 
         {/* Error indicator */}
-        {status === 'error' && (
+        {status === "error" && (
           <span
             title="AI suggestion failed"
             style={{
-              position: 'absolute', right: 10, top: 8,
-              fontSize: 13, opacity: 0.6, pointerEvents: 'none', zIndex: 5,
+              position: "absolute",
+              right: 10,
+              top: 8,
+              fontSize: 13,
+              opacity: 0.6,
+              pointerEvents: "none",
+              zIndex: 5,
             }}
           >
             ⚠
@@ -1204,37 +1497,50 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
 
         {/* Rejection tag chip (tagged feedback mode only) */}
         {tagChipVisible && (
-          <div style={{
-            position: 'absolute', left: 0, right: 0, bottom: -34,
-            display: 'flex', gap: 5, padding: '5px 12px',
-            background: 'var(--bg-1)', borderTop: '1px solid var(--line)', zIndex: 20,
-          }}>
-            {REJECTION_TAGS.map(tag => (
+          <div
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: -34,
+              display: "flex",
+              gap: 5,
+              padding: "5px 12px",
+              background: "var(--bg-1)",
+              borderTop: "1px solid var(--line)",
+              zIndex: 20,
+            }}
+          >
+            {REJECTION_TAGS.map((tag) => (
               <button
                 key={tag}
                 onClick={async () => {
-                  if (pendingTagEventId) await updateEventTag(pendingTagEventId, tag)
-                  setTagChipVisible(false)
-                  setPendingTagEventId(null)
+                  if (pendingTagEventId)
+                    await updateEventTag(pendingTagEventId, tag);
+                  setTagChipVisible(false);
+                  setPendingTagEventId(null);
                 }}
                 style={{
-                  fontSize: 10.5, padding: '2px 8px', borderRadius: 999,
-                  background: 'var(--bg-2)', border: '1px solid var(--line-2)',
-                  color: 'var(--text-2)',
+                  fontSize: 10.5,
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  background: "var(--bg-2)",
+                  border: "1px solid var(--line-2)",
+                  color: "var(--text-2)",
                 }}
               >
-                {tag.replace('_', ' ')}
+                {tag.replace("_", " ")}
               </button>
             ))}
           </div>
         )}
       </>
-    )
-  }
-)
+    );
+  },
+);
 
-LyricsAiOverlay.displayName = 'LyricsAiOverlay'
-export default LyricsAiOverlay
+LyricsAiOverlay.displayName = "LyricsAiOverlay";
+export default LyricsAiOverlay;
 ```
 
 - [ ] **Step 2: Verify TypeScript compiles**
@@ -1257,6 +1563,7 @@ git commit -m "feat: add LyricsAiOverlay component"
 ## Task 8: Wire overlay into LyricsTab
 
 **Files:**
+
 - Modify: `src/components/detail/tabs/LyricsTab.tsx`
 
 - [ ] **Step 1: Add imports to LyricsTab.tsx**
@@ -1264,14 +1571,14 @@ git commit -m "feat: add LyricsAiOverlay component"
 Add to the top of `src/components/detail/tabs/LyricsTab.tsx`:
 
 ```tsx
-import { useRef } from 'react'  // add to existing React imports
-import LyricsAiOverlay, { type LyricsAiOverlayHandle } from './LyricsAiOverlay'
+import { useRef } from "react"; // add to existing React imports
+import LyricsAiOverlay, { type LyricsAiOverlayHandle } from "./LyricsAiOverlay";
 ```
 
 Note: `useState`, `useMemo`, `useRef` — make sure `useRef` is in the existing React import. Update the import to:
 
 ```tsx
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef } from "react";
 ```
 
 - [ ] **Step 2: Add cursor and scroll state to LyricsTab component body**
@@ -1279,10 +1586,10 @@ import { useState, useMemo, useRef } from 'react'
 In the `LyricsTab` component, after the existing `useState` declarations, add:
 
 ```tsx
-const overlayRef   = useRef<LyricsAiOverlayHandle>(null)
-const [selectionStart, setSelectionStart] = useState(0)
-const [selectionEnd,   setSelectionEnd]   = useState(0)
-const [scrollTop,      setScrollTop]      = useState(0)
+const overlayRef = useRef<LyricsAiOverlayHandle>(null);
+const [selectionStart, setSelectionStart] = useState(0);
+const [selectionEnd, setSelectionEnd] = useState(0);
+const [scrollTop, setScrollTop] = useState(0);
 ```
 
 - [ ] **Step 3: Add the overlay insert handler**
@@ -1290,30 +1597,34 @@ const [scrollTop,      setScrollTop]      = useState(0)
 After `handleDone`, add:
 
 ```tsx
-const handleOverlayInsert = (text: string, mode: import('../../../types').LyricSuggestionMode) => {
-  const ta = textareaRef.current
-  setDraft(prev => {
-    if (mode === 'completion') {
-      return prev.slice(0, selectionStart) + text + prev.slice(selectionStart)
+const handleOverlayInsert = (
+  text: string,
+  mode: import("../../../types").LyricSuggestionMode,
+) => {
+  const ta = textareaRef.current;
+  setDraft((prev) => {
+    if (mode === "completion") {
+      return prev.slice(0, selectionStart) + text + prev.slice(selectionStart);
     }
-    if (mode === 'alternative') {
-      return prev.slice(0, selectionStart) + text + prev.slice(selectionEnd)
+    if (mode === "alternative") {
+      return prev.slice(0, selectionStart) + text + prev.slice(selectionEnd);
     }
     // next_line: insert after current line
-    const lineEnd  = prev.indexOf('\n', selectionStart)
-    const insertAt = lineEnd === -1 ? prev.length : lineEnd
-    return prev.slice(0, insertAt) + '\n' + text + prev.slice(insertAt)
-  })
+    const lineEnd = prev.indexOf("\n", selectionStart);
+    const insertAt = lineEnd === -1 ? prev.length : lineEnd;
+    return prev.slice(0, insertAt) + "\n" + text + prev.slice(insertAt);
+  });
   if (ta) {
     requestAnimationFrame(() => {
-      const newCursor = mode === 'alternative'
-        ? selectionStart + text.length
-        : selectionStart + text.length
-      ta.focus()
-      ta.setSelectionRange(newCursor, newCursor)
-    })
+      const newCursor =
+        mode === "alternative"
+          ? selectionStart + text.length
+          : selectionStart + text.length;
+      ta.focus();
+      ta.setSelectionRange(newCursor, newCursor);
+    });
   }
-}
+};
 ```
 
 - [ ] **Step 4: Update the editing textarea block in the JSX**
@@ -1324,20 +1635,23 @@ Find the editing section in the JSX. Replace:
 <textarea
   ref={textareaRef}
   className="description-input"
-  dir={rtl ? 'rtl' : 'ltr'}
+  dir={rtl ? "rtl" : "ltr"}
   style={{
-    border: 'none', borderRadius: 0, minHeight: 240,
-    background: 'var(--bg-0)', textAlign: rtl ? 'right' : 'left',
+    border: "none",
+    borderRadius: 0,
+    minHeight: 240,
+    background: "var(--bg-0)",
+    textAlign: rtl ? "right" : "left",
   }}
   value={draft}
-  onChange={e => setDraft(e.target.value)}
+  onChange={(e) => setDraft(e.target.value)}
 />
 ```
 
 With:
 
 ```tsx
-<div style={{ position: 'relative' }}>
+<div style={{ position: "relative" }}>
   <LyricsAiOverlay
     ref={overlayRef}
     draft={draft}
@@ -1350,29 +1664,33 @@ With:
   <textarea
     ref={textareaRef}
     className="description-input"
-    dir={rtl ? 'rtl' : 'ltr'}
+    dir={rtl ? "rtl" : "ltr"}
     style={{
-      border: 'none', borderRadius: 0, minHeight: 240,
-      background: 'transparent', textAlign: rtl ? 'right' : 'left',
-      position: 'relative', zIndex: 1,
+      border: "none",
+      borderRadius: 0,
+      minHeight: 240,
+      background: "transparent",
+      textAlign: rtl ? "right" : "left",
+      position: "relative",
+      zIndex: 1,
     }}
     value={draft}
-    onChange={e => setDraft(e.target.value)}
-    onSelect={e => {
-      setSelectionStart(e.currentTarget.selectionStart)
-      setSelectionEnd(e.currentTarget.selectionEnd)
+    onChange={(e) => setDraft(e.target.value)}
+    onSelect={(e) => {
+      setSelectionStart(e.currentTarget.selectionStart);
+      setSelectionEnd(e.currentTarget.selectionEnd);
     }}
-    onScroll={e => setScrollTop(e.currentTarget.scrollTop)}
-    onKeyDown={e => {
-      if (e.key === 'Tab') {
+    onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+    onKeyDown={(e) => {
+      if (e.key === "Tab") {
         if (overlayRef.current?.hasSuggestion()) {
-          e.preventDefault()
-          overlayRef.current.acceptSuggestion()
-          return
+          e.preventDefault();
+          overlayRef.current.acceptSuggestion();
+          return;
         }
         // default Tab behavior (indent) if no suggestion
       } else {
-        overlayRef.current?.dismissSuggestion()
+        overlayRef.current?.dismissSuggestion();
       }
     }}
   />
@@ -1447,6 +1765,7 @@ git push -u origin feat/sessions-vault-titlebar-branding
 ## Self-Review Notes
 
 **Spec coverage verified:**
+
 - ✅ Master on/off toggle (Task 5 + 6)
 - ✅ Inline ghost text mode with 800ms debounce (Task 7)
 - ✅ Popup mode with single generateObject call (Task 7)

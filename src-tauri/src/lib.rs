@@ -1,8 +1,8 @@
 mod backup;
 mod commands;
+mod parser;
 mod scanner;
 mod watcher;
-mod parser;
 
 use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::Emitter;
@@ -14,7 +14,8 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let about_item = MenuItem::with_id(app, "about", "About SessionsVault", true, None::<&str>)?;
+            let about_item =
+                MenuItem::with_id(app, "about", "About SessionsVault", true, None::<&str>)?;
             let help_menu = Submenu::with_items(app, "Help", true, &[&about_item])?;
             let menu = Menu::default(&app.handle())?;
             menu.append(&help_menu)?;

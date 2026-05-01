@@ -13,12 +13,12 @@ An AI-powered lyrics brainstorm partner embedded in the LyricsTab editor. The go
 
 All lyrics AI settings are stored in `backupConfigs` under id `"lyrics_ai"` (same mechanism as AI provider config).
 
-| Setting | Type | Default | Description |
-|---|---|---|---|
-| `enabled` | boolean | `false` | Master toggle. When off, no debounce fires, no AI calls are made. All other settings hidden. |
-| `mode` | `"inline" \| "popup"` | `"inline"` | How suggestions surface in the editor. |
-| `enabled_modes` | `("completion" \| "alternative" \| "next_line")[]` | `["completion"]` | Which suggestion types the AI may generate. Multi-select. |
-| `feedback_mode` | `"minimal" \| "tagged"` | `"minimal"` | Whether the user can tag rejections with a label. |
+| Setting         | Type                                               | Default          | Description                                                                                  |
+| --------------- | -------------------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------- |
+| `enabled`       | boolean                                            | `false`          | Master toggle. When off, no debounce fires, no AI calls are made. All other settings hidden. |
+| `mode`          | `"inline" \| "popup"`                              | `"inline"`       | How suggestions surface in the editor.                                                       |
+| `enabled_modes` | `("completion" \| "alternative" \| "next_line")[]` | `["completion"]` | Which suggestion types the AI may generate. Multi-select.                                    |
+| `feedback_mode` | `"minimal" \| "tagged"`                            | `"minimal"`      | Whether the user can tag rejections with a label.                                            |
 
 A new **Lyrics AI** section is added to `SettingsModal.tsx` under the existing AI Assistant section. When `enabled` is false, all other controls collapse.
 
@@ -31,6 +31,7 @@ A new **Lyrics AI** section is added to `SettingsModal.tsx` under the existing A
 A backdrop `<div>` is absolutely positioned behind the `<textarea>`, mirroring it exactly (same font, padding, line-height, scroll offset). It renders all existing text in transparent color and the AI suggestion appended in faint accent-colored text (`opacity: 0.35`).
 
 **Trigger:** 800ms debounce after the user stops typing. Mode is determined from cursor context:
+
 - Cursor mid-line, text is incomplete → `completion`
 - Cursor at end of a complete line → `next_line` (if enabled)
 - Text is selected → `alternative` (if enabled)
@@ -68,25 +69,25 @@ Shows one suggestion per enabled mode (up to 3 rows). These are fetched in a **s
 
 One row per suggestion interaction.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | text PK | |
-| `project_id` | text nullable | null = global |
-| `suggestion_text` | text | |
-| `mode` | text | `completion \| alternative \| next_line` |
-| `accepted` | integer | 1 = accepted, 0 = rejected |
-| `tag` | text nullable | `too_cheesy \| good_rhyme \| wrong_vibe \| other` — only populated when `feedback_mode = "tagged"` |
-| `created_at` | integer | unix timestamp |
+| Column            | Type          | Notes                                                                                              |
+| ----------------- | ------------- | -------------------------------------------------------------------------------------------------- |
+| `id`              | text PK       |                                                                                                    |
+| `project_id`      | text nullable | null = global                                                                                      |
+| `suggestion_text` | text          |                                                                                                    |
+| `mode`            | text          | `completion \| alternative \| next_line`                                                           |
+| `accepted`        | integer       | 1 = accepted, 0 = rejected                                                                         |
+| `tag`             | text nullable | `too_cheesy \| good_rhyme \| wrong_vibe \| other` — only populated when `feedback_mode = "tagged"` |
+| `created_at`      | integer       | unix timestamp                                                                                     |
 
 ### `lyric_style_profile`
 
 One row per scope (global or per-project).
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | text PK | `"global"` or a `project_id` |
-| `summary_text` | text | AI-generated natural-language style description |
-| `last_updated_at` | integer | unix timestamp |
+| Column            | Type    | Notes                                           |
+| ----------------- | ------- | ----------------------------------------------- |
+| `id`              | text PK | `"global"` or a `project_id`                    |
+| `summary_text`    | text    | AI-generated natural-language style description |
+| `last_updated_at` | integer | unix timestamp                                  |
 
 ---
 
@@ -97,11 +98,13 @@ One row per scope (global or per-project).
 2. **Profile regeneration** — after every 5 acceptances in a given scope, a background `generateStyleSummary` call fires with the last 20 accepted texts for that scope. The result overwrites `summary_text` in `lyric_style_profile`. This runs silently and never blocks the editor.
 
 3. **Prompt injection** — on each suggestion call, both profile rows are prepended to the system prompt:
+
    ```
    Your style context:
    Global: tends toward ABAB rhyme, dark imagery, short punchy lines
    This song: more introspective, slower cadence
    ```
+
    If no profile exists yet, this section is omitted.
 
 4. **Reset** — user can clear global or per-project memory from Settings. This deletes all `lyric_style_events` rows for that scope and removes the `lyric_style_profile` row.
@@ -110,32 +113,32 @@ One row per scope (global or per-project).
 
 ## Error Handling
 
-| Scenario | Behaviour |
-|---|---|
-| No AI config | Suggestions silently disabled (no errors in editor) |
-| API error / network failure | Ghost text / popup clears quietly; small `⚠` icon in lyrics toolbar fades after 3s |
-| Slow response (>5s, no tokens) | Request cancelled silently, ghost text cleared |
-| `enabled = false` | Debounce never starts — zero overhead |
+| Scenario                       | Behaviour                                                                          |
+| ------------------------------ | ---------------------------------------------------------------------------------- |
+| No AI config                   | Suggestions silently disabled (no errors in editor)                                |
+| API error / network failure    | Ghost text / popup clears quietly; small `⚠` icon in lyrics toolbar fades after 3s |
+| Slow response (>5s, no tokens) | Request cancelled silently, ghost text cleared                                     |
+| `enabled = false`              | Debounce never starts — zero overhead                                              |
 
 ---
 
 ## New Files
 
-| File | Purpose |
-|---|---|
-| `src/lib/lyrics-ai.ts` | Prompt builder, suggestion logic, style context assembly |
-| `src/db/queries/lyrics-ai.ts` | Read/write `lyric_style_events` and `lyric_style_profile` |
-| `src/components/detail/tabs/LyricsAiOverlay.tsx` | Backdrop ghost text + popup component |
-| `src/components/settings/LyricsAiSettings.tsx` | Settings panel section |
+| File                                             | Purpose                                                   |
+| ------------------------------------------------ | --------------------------------------------------------- |
+| `src/lib/lyrics-ai.ts`                           | Prompt builder, suggestion logic, style context assembly  |
+| `src/db/queries/lyrics-ai.ts`                    | Read/write `lyric_style_events` and `lyric_style_profile` |
+| `src/components/detail/tabs/LyricsAiOverlay.tsx` | Backdrop ghost text + popup component                     |
+| `src/components/settings/LyricsAiSettings.tsx`   | Settings panel section                                    |
 
 ### Modified Files
 
-| File | Change |
-|---|---|
-| `src/lib/ai.ts` | Add `streamLyricsSuggestion()` and `generateStyleSummary()` |
-| `src/db/schema.ts` | Add `lyric_style_events` and `lyric_style_profile` tables |
-| `src/components/detail/tabs/LyricsTab.tsx` | Integrate `LyricsAiOverlay`, wire debounce, handle Tab/dismiss |
-| `src/components/settings/SettingsModal.tsx` | Add Lyrics AI settings section |
+| File                                        | Change                                                         |
+| ------------------------------------------- | -------------------------------------------------------------- |
+| `src/lib/ai.ts`                             | Add `streamLyricsSuggestion()` and `generateStyleSummary()`    |
+| `src/db/schema.ts`                          | Add `lyric_style_events` and `lyric_style_profile` tables      |
+| `src/components/detail/tabs/LyricsTab.tsx`  | Integrate `LyricsAiOverlay`, wire debounce, handle Tab/dismiss |
+| `src/components/settings/SettingsModal.tsx` | Add Lyrics AI settings section                                 |
 
 ---
 

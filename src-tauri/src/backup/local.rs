@@ -24,8 +24,7 @@ pub fn backup_to_local(
         .map_err(|e| e.to_string())?
         .len();
 
-    std::fs::copy(&zip_tmp, &dest_path)
-        .map_err(|e| format!("copy to dest: {e}"))?;
+    std::fs::copy(&zip_tmp, &dest_path).map_err(|e| format!("copy to dest: {e}"))?;
     let _ = std::fs::remove_file(&zip_tmp);
 
     Ok(super::BackupResult {

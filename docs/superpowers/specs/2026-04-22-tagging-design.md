@@ -19,12 +19,14 @@ Current implementation ignores `tagId` and deletes all tags for the project. Fix
 
 ```ts
 // before (broken)
-await db.delete(projectTags).where(eq(projectTags.projectId, projectId))
+await db.delete(projectTags).where(eq(projectTags.projectId, projectId));
 
 // after
-await db.delete(projectTags).where(
-  and(eq(projectTags.projectId, projectId), eq(projectTags.tagId, tagId))
-)
+await db
+  .delete(projectTags)
+  .where(
+    and(eq(projectTags.projectId, projectId), eq(projectTags.tagId, tagId)),
+  );
 ```
 
 ### Color assignment
@@ -33,9 +35,17 @@ A fixed palette of 10 distinct colors. When creating a new tag, pick the next co
 
 ```ts
 const TAG_COLORS = [
-  '#ff7a45', '#ffcc66', '#5cd18b', '#0ea5e9', '#a98bff',
-  '#ff5a5a', '#34d399', '#f472b6', '#fb923c', '#818cf8',
-]
+  "#ff7a45",
+  "#ffcc66",
+  "#5cd18b",
+  "#0ea5e9",
+  "#a98bff",
+  "#ff5a5a",
+  "#34d399",
+  "#f472b6",
+  "#fb923c",
+  "#818cf8",
+];
 ```
 
 ---
@@ -45,33 +55,39 @@ const TAG_COLORS = [
 **Location:** `src/components/shared/TagInput.tsx`
 
 **Props:**
+
 ```ts
 interface Props {
-  projectId: string
-  projectTags: string[]   // tag names already on this project
-  allTags: Tag[]          // all tags in the library
-  onChange: () => void    // called after any add/remove to trigger reload
+  projectId: string;
+  projectTags: string[]; // tag names already on this project
+  allTags: Tag[]; // all tags in the library
+  onChange: () => void; // called after any add/remove to trigger reload
 }
 ```
 
 **States:**
+
 - Closed: renders existing tag chips (with ×) + the "+ add tag" chip
 - Open: the "+ add tag" chip is replaced by a text `<input>` + dropdown
 
 **Dropdown logic:**
+
 1. Filter `allTags` by whether `name.includes(query)` (case-insensitive)
 2. Exclude tags already on the project
 3. If query is non-empty and no exact name match exists, prepend a "Create '#query'" row
 4. Arrow keys navigate; Enter selects highlighted row; Escape closes
 
 **Add flow:**
+
 - Select existing tag → `assignTag(projectId, tagId)` → `onChange()`
 - Select "Create" → `createTag(name, nextColor(allTags.length))` → `assignTag` → `onChange()`
 
 **Remove flow:**
+
 - Click × on chip → `removeTag(projectId, tagId)` → `onChange()`
 
 **Keyboard / focus:**
+
 - Input auto-focuses when opened
 - Blur (clicking outside) closes the dropdown without action
 

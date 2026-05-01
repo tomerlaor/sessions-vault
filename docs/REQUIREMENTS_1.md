@@ -15,6 +15,7 @@ A desktop application that gives music creators a single home for every DAW proj
 ### 1.2 Target user
 
 Bedroom producers, songwriters, and hobbyist-to-prosumer musicians who:
+
 - Accumulate dozens to hundreds of DAW projects over time
 - Use primarily Ableton Live, but may dabble in other DAWs
 - Lose projects to drive failures, misplaced folders, or forgotten names
@@ -68,12 +69,14 @@ Target OS: macOS (primary — most Ableton users), Windows (secondary), Linux (b
 Each project entry stores:
 
 **Auto-extracted (where possible):**
+
 - Project name, file path, size, created/modified dates
 - DAW + version
 - BPM, key, time signature, length
 - Track count, plugin list, sample dependencies
 
 **User-editable:**
+
 - Title (separate from filename)
 - Description / notes
 - Tags (genre, mood, status — e.g. `draft`, `mixed`, `released`)
