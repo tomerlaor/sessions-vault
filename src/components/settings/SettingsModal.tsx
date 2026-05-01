@@ -165,6 +165,7 @@ export default function SettingsModal({ onClose }: Props) {
   const handleLyricsAIChange = useCallback(async (next: LyricsAIConfig) => {
     setLyricsAICfgState(next)
     await setLyricsAIConfig(next)
+    window.dispatchEvent(new CustomEvent('lyrics-ai-config-changed', { detail: next }))
   }, [])
 
   const handleClearGlobalMemory = useCallback(async () => {

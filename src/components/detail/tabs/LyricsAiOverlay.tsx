@@ -92,7 +92,14 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
         setAiConfig(ai)
         setCfg(lyricsAI)
       })
-      return () => clearTimeout(tagTimerRef.current)
+
+      const onCfgChange = (e: Event) => setCfg((e as CustomEvent<LyricsAIConfig>).detail)
+      window.addEventListener('lyrics-ai-config-changed', onCfgChange)
+
+      return () => {
+        clearTimeout(tagTimerRef.current)
+        window.removeEventListener('lyrics-ai-config-changed', onCfgChange)
+      }
     }, [])
 
     useEffect(() => {

@@ -48,6 +48,17 @@ export async function getProjectByPath(filePath: string): Promise<Project | unde
   return rows[0] as Project | undefined
 }
 
+export async function getProjectByHash(fileHash: string): Promise<Project | undefined> {
+  const db = await getDb()
+  const rows = await db.select().from(projects).where(eq(projects.fileHash, fileHash))
+  return rows[0] as Project | undefined
+}
+
+export async function updateProjectFilePath(id: string, newFilePath: string): Promise<void> {
+  const db = await getDb()
+  await db.update(projects).set({ filePath: newFilePath }).where(eq(projects.id, id))
+}
+
 export async function deleteProjectByPath(filePath: string): Promise<void> {
   const db = await getDb()
   await db.delete(projects).where(eq(projects.filePath, filePath))
