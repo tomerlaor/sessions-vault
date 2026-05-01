@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sessions Vault</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-0: #0a0a0b;
+  --bg-1: #111114;
+  --bg-2: #17171c;
+  --bg-3: #1f1f26;
+  --bg-4: #282832;
+  --line: #23232b;
+  --line-2: #2e2e38;
+  --text-0: #f4f4f6;
+  --text-1: #b8b8c2;
+  --text-2: #70707c;
+  --text-3: #4a4a54;
+  --accent: #ff7a45;
+  --accent-dim: #8a3e1f;
+  --green: #5cd18b;
+  --yellow: #ffcc66;
+  --red: #ff5a5a;
+  --blue: #5e9cff;
+  --violet: #a98bff;
+  --font-sans: "Inter Tight", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  --radius-s: 4px;
+  --radius-m: 6px;
+  --radius-l: 10px;
+}
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; background: var(--bg-0); color: var(--text-0); font-family: var(--font-sans); font-size: 13px; line-height: 1.4; letter-spacing: -0.005em; -webkit-font-smoothing: antialiased; overflow: hidden; }
+button { font-family: inherit; font-size: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; }
+input, textarea { font-family: inherit; color: inherit; background: none; border: none; outline: none; }
+::selection { background: var(--accent); color: #000; }
+
+.app { display: grid; grid-template-columns: 220px 1fr; grid-template-rows: 44px 1fr 24px; height: 100vh; background: var(--bg-0); }
+
+/* Titlebar */
+.titlebar { grid-column: 1 / -1; display: flex; align-items: center; padding: 0 14px; background: var(--bg-1); border-bottom: 1px solid var(--line); gap: 14px; }
+.traffic { display: flex; gap: 8px; }
+.traffic .dot { width: 12px; height: 12px; border-radius: 50%; }
+.traffic .r { background: #ff5f57; } .traffic .y { background: #febc2e; } .traffic .g { background: #28c840; }
+.titlebar .title { display: flex; align-items: center; gap: 7px; }
+.titlebar .search { margin-left: auto; display: flex; align-items: center; gap: 8px; background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--radius-m); padding: 5px 10px; width: 320px; }
+.titlebar .search input { flex: 1; font-size: 12px; }
+.titlebar .search .kbd { font-family: var(--font-mono); font-size: 10px; color: var(--text-2); padding: 1px 5px; border: 1px solid var(--line-2); border-radius: 3px; }
+.titlebar .tb-actions { display: flex; gap: 6px; }
+.tb-btn { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; font-size: 12px; color: var(--text-1); background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--radius-m); transition: background 80ms; }
+.tb-btn:hover { background: var(--bg-3); color: var(--text-0); }
+.tb-btn.primary { background: var(--accent); border-color: var(--accent); color: #1a0a00; font-weight: 600; }
+.tb-btn.primary:hover { background: #ff8d5c; }
+
+/* Sidebar */
+.sidebar { background: var(--bg-1); border-right: 1px solid var(--line); overflow-y: auto; padding: 10px 0; }
+.sb-section-title { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); padding: 10px 14px 6px; display: flex; align-items: center; justify-content: space-between; }
+.sb-section-title button { color: var(--text-2); font-size: 14px; line-height: 1; }
+.sb-section-title button:hover { color: var(--text-0); }
+.sb-item { display: flex; align-items: center; gap: 9px; padding: 5px 14px; font-size: 12.5px; color: var(--text-1); cursor: pointer; border-left: 2px solid transparent; user-select: none; }
+.sb-item:hover { background: var(--bg-2); color: var(--text-0); }
+.sb-item.active { background: var(--bg-2); color: var(--text-0); border-left-color: var(--accent); }
+.sb-item .count { margin-left: auto; color: var(--text-3); font-variant-numeric: tabular-nums; font-size: 11px; }
+.sb-item .swatch { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.sb-divider { height: 1px; background: var(--line); margin: 10px 14px; }
+.drive-card { margin: 10px 14px; padding: 12px; background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--radius-l); }
+.drive-card .row { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-2); margin-top: 6px; }
+.drive-card .hdr { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 600; color: var(--text-0); }
+.drive-card .hdr .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px rgba(92,209,139,0.6); }
+.drive-card .bar { height: 3px; background: var(--bg-4); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+.drive-card .bar > div { height: 100%; background: linear-gradient(90deg, var(--accent), var(--yellow)); }
+.drive-card .meta { font-size: 10.5px; color: var(--text-3); margin-top: 4px; }
+
+/* Main */
+.main { display: grid; grid-template-columns: 1fr minmax(340px, 440px); min-width: 0; min-height: 0; }
+.main.no-detail { grid-template-columns: 1fr; }
+
+/* List pane */
+.list-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
+.list-header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--bg-1); }
+.list-header h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.list-header .count { color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.filter-chips { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+.chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; font-size: 11.5px; color: var(--text-1); background: var(--bg-2); border: 1px solid var(--line-2); border-radius: 999px; cursor: pointer; }
+.chip:hover { color: var(--text-0); }
+.chip.active { background: rgba(255,122,69,0.15); color: var(--accent); border-color: rgba(255,122,69,0.4); }
+.chip .x { color: var(--text-3); font-size: 10px; }
+
+/* Table */
+.table-wrap { flex: 1; overflow: auto; min-height: 0; position: relative; }
+.table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.table thead th { position: sticky; top: 0; z-index: 2; text-align: left; font-weight: 500; font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); padding: 8px 12px; background: var(--bg-1); border-bottom: 1px solid var(--line); white-space: nowrap; user-select: none; cursor: pointer; }
+.table thead th:hover { color: var(--text-1); }
+.table thead th .sort-ind { margin-left: 3px; opacity: 0.7; font-size: 9px; }
+.table tbody tr { border-bottom: 1px solid var(--line); cursor: pointer; }
+.table tbody tr:hover { background: var(--bg-1); }
+.table tbody tr.selected { background: rgba(255,122,69,0.08); box-shadow: inset 2px 0 0 var(--accent); }
+.table td { padding: 10px 12px; color: var(--text-1); vertical-align: middle; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.name-cell .name { display: flex; flex-direction: column; min-width: 0; }
+.name-cell .title { color: var(--text-0); font-weight: 500; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name-cell .path { color: var(--text-3); font-size: 10.5px; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.daw-pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; font-size: 11px; font-weight: 500; border-radius: 4px; white-space: nowrap; }
+.sync-cell { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+.status-dot.synced { background: var(--green); }
+.status-dot.syncing { background: var(--yellow); animation: pulse 1.2s ease-in-out infinite; }
+.status-dot.dirty { background: var(--red); }
+.status-dot.pending { background: var(--text-3); }
+.versions { font-family: var(--font-mono); font-size: 10px; color: var(--text-2); padding: 1px 5px; background: var(--bg-2); border-radius: 3px; border: 1px solid var(--line); }
+@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.85); } }
+.tags-cell { display: flex; gap: 4px; flex-wrap: nowrap; overflow: hidden; }
+.tag { font-size: 10.5px; padding: 1px 6px; border-radius: 3px; color: var(--text-1); background: var(--bg-3); white-space: nowrap; }
+.row-actions { display: flex; gap: 4px; opacity: 0; transition: opacity 100ms; }
+.table tbody tr:hover .row-actions { opacity: 1; }
+.row-btn { width: 24px; height: 24px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
+.row-btn:hover { background: var(--bg-3); color: var(--text-0); }
+.drop-overlay { position: absolute; inset: 0; background: rgba(255,122,69,0.06); border: 2px dashed var(--accent); display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 5; }
+.drop-overlay .msg { background: var(--bg-2); border: 1px solid var(--accent); padding: 20px 28px; border-radius: 10px; color: var(--text-0); font-weight: 500; }
+
+/* Statusbar */
+.statusbar { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; padding: 0 14px; background: var(--bg-1); border-top: 1px solid var(--line); font-size: 11px; color: var(--text-2); }
+.statusbar .sep { width: 1px; height: 12px; background: var(--line-2); }
+.statusbar .right { margin-left: auto; display: flex; gap: 14px; align-items: center; }
+
+/* Detail panel */
+.detail { background: var(--bg-1); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.detail-header { padding: 16px 18px 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.detail-header .top { display: flex; gap: 12px; align-items: flex-start; }
+.detail-header h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.detail-header .path { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-header .meta-row { display: flex; gap: 14px; margin-top: 6px; font-size: 11.5px; color: var(--text-2); }
+.detail-header .meta-row b { color: var(--text-0); font-weight: 500; }
+.detail-close { margin-left: auto; color: var(--text-2); width: 24px; height: 24px; border-radius: 5px; display: flex; align-items: center; justify-content: center; }
+.detail-close:hover { background: var(--bg-3); color: var(--text-0); }
+.detail-actions { display: flex; gap: 6px; }
+.detail-actions .tb-btn { flex: 0 0 auto; font-size: 11.5px; padding: 5px 10px; }
+.detail-actions .tb-btn.primary { flex: 1; justify-content: center; }
+.tabs { display: flex; border-bottom: 1px solid var(--line); padding: 0 12px; gap: 2px; background: var(--bg-1); }
+.tab { padding: 8px 10px; font-size: 12px; color: var(--text-2); border-bottom: 2px solid transparent; margin-bottom: -1px; display: flex; align-items: center; gap: 6px; }
+.tab:hover { color: var(--text-0); }
+.tab.active { color: var(--text-0); border-bottom-color: var(--accent); }
+.tab .badge { font-size: 10px; padding: 0 5px; border-radius: 999px; background: var(--bg-3); color: var(--text-1); }
+.tab-body { flex: 1; overflow: auto; padding: 16px 18px; min-height: 0; }
+.field-label { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); margin-bottom: 6px; }
+.description-input { width: 100%; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-m); padding: 10px 12px; font-size: 12.5px; color: var(--text-0); resize: none; line-height: 1.55; transition: border-color 100ms; }
+.description-input:focus { border-color: var(--accent); }
+.meta-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius-m); overflow: hidden; margin-top: 8px; }
+.meta-grid > div { background: var(--bg-2); padding: 10px 12px; }
+.meta-grid .lbl { font-size: 9.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); margin-bottom: 4px; }
+.meta-grid .val { font-family: var(--font-mono); font-size: 14px; color: var(--text-0); font-weight: 500; }
+.lyrics-editor { background: var(--bg-0); border: 1px solid var(--line); border-radius: var(--radius-m); overflow: hidden; display: flex; flex-direction: column; }
+.lyrics-toolbar { display: flex; gap: 4px; padding: 6px 8px; background: var(--bg-1); border-bottom: 1px solid var(--line); }
+.lyrics-toolbar button { padding: 3px 8px; font-size: 11px; color: var(--text-2); border-radius: 3px; }
+.lyrics-toolbar button:hover { background: var(--bg-3); color: var(--text-0); }
+.lyrics-content { padding: 14px 16px; min-height: 180px; font-size: 13px; line-height: 1.7; }
+.lyrics-content .section { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin-top: 14px; margin-bottom: 6px; }
+.lyrics-content .section:first-child { margin-top: 0; }
+.lyrics-content p { margin: 0 0 2px; color: var(--text-0); }
+.attach-grid { display: grid; grid-template-columns: 1fr; gap: 6px; }
+.attach-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-m); }
+.attach-item .icn { width: 28px; height: 28px; border-radius: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.attach-item .info { flex: 1; min-width: 0; }
+.attach-item .info .fname { font-size: 12px; color: var(--text-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attach-item .info .fmeta { font-size: 10.5px; color: var(--text-3); }
+.attach-item .play { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #1a0a00; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.waveform { flex: 1; display: flex; align-items: center; gap: 1px; height: 20px; }
+.waveform span { width: 2px; background: var(--text-3); border-radius: 1px; }
+.attach-item.playing .waveform span { background: var(--accent); }
+.dropzone { padding: 14px; margin-top: 8px; text-align: center; font-size: 11.5px; color: var(--text-2); border: 1px dashed var(--line-2); border-radius: var(--radius-m); cursor: pointer; }
+.dropzone:hover { color: var(--text-0); border-color: var(--accent); background: rgba(255,122,69,0.04); }
+.sync-timeline { position: relative; padding-left: 18px; }
+.sync-timeline::before { content: ''; position: absolute; top: 4px; bottom: 4px; left: 5px; width: 1px; background: var(--line-2); }
+.sync-entry { position: relative; padding-bottom: 14px; }
+.sync-entry::before { content: ''; position: absolute; left: -18px; top: 4px; width: 11px; height: 11px; border-radius: 50%; background: var(--bg-0); border: 2px solid var(--green); }
+.sync-entry.current::before { border-color: var(--accent); background: var(--accent); }
+.sync-entry .t { font-size: 12px; color: var(--text-0); font-weight: 500; }
+.sync-entry .s { font-size: 11px; color: var(--text-2); font-family: var(--font-mono); margin-top: 2px; }
+.chord-sheet { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.9; background: var(--bg-0); border: 1px solid var(--line); border-radius: var(--radius-m); padding: 14px 16px; white-space: pre; overflow-x: auto; }
+.chord-sheet .c { color: var(--accent); font-weight: 600; }
+.chord-sheet .l { color: var(--text-0); }
+.session-list { display: flex; flex-direction: column; gap: 4px; }
+.session-item { padding: 8px 10px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-m); display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.session-item .check { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid var(--text-3); flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.session-item.done .check { background: var(--accent); border-color: var(--accent); color: #000; }
+.session-item.done .txt { color: var(--text-3); text-decoration: line-through; }
+.session-item .txt { flex: 1; font-size: 12px; }
+.tweaks { position: fixed; right: 16px; bottom: 32px; width: 280px; background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--radius-l); box-shadow: 0 12px 40px rgba(0,0,0,0.5); z-index: 100; overflow: hidden; }
+.tweaks .hd { padding: 10px 14px; background: var(--bg-3); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-1); display: flex; align-items: center; justify-content: space-between; }
+.tweaks .bd { padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+.tweak-row { display: flex; flex-direction: column; gap: 6px; }
+.tweak-row > .l { font-size: 10.5px; color: var(--text-2); letter-spacing: 0.04em; text-transform: uppercase; font-weight: 600; }
+.tweak-opts { display: flex; gap: 4px; flex-wrap: wrap; }
+.tweak-opts button { padding: 4px 9px; font-size: 11px; color: var(--text-1); background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 4px; }
+.tweak-opts button.on { background: var(--accent); color: #1a0a00; border-color: var(--accent); }
+body.density-compact .table td { padding: 5px 12px; }
+body.density-compact .wv-art { width: 22px !important; height: 22px !important; }
+body.density-comfortable .table td { padding: 14px 12px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useMemo, useRef } = React;
+
+// ─── Seed data ────────────────────────────────────────────────────────────────
+
+const DAWS = {
+  ableton: { name: 'Ableton Live', color: '#ff7a45', ext: '.als' },
+  logic:   { name: 'Logic Pro',    color: '#ffcc66', ext: '.logicx' },
+  fl:      { name: 'FL Studio',    color: '#5cd18b', ext: '.flp' },
+  bitwig:  { name: 'Bitwig',       color: '#ff5a5a', ext: '.bwproject' },
+  reaper:  { name: 'Reaper',       color: '#a98bff', ext: '.rpp' },
+};
+
+const W = (seed, n = 28) => {
+  const out = []; let s = seed;
+  for (let i = 0; i < n; i++) { s = (s * 9301 + 49297) % 233280; out.push(0.2 + (s / 233280) * 0.8); }
+  return out;
+};
+const G = (a, b) => `linear-gradient(135deg, ${a} 0%, ${b} 100%)`;
+
+const INITIAL_PROJECTS = [
+  { id:'p1',  title:'Ultraviolet Bloom',        daw:'ableton', path:'~/Music/Projects/2026/ultraviolet-bloom.als',          art:G('#6b21a8','#ec4899'), wave:W(13), modifiedLabel:'2h ago',      size:'842 MB',  duration:'3:47', bpm:124, key:'F# min', tuning:'E Std',   status:'dirty',   versions:14, lastSyncLabel:'today, 09:04',  tags:['synthwave','draft','dark'],         collection:'album-v1', starred:true,
+    description:'Title track for the EP. Big-room synthwave with modular arp and vocoder bridge. Still wrestling with the drop.',
+    lyrics:[{kind:'section',text:'Verse 1'},{kind:'line',text:'Cold wire hum beneath my skin,'},{kind:'line',text:'the dashboard light the only kin.'},{kind:'section',text:'Chorus'},{kind:'line',text:'Carry me through the dark, dark, dark —'},{kind:'line',text:'I am a satellite, I am a spark.'}],
+    chords:`[Intro]  F#m   A   E   B\n\n[Verse]\nF#m              A\n  Cold wire hum beneath my skin\nE                B\n  the dashboard light the only kin`,
+    attachments:[{type:'audio',name:'bounce_v14_master.wav',size:'48.2 MB',dur:'3:47',wave:W(31)},{type:'audio',name:'reference_tame_impala.mp3',size:'9.1 MB',dur:'4:02',wave:W(7)},{type:'image',name:'moodboard_01.jpg',size:'3.4 MB'},{type:'doc',name:'bounce_notes.md',size:'4 KB'}],
+    sessions:[{done:true,text:'Re-record vocal take for verse 2'},{done:true,text:'Swap Serum pad for hardware Juno'},{done:false,text:'Bridge: try the half-time drum pattern'},{done:false,text:'Book mix session with Dan'}],
+    collaborators:['M','D','S'],
+    syncHistory:[{t:'Today, 09:04',size:'842 MB',v:'v14 • auto-sync'},{t:'Yesterday, 18:30',size:'838 MB',v:'v13 • manual'},{t:'Apr 19, 22:15',size:'816 MB',v:'v12 • auto-sync'}] },
+  { id:'p2',  title:'Honeythief',                daw:'logic',   path:'~/Music/Logic/honeythief.logicx',                      art:G('#f59e0b','#b45309'), wave:W(42), modifiedLabel:'yesterday',   size:'1.24 GB', duration:'4:12', bpm:92,  key:'A maj',  tuning:'Drop D', status:'synced',  versions:22, lastSyncLabel:'yesterday, 18:00', tags:['folk','released'],                   collection:'album-v1', starred:false },
+  { id:'p3',  title:'Sleepless Drift (remix)',    daw:'ableton', path:'~/Music/Projects/sleepless-drift-rmx.als',             art:G('#0ea5e9','#1e3a8a'), wave:W(77), modifiedLabel:'4h ago',      size:'2.1 GB',  duration:'5:33', bpm:140, key:'G min',               status:'syncing', versions:7,  lastSyncLabel:'syncing…',       tags:['drum-and-bass','remix','wip'],       collection:'singles',  starred:true  },
+  { id:'p4',  title:'Cathedral / empty room',    daw:'logic',   path:'~/Music/Logic/cathedral-empty-room.logicx',            art:G('#475569','#0f172a'), wave:W(5),  modifiedLabel:'Apr 15',      size:'580 MB',  duration:'7:12', bpm:68,  key:'D min',               status:'synced',  versions:11, lastSyncLabel:'Apr 16, 01:00',  tags:['ambient','drone'],                   collection:'soundtrack',starred:false },
+  { id:'p5',  title:'Feral Pop Demo #3',         daw:'fl',      path:'~/Documents/FL Studio/feral-pop-demo-03.flp',          art:G('#22c55e','#14532d'), wave:W(91), modifiedLabel:'2 days ago',  size:'320 MB',  duration:'2:58', bpm:128, key:'C maj',               status:'dirty',   versions:3,  lastSyncLabel:'Apr 17, 22:00',  tags:['pop','demo','draft'],                collection:'demos',    starred:false },
+  { id:'p6',  title:'Running Clouds',            daw:'ableton', path:'~/Music/Projects/running-clouds.als',                  art:G('#be123c','#7c2d12'), wave:W(33), modifiedLabel:'3 days ago',  size:'660 MB',  duration:'3:24', bpm:110, key:'E min',               status:'synced',  versions:9,  lastSyncLabel:'Apr 18, 16:12',  tags:['indie','draft'],                     collection:'album-v1', starred:false },
+  { id:'p7',  title:'Liminal (Berghain edit)',   daw:'bitwig',  path:'~/Music/Bitwig/liminal-berghain-edit.bwproject',       art:G('#111827','#1e1b4b'), wave:W(101),modifiedLabel:'Apr 14',      size:'1.8 GB',  duration:'8:40', bpm:132, key:'A min',               status:'synced',  versions:16, lastSyncLabel:'Apr 15, 02:00',  tags:['techno','club-edit'],                collection:'dj-edits', starred:true  },
+  { id:'p8',  title:'Porch Light Lullaby',       daw:'logic',   path:'~/Music/Logic/porch-light-lullaby.logicx',             art:G('#fbbf24','#92400e'), wave:W(66), modifiedLabel:'Apr 12',      size:'380 MB',  duration:'3:02', bpm:72,  key:'G maj',  tuning:'DADGAD',status:'synced',  versions:18, lastSyncLabel:'Apr 13, 00:30',  tags:['folk','acoustic','released'],        collection:'album-v1', starred:false },
+  { id:'p9',  title:'Iron Feathers — session A', daw:'reaper',  path:'~/Music/Reaper/iron-feathers-A.rpp',                   art:G('#6b7280','#111827'), wave:W(22), modifiedLabel:'Apr 11',      size:'2.4 GB',  duration:'4:45', bpm:88,  key:'B min',               status:'pending', versions:2,  lastSyncLabel:'never',          tags:['rock','tracking'],                   collection:'band',     starred:false },
+  { id:'p10', title:'Small Machines',            daw:'ableton', path:'~/Music/Projects/small-machines.als',                  art:G('#06b6d4','#164e63'), wave:W(55), modifiedLabel:'Apr 10',      size:'920 MB',  duration:'4:08', bpm:116, key:'D maj',               status:'synced',  versions:12, lastSyncLabel:'Apr 10, 12:00',  tags:['electronic','idm'],                  collection:'singles',  starred:false },
+  { id:'p11', title:'House of Small Things',     daw:'logic',   path:'~/Music/Logic/house-of-small-things.logicx',           art:G('#ec4899','#831843'), wave:W(88), modifiedLabel:'Apr 8',       size:'1.1 GB',  duration:'3:55', bpm:104, key:'F maj',               status:'dirty',   versions:6,  lastSyncLabel:'Apr 7, 22:00',   tags:['pop','draft'],                       collection:'demos',    starred:false },
+  { id:'p12', title:'Void Concerto (sketch)',    daw:'ableton', path:'~/Music/Projects/void-concerto.als',                   art:G('#1e1b4b','#020617'), wave:W(44), modifiedLabel:'Apr 5',       size:'240 MB',  duration:'2:14', bpm:60,  key:'C# min',              status:'synced',  versions:4,  lastSyncLabel:'Apr 5, 02:30',   tags:['ambient','classical','sketch'],      collection:'soundtrack',starred:false },
+];
+
+const COLLECTIONS = [
+  { id:'album-v1',  name:'Album v1',    color:'#ff7a45' },
+  { id:'singles',   name:'Singles',     color:'#5e9cff' },
+  { id:'demos',     name:'Demos',       color:'#ffcc66' },
+  { id:'soundtrack',name:'Soundtrack',  color:'#a98bff' },
+  { id:'dj-edits',  name:'DJ edits',    color:'#5cd18b' },
+  { id:'band',      name:'Band stuff',  color:'#ff5a5a' },
+];
+
+const ALL_TAGS = ['draft','wip','released','demo','synthwave','folk','techno','ambient','pop','indie','sketch','remix'];
+
+// ─── Icons ────────────────────────────────────────────────────────────────────
+
+const Icon = ({ name, size = 14, style = {}, stroke = 1.8 }) => {
+  const paths = {
+    search:    <><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/></>,
+    folder:    <path d="M2 4.5C2 3.67 2.67 3 3.5 3h3.2c.4 0 .78.16 1.06.44L8.7 4.25a1.5 1.5 0 001.06.44H12.5c.83 0 1.5.67 1.5 1.5v6c0 .83-.67 1.5-1.5 1.5h-9A1.5 1.5 0 012 12.19V4.5z"/>,
+    star:      <path d="M8 1.5l1.95 3.95L14 6.04l-3 2.92.7 4.1L8 11.12l-3.7 1.94.7-4.1L2 6.04l4.05-.59L8 1.5z"/>,
+    sync:      <><path d="M13 4.5A5 5 0 004 5.5m-1 6A5 5 0 0012 11"/><path d="M13 2v3h-3M3 14v-3h3" strokeLinejoin="round"/></>,
+    cloud:     <path d="M11 12H4.5a2.5 2.5 0 01-.5-4.96 4 4 0 017.8.96H11a2 2 0 010 4z"/>,
+    music:     <><circle cx="4" cy="12" r="1.8"/><circle cx="12" cy="10.5" r="1.8"/><path d="M5.8 12V3l8-1.5v9"/></>,
+    tag:       <><path d="M2 2h5.5L14 8.5 8.5 14 2 7.5V2z"/><circle cx="5" cy="5" r="1" fill="currentColor"/></>,
+    tune:      <><path d="M2 4h8M13 4h1M2 12h1M6 12h8"/><circle cx="11.5" cy="4" r="1.5"/><circle cx="4.5" cy="12" r="1.5"/></>,
+    plus:      <path d="M8 3v10M3 8h10"/>,
+    play:      <path d="M5 3l8 5-8 5V3z" fill="currentColor"/>,
+    pause:     <path d="M5 3h2v10H5zM9 3h2v10H9z" fill="currentColor"/>,
+    open:      <><path d="M9 2h5v5"/><path d="M14 2L7.5 8.5"/><path d="M12 9v4a1 1 0 01-1 1H3a1 1 0 01-1-1V5a1 1 0 011-1h4"/></>,
+    x:         <path d="M3 3l10 10M13 3L3 13"/>,
+    dots:      <><circle cx="3" cy="8" r="1.2" fill="currentColor"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><circle cx="13" cy="8" r="1.2" fill="currentColor"/></>,
+    chevron:   <path d="M6 3l4 5-4 5"/>,
+    chevronD:  <path d="M3 6l5 4 5-4"/>,
+    check:     <path d="M3 8l3.5 3L13 4"/>,
+    paperclip: <path d="M12.5 7l-5 5a3 3 0 01-4.24-4.24l6-6a2 2 0 012.83 2.83L6.5 10.5a1 1 0 01-1.41-1.41L9.5 4.5"/>,
+    waveform:  <><path d="M1 8h2M4 5v6M7 3v10M10 5v6M13 8h2"/></>,
+    file:      <path d="M3 2h7l3 3v9H3V2z"/>,
+    image:     <><rect x="2" y="3" width="12" height="10" rx="1"/><circle cx="5.5" cy="6.5" r="1"/><path d="M2 11l3.5-3 3 2.5L12 7l2 2"/></>,
+    doc:       <><path d="M3 2h6l3 3v9H3V2z"/><path d="M6 8h4M6 10.5h4M6 5.5h2"/></>,
+    grid:      <><rect x="2" y="2" width="5" height="5"/><rect x="9" y="2" width="5" height="5"/><rect x="2" y="9" width="5" height="5"/><rect x="9" y="9" width="5" height="5"/></>,
+    list:      <><path d="M2 4h12M2 8h12M2 12h12"/></>,
+    history:   <><circle cx="8" cy="8" r="6"/><path d="M8 5v3.5L10.5 10"/></>,
+    upload:    <><path d="M8 3v8M5 6l3-3 3 3"/><path d="M3 13h10"/></>,
+    section:   <path d="M2 4h12M2 8h8M2 12h12"/>,
+    bold:      <path d="M4 2h4.5a2.5 2.5 0 010 5H4V2zm0 5h5a2.5 2.5 0 010 5H4V7z"/>,
+    italic:    <path d="M6 2h6M4 14h6M9 2l-2 12"/>,
+    link:      <><path d="M10 6h1a3 3 0 010 6h-1M6 10H5a3 3 0 010-6h1"/><path d="M7 8h2"/></>,
+    drive:     <><ellipse cx="8" cy="6" rx="6" ry="3"/><path d="M2 6v4a6 3 0 0012 0V6"/><path d="M2 10a6 3 0 0012 0"/></>,
+    mic:       <><rect x="6" y="2" width="4" height="7" rx="2"/><path d="M3.5 8a4.5 4.5 0 009 0M8 12.5V14M5 14h6"/></>,
+  };
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      stroke="currentColor" strokeWidth={stroke} strokeLinecap="round"
+      style={{ display:'inline-block', flexShrink:0, ...style }}>
+      {paths[name] || null}
+    </svg>
+  );
+};
+
+// ─── Wave art thumbnail ───────────────────────────────────────────────────────
+
+const WaveArt = ({ wave, bg, size = 32 }) => (
+  <div style={{ width: size, height: size, borderRadius: 4, flexShrink: 0,
+    background: bg, display:'flex', alignItems:'flex-end', gap:1, padding: size > 40 ? 6 : 3, overflow:'hidden' }}>
+    {wave.map((v, i) => (
+      <div key={i} style={{ flex:1, background:'rgba(255,255,255,0.55)',
+        height:`${v * 100}%`, borderRadius:0.5, minHeight:2 }} />
+    ))}
+  </div>
+);
+
+// ─── DAW mark dot ─────────────────────────────────────────────────────────────
+
+const DAWMark = ({ daw, size = 10 }) => {
+  const d = DAWS[daw];
+  return <div style={{ width:size, height:size, borderRadius:2, background: d?.color || '#888', flexShrink:0 }} />;
+};
+
+// ─── Sidebar ─────────────────────────────────────────────────────────────────
+
+const Sidebar = ({ filter, setFilter, counts, drive }) => {
+  const setF = patch => setFilter({ ...filter, ...patch });
+  return (
+    <aside className="sidebar">
+      <div className="drive-card">
+        <div className="hdr">
+          <span className="dot" />
+          <span>Google Drive</span>
+          <span style={{ marginLeft:'auto', color:'var(--text-2)', fontWeight:500 }}>{drive.synced}/{drive.total}</span>
+        </div>
+        <div className="bar"><div style={{ width:`${(drive.synced/drive.total)*100}%` }} /></div>
+        <div className="meta">{drive.used} of {drive.quota} used</div>
+        <div className="row"><span>Last sync</span><span style={{ color:'var(--text-1)' }}>2 min ago</span></div>
+      </div>
+
+      <div className="sb-section-title">Library</div>
+      {[
+        { id:'all',     label:'All projects', icon:'music' },
+        { id:'starred', label:'Starred',       icon:'star' },
+        { id:'recent',  label:'Recent',        icon:'history' },
+        { id:'dirty',   label:'Needs backup',  icon:'upload' },
+      ].map(v => (
+        <div key={v.id} className={`sb-item ${filter.view===v.id ? 'active':''}`}
+          onClick={() => setF({ view:v.id, collection:null })}>
+          <Icon name={v.icon} size={13} />
+          <span>{v.label}</span>
+          <span className="count">{counts[v.id]}</span>
+        </div>
+      ))}
+
+      <div className="sb-divider" />
+      <div className="sb-section-title">DAWs</div>
+      {Object.entries(DAWS).map(([id, d]) => (
+        <div key={id} className={`sb-item ${filter.daw===id ? 'active':''}`}
+          onClick={() => setF({ daw: filter.daw===id ? null : id })}>
+          <div className="swatch" style={{ background:d.color }} />
+          <span>{d.name}</span>
+          <span className="count">{counts.daw[id] || 0}</span>
+        </div>
+      ))}
+
+      <div className="sb-divider" />
+      <div className="sb-section-title">
+        Collections
+        <button title="New collection"><Icon name="plus" size={11} /></button>
+      </div>
+      {COLLECTIONS.map(c => (
+        <div key={c.id} className={`sb-item ${filter.collection===c.id ? 'active':''}`}
+          onClick={() => setF({ collection: filter.collection===c.id ? null : c.id, view:'all' })}>
+          <div className="swatch" style={{ background:c.color }} />
+          <span>{c.name}</span>
+          <span className="count">{counts.collection[c.id] || 0}</span>
+        </div>
+      ))}
+
+      <div className="sb-divider" />
+      <div className="sb-section-title">Tags</div>
+      {ALL_TAGS.slice(0, 8).map(t => (
+        <div key={t} className={`sb-item ${filter.tags.includes(t) ? 'active':''}`}
+          onClick={() => {
+            const has = filter.tags.includes(t);
+            setF({ tags: has ? filter.tags.filter(x=>x!==t) : [...filter.tags, t] });
+          }}>
+          <Icon name="tag" size={11} />
+          <span>#{t}</span>
+        </div>
+      ))}
+    </aside>
+  );
+};
+
+// ─── Project row ─────────────────────────────────────────────────────────────
+
+const StatusDot = ({ status }) => {
+  const label = { synced:'Synced', syncing:'Syncing…', dirty:'Changes not synced', pending:'Never synced' }[status];
+  return (
+    <div className="sync-cell" title={label}>
+      <span className={`status-dot ${status}`} />
+      <span>{label}</span>
+    </div>
+  );
+};
+
+const ProjectRow = ({ p, selected, onClick, onSync, onOpen, onStar }) => {
+  const daw = DAWS[p.daw];
+  return (
+    <tr className={selected ? 'selected' : ''} onClick={onClick}>
+      <td>
+        <div className="name-cell">
+          <WaveArt wave={p.wave} bg={p.art} size={32} />
+          <div className="name">
+            <div className="title">
+              {p.starred && <span style={{ color:'var(--yellow)', marginRight:4 }}>★</span>}
+              {p.title}
+            </div>
+            <div className="path">{p.path}</div>
+          </div>
+        </div>
+      </td>
+      <td>
+        <div className="daw-pill" style={{ background:`${daw.color}22`, color:daw.color }}>
+          <DAWMark daw={p.daw} size={10} />
+          {daw.name}
+        </div>
+      </td>
+      <td><StatusDot status={p.status} /></td>
+      <td style={{ color:'var(--text-2)', fontSize:11.5 }}>
+        {p.lastSyncLabel}
+        {p.status !== 'pending' && <span className="versions" style={{ marginLeft:8 }}>v{p.versions}</span>}
+      </td>
+      <td style={{ color:'var(--text-2)', fontFamily:'var(--font-mono)', fontSize:11 }}>
+        {p.bpm} / {p.key}
+      </td>
+      <td>
+        <div className="tags-cell">
+          {(p.tags||[]).slice(0,3).map(t => <span key={t} className="tag">{t}</span>)}
+        </div>
+      </td>
+      <td style={{ color:'var(--text-2)', fontSize:11.5 }}>{p.modifiedLabel}</td>
+      <td style={{ color:'var(--text-2)', fontSize:11.5, textAlign:'right' }}>{p.size}</td>
+      <td onClick={e => e.stopPropagation()}>
+        <div className="row-actions">
+          <button className="row-btn" title="Open in DAW" onClick={() => onOpen(p)}><Icon name="open" size={12} /></button>
+          <button className="row-btn" title="Sync now" onClick={() => onSync(p)}><Icon name="sync" size={12} /></button>
+          <button className="row-btn" title={p.starred ? 'Unstar' : 'Star'} onClick={() => onStar(p)}>
+            <Icon name="star" size={12} style={{ color: p.starred ? 'var(--yellow)' : undefined, fill: p.starred ? 'var(--yellow)' : 'none' }} />
+          </button>
+          <button className="row-btn" title="More"><Icon name="dots" size={12} /></button>
+        </div>
+      </td>
+    </tr>
+  );
+};
+
+// ─── List pane ────────────────────────────────────────────────────────────────
+
+const ListPane = ({ projects, filter, setFilter, sort, setSort, selectedId, onSelect, onSync, onOpen, onStar, dropping, onDragOver, onDragLeave, onDrop }) => {
+  const activeChips = [];
+  if (filter.search) activeChips.push({ key:'search', label:`"${filter.search}"`, clear:() => setFilter({...filter,search:''}) });
+  if (filter.daw) activeChips.push({ key:'daw', label:DAWS[filter.daw].name, clear:() => setFilter({...filter,daw:null}) });
+  if (filter.collection) {
+    const c = COLLECTIONS.find(x => x.id===filter.collection);
+    if (c) activeChips.push({ key:'coll', label:c.name, clear:() => setFilter({...filter,collection:null}) });
+  }
+  filter.tags.forEach(t => activeChips.push({ key:'t-'+t, label:'#'+t, clear:() => setFilter({...filter,tags:filter.tags.filter(x=>x!==t)}) }));
+
+  const sortIcon = key => sort.key===key ? (sort.dir==='asc' ? '↑' : '↓') : '';
+  const cols = [
+    {key:'title',    label:'Project'},
+    {key:'daw',      label:'DAW'},
+    {key:'status',   label:'Sync'},
+    {key:'lastSync', label:'Last backup / version'},
+    {key:'bpm',      label:'BPM / Key'},
+    {key:'tags',     label:'Tags'},
+    {key:'modified', label:'Modified'},
+    {key:'size',     label:'Size'},
+    {key:'__',       label:''},
+  ];
+
+  const viewLabel = { all:'All projects', starred:'Starred', recent:'Recent', dirty:'Needs backup' }[filter.view] || 'All projects';
+
+  return (
+    <div className="list-pane">
+      <div className="list-header">
+        <h1>{viewLabel}</h1>
+        <span className="count">{projects.length}</span>
+        <div className="filter-chips">
+          {activeChips.map(c => (
+            <span key={c.key} className="chip active" onClick={c.clear}>{c.label} <span className="x">✕</span></span>
+          ))}
+        </div>
+      </div>
+      <div className="table-wrap" onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+        <table className="table">
+          <thead>
+            <tr>
+              {cols.map(c => (
+                <th key={c.key} onClick={() => c.key!=='__' && setSort({ key:c.key, dir: sort.key===c.key && sort.dir==='asc' ? 'desc' : 'asc' })}>
+                  {c.label}<span className="sort-ind">{sortIcon(c.key)}</span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {projects.map(p => (
+              <ProjectRow key={p.id} p={p} selected={p.id===selectedId}
+                onClick={() => onSelect(p.id)}
+                onSync={onSync} onOpen={onOpen} onStar={onStar} />
+            ))}
+            {projects.length===0 && (
+              <tr><td colSpan={9} style={{ textAlign:'center', padding:40, color:'var(--text-3)' }}>No projects match these filters.</td></tr>
+            )}
+          </tbody>
+        </table>
+        {dropping && (
+          <div className="drop-overlay"><div className="msg">Drop to attach to selected project</div></div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─── Detail panel tabs ────────────────────────────────────────────────────────
+
+const TAB_DEFS = [
+  { id:'overview',    label:'Overview',    icon:'music' },
+  { id:'lyrics',      label:'Lyrics',      icon:'section' },
+  { id:'chords',      label:'Tabs',        icon:'tune' },
+  { id:'attachments', label:'Attachments', icon:'paperclip' },
+  { id:'sessions',    label:'To-do',       icon:'check' },
+  { id:'history',     label:'Sync',        icon:'history' },
+];
+
+const MetaGrid = ({ p }) => (
+  <div className="meta-grid">
+    {[['BPM',p.bpm],['Key',p.key],['Length',p.duration],['Tuning',p.tuning]].map(([l,v]) => (
+      <div key={l}><div className="lbl">{l}</div><div className="val">{v||'—'}</div></div>
+    ))}
+  </div>
+);
+
+const OverviewTab = ({ p, desc, setDesc }) => (
+  <>
+    <div className="field-label">Description</div>
+    <textarea className="description-input" rows={5}
+      placeholder="What is this project about? Mood, references, what's unfinished…"
+      value={desc} onChange={e => setDesc(e.target.value)} />
+    <div style={{ marginTop:18 }} className="field-label">Details</div>
+    <MetaGrid p={p} />
+    <div style={{ marginTop:18 }} className="field-label">Tags</div>
+    <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
+      {(p.tags||[]).map(t => <span key={t} className="chip active">#{t}</span>)}
+      <span className="chip"><Icon name="plus" size={9} /> add tag</span>
+    </div>
+    <div style={{ marginTop:18 }} className="field-label">Collaborators</div>
+    <div style={{ display:'flex', gap:4, alignItems:'center' }}>
+      {(p.collaborators||['M']).map((c,i) => (
+        <div key={i} style={{ width:26, height:26, borderRadius:'50%', background:['#ff7a45','#5e9cff','#5cd18b','#ffcc66'][i%4], color:'#000', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:700, marginLeft:i>0?-6:0, border:'2px solid var(--bg-1)' }}>{c}</div>
+      ))}
+      <button className="row-btn" style={{ marginLeft:8 }} title="Invite"><Icon name="plus" size={11} /></button>
+    </div>
+  </>
+);
+
+const LyricsTab = ({ p, lyrics, setLyrics }) => {
+  const [editing, setEditing] = useState(false);
+  const lines = lyrics && lyrics.length ? lyrics : [];
+  if (editing) {
+    const asText = lines.map(l => l.kind==='section' ? `[${l.text}]` : l.text).join('\n');
+    return (
+      <div className="lyrics-editor">
+        <div className="lyrics-toolbar">
+          <button title="Bold"><Icon name="bold" size={11} /></button>
+          <button title="Italic"><Icon name="italic" size={11} /></button>
+          <div style={{ flex:1 }} />
+          <button style={{ color:'var(--accent)' }} onClick={() => setEditing(false)}>Done</button>
+        </div>
+        <textarea className="description-input" style={{ border:'none', borderRadius:0, minHeight:260, background:'var(--bg-0)' }}
+          defaultValue={asText}
+          onBlur={e => {
+            const next = e.target.value.split('\n').map(line => {
+              const m = line.match(/^\s*\[(.+)\]\s*$/);
+              return m ? {kind:'section',text:m[1]} : {kind:'line',text:line};
+            });
+            setLyrics(next);
+          }} />
+      </div>
+    );
+  }
+  if (!lines.length) {
+    return (
+      <div style={{ textAlign:'center', padding:'40px 20px', color:'var(--text-3)' }}>
+        <Icon name="section" size={28} style={{ opacity:0.4, margin:'0 auto 12px', display:'block' }} />
+        <div style={{ fontSize:13, marginBottom:12 }}>No lyrics yet.</div>
+        <button className="tb-btn primary" onClick={() => { setLyrics([{kind:'section',text:'Verse 1'},{kind:'line',text:''}]); setEditing(true); }}>Start writing</button>
+      </div>
+    );
+  }
+  return (
+    <div className="lyrics-editor">
+      <div className="lyrics-toolbar">
+        <button>{p.key||'—'}</button>
+        <button>{p.bpm||'—'} BPM</button>
+        <div style={{ flex:1 }} />
+        <button onClick={() => setEditing(true)} style={{ color:'var(--accent)' }}>✎ Edit</button>
+      </div>
+      <div className="lyrics-content">
+        {lines.map((l,i) => l.kind==='section'
+          ? <div key={i} className="section">{l.text}</div>
+          : <p key={i}>{l.text||' '}</p>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const ChordsTab = ({ p }) => {
+  if (!p.chords) return (
+    <div style={{ textAlign:'center', padding:'40px 20px', color:'var(--text-3)' }}>
+      <Icon name="tune" size={28} style={{ opacity:0.4, margin:'0 auto 12px', display:'block' }} />
+      <div style={{ fontSize:13, marginBottom:12 }}>No tabs or chord sheet yet.</div>
+      <button className="tb-btn primary">Add chord sheet</button>
+    </div>
+  );
+  const lines = p.chords.split('\n').map((line, i) => {
+    if (/^\[.*\]/.test(line.trim())) return <div key={i}><span className="c">{line||' '}</span></div>;
+    return <div key={i}><span className="l">{line||' '}</span></div>;
+  });
+  return (
+    <>
+      <div style={{ display:'flex', gap:6, marginBottom:10 }}>
+        <button className="tb-btn">Transpose ↓</button>
+        <button className="tb-btn">Transpose ↑</button>
+        <span className="tb-btn" style={{ borderColor:'var(--accent)', color:'var(--accent)' }}>Key of {p.key||'—'}</span>
+      </div>
+      <div className="chord-sheet">{lines}</div>
+    </>
+  );
+};
+
+const AttachmentsTab = ({ p, playing, setPlaying }) => {
+  const files = p.attachments||[];
+  const [over, setOver] = useState(false);
+  const audioFiles = files.filter(f => f.type==='audio');
+  const imageFiles = files.filter(f => f.type==='image');
+  const docFiles   = files.filter(f => f.type==='doc');
+  const AttachIcon = ({ type }) => {
+    const cfg = {
+      audio: { bg:'linear-gradient(135deg,#ff7a45,#b45309)', icon:<Icon name="waveform" size={14} stroke={1.6} /> },
+      image: { bg:'linear-gradient(135deg,#a98bff,#6b21a8)', icon:<Icon name="image" size={13} /> },
+      doc:   { bg:'linear-gradient(135deg,#5e9cff,#1e3a8a)', icon:<Icon name="doc" size={13} /> },
+    }[type]||{ bg:'var(--bg-3)', icon:'?' };
+    return <div className="icn" style={{ background:cfg.bg, color:'#fff' }}>{cfg.icon}</div>;
+  };
+  return (
+    <>
+      {audioFiles.length>0 && <>
+        <div className="field-label">Audio ({audioFiles.length})</div>
+        <div className="attach-grid">
+          {audioFiles.map((f,i) => {
+            const isPlaying = playing===f.name;
+            return (
+              <div key={i} className={`attach-item ${isPlaying?'playing':''}`}>
+                <button className="play" onClick={() => setPlaying(isPlaying?null:f.name)}>
+                  <Icon name={isPlaying?'pause':'play'} size={10} />
+                </button>
+                <div className="info" style={{ flex:'0 0 auto', maxWidth:150 }}>
+                  <div className="fname">{f.name}</div>
+                  <div className="fmeta">{f.dur} • {f.size}</div>
+                </div>
+                <div className="waveform">{(f.wave||W(i*7)).map((v,j) => <span key={j} style={{ height:`${v*100}%` }} />)}</div>
+              </div>
+            );
+          })}
+        </div>
+      </>}
+      {imageFiles.length>0 && <>
+        <div className="field-label" style={{ marginTop:16 }}>Images</div>
+        <div className="attach-grid">
+          {imageFiles.map((f,i) => (
+            <div key={i} className="attach-item">
+              <AttachIcon type="image" />
+              <div className="info"><div className="fname">{f.name}</div><div className="fmeta">{f.size}</div></div>
+              <button className="row-btn"><Icon name="dots" size={12} /></button>
+            </div>
+          ))}
+        </div>
+      </>}
+      {docFiles.length>0 && <>
+        <div className="field-label" style={{ marginTop:16 }}>Documents</div>
+        <div className="attach-grid">
+          {docFiles.map((f,i) => (
+            <div key={i} className="attach-item">
+              <AttachIcon type="doc" />
+              <div className="info"><div className="fname">{f.name}</div><div className="fmeta">{f.size}</div></div>
+              <button className="row-btn"><Icon name="dots" size={12} /></button>
+            </div>
+          ))}
+        </div>
+      </>}
+      <div className={`dropzone`}
+        style={over ? { borderColor:'var(--accent)', color:'var(--accent)', background:'rgba(255,122,69,0.08)' } : {}}
+        onDragOver={e => { e.preventDefault(); setOver(true); }}
+        onDragLeave={() => setOver(false)}
+        onDrop={e => { e.preventDefault(); setOver(false); }}>
+        Drop audio, images, tabs or notes here — or <span style={{ color:'var(--accent)' }}>browse</span>
+      </div>
+    </>
+  );
+};
+
+const SessionsTab = ({ sessions, setSessions }) => {
+  const toggle = i => setSessions(sessions.map((s,j) => j===i ? {...s,done:!s.done} : s));
+  return (
+    <>
+      <div className="session-list">
+        {(sessions||[]).map((s,i) => (
+          <div key={i} className={`session-item ${s.done?'done':''}`} onClick={() => toggle(i)}>
+            <div className="check">{s.done && <Icon name="check" size={10} stroke={3} />}</div>
+            <span className="txt">{s.text}</span>
+          </div>
+        ))}
+        {(!sessions||sessions.length===0) && <div style={{ textAlign:'center', padding:20, color:'var(--text-3)' }}>No notes yet.</div>}
+      </div>
+      <div className="dropzone" style={{ marginTop:10 }}><Icon name="plus" size={10} /> Add note</div>
+    </>
+  );
+};
+
+const HistoryTab = ({ p }) => {
+  const entries = p.syncHistory||[{ t:p.lastSyncLabel, v:`v${p.versions} • current`, size:p.size }];
+  return (
+    <>
+      <div style={{ display:'flex', gap:10, alignItems:'center', marginBottom:16, padding:'10px 12px', background:'var(--bg-2)', border:'1px solid var(--line)', borderRadius:6 }}>
+        <span className={`status-dot ${p.status}`} style={{ width:9, height:9 }} />
+        <div style={{ flex:1 }}>
+          <div style={{ fontSize:12, color:'var(--text-0)' }}>
+            {{ synced:'Up to date on Google Drive', dirty:'Local changes not yet synced', syncing:'Uploading to Google Drive…', pending:'Never synced to Google Drive' }[p.status]}
+          </div>
+          <div style={{ fontSize:11, color:'var(--text-3)', marginTop:2 }}>{p.versions} version{p.versions===1?'':'s'} • {p.size}</div>
+        </div>
+        <button className="tb-btn primary" style={{ fontSize:11, padding:'4px 10px' }}>
+          {p.status==='syncing' ? 'Pause' : 'Sync now'}
+        </button>
+      </div>
+      <div className="field-label">Version history</div>
+      <div className="sync-timeline">
+        {entries.map((e,i) => (
+          <div key={i} className={`sync-entry ${i===0?'current':''}`}>
+            <div className="t">{e.t}</div>
+            <div className="s">{e.v} • {e.size}</div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+};
+
+// ─── Detail panel ─────────────────────────────────────────────────────────────
+
+const DetailPanel = ({ p, onClose, onOpen, onSync, patch }) => {
+  const [tab, setTab] = useState('overview');
+  if (!p) return null;
+  const daw = DAWS[p.daw];
+  return (
+    <aside className="detail">
+      <div className="detail-header">
+        <div className="top">
+          <WaveArt wave={p.wave} bg={p.art} size={64} />
+          <div style={{ flex:1, minWidth:0 }}>
+            <h2>{p.title}</h2>
+            <div className="path">{p.path}</div>
+            <div className="meta-row">
+              <span><DAWMark daw={p.daw} size={11} /> <b style={{ marginLeft:4 }}>{daw.name}</b></span>
+              <span>{p.size}</span>
+              <span>Modified {p.modifiedLabel}</span>
+            </div>
+          </div>
+          <button className="detail-close" onClick={onClose} title="Close"><Icon name="x" size={12} /></button>
+        </div>
+        <div className="detail-actions">
+          <button className="tb-btn primary" onClick={() => onOpen(p)}>
+            <Icon name="open" size={12} /> Open in {daw.name}
+          </button>
+          <button className="tb-btn" onClick={() => onSync(p)} title="Sync now"><Icon name="sync" size={12} /></button>
+          <button className="tb-btn" title="Reveal in Finder"><Icon name="folder" size={12} /></button>
+          <button className="tb-btn" title="Copy link"><Icon name="link" size={12} /></button>
+        </div>
+      </div>
+
+      <div className="tabs">
+        {TAB_DEFS.map(t => (
+          <button key={t.id} className={`tab ${tab===t.id?'active':''}`} onClick={() => setTab(t.id)}>
+            <Icon name={t.icon} size={11} />
+            {t.label}
+            {t.id==='attachments' && p.attachments && <span className="badge">{p.attachments.length}</span>}
+            {t.id==='sessions' && (p.sessions||[]).length>0 && <span className="badge">{(p.sessions||[]).filter(s=>!s.done).length}</span>}
+          </button>
+        ))}
+      </div>
+
+      <div className="tab-body">
+        {tab==='overview'    && <OverviewTab p={p} desc={p.description||''} setDesc={v => patch({description:v})} />}
+        {tab==='lyrics'      && <LyricsTab p={p} lyrics={p.lyrics||[]} setLyrics={v => patch({lyrics:v})} />}
+        {tab==='chords'      && <ChordsTab p={p} />}
+        {tab==='attachments' && <AttachmentsTab p={p} playing={p._playing||null} setPlaying={v => patch({_playing:v})} />}
+        {tab==='sessions'    && <SessionsTab sessions={p.sessions||[]} setSessions={v => patch({sessions:v})} />}
+        {tab==='history'     && <HistoryTab p={p} />}
+      </div>
+    </aside>
+  );
+};
+
+// ─── Root app ─────────────────────────────────────────────────────────────────
+
+function App() {
+  const [projects, setProjects] = useState(INITIAL_PROJECTS);
+  const [selectedId, setSelectedId] = useState('p1');
+  const [filter, setFilter] = useState({ view:'all', daw:null, collection:null, tags:[], search:'' });
+  const [sort, setSort] = useState({ key:'modified', dir:'desc' });
+  const [dropping, setDropping] = useState(false);
+  const [showDetail, setShowDetail] = useState(true);
+  const [tweaksOpen, setTweaksOpen] = useState(false);
+  const [tweaks, setTweaks] = useState({ accent:'#ff7a45', density:'default' });
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--accent', tweaks.accent);
+    document.body.className = `density-${tweaks.density}`;
+  }, [tweaks]);
+
+  // Simulate syncing completing
+  useEffect(() => {
+    const syncing = projects.find(p => p.status==='syncing');
+    if (!syncing) return;
+    const t = setTimeout(() => {
+      setProjects(prev => prev.map(p => p.id===syncing.id
+        ? {...p, status:'synced', lastSyncLabel:'just now', versions:p.versions+1} : p));
+      showToast(`${syncing.title} synced • v${syncing.versions+1}`);
+    }, 3500);
+    return () => clearTimeout(t);
+  }, [projects]);
+
+  const showToast = text => { setToast(text); setTimeout(() => setToast(null), 2800); };
+  const selected = projects.find(p => p.id===selectedId);
+  const patch = p => setProjects(prev => prev.map(x => x.id===selectedId ? {...x,...p} : x));
+
+  const filtered = useMemo(() => {
+    let list = projects.slice();
+    if (filter.view==='starred') list = list.filter(p => p.starred);
+    if (filter.view==='dirty')   list = list.filter(p => p.status==='dirty'||p.status==='pending');
+    if (filter.view==='recent')  list = list.slice(0, 6);
+    if (filter.daw)        list = list.filter(p => p.daw===filter.daw);
+    if (filter.collection) list = list.filter(p => p.collection===filter.collection);
+    if (filter.tags.length) list = list.filter(p => filter.tags.every(t => (p.tags||[]).includes(t)));
+    if (filter.search) {
+      const q = filter.search.toLowerCase();
+      list = list.filter(p => p.title.toLowerCase().includes(q) || (p.description||'').toLowerCase().includes(q) || (p.tags||[]).some(t => t.includes(q)));
+    }
+    const sortOrder = { synced:0, syncing:1, dirty:2, pending:3 };
+    list.sort((a,b) => {
+      let av = a[sort.key], bv = b[sort.key];
+      if (sort.key==='status') { av = sortOrder[av]||0; bv = sortOrder[bv]||0; }
+      if (typeof av==='string') av = av.toLowerCase();
+      if (typeof bv==='string') bv = bv.toLowerCase();
+      if (av < bv) return sort.dir==='asc' ? -1 : 1;
+      if (av > bv) return sort.dir==='asc' ? 1 : -1;
+      return 0;
+    });
+    return list;
+  }, [projects, filter, sort]);
+
+  const counts = useMemo(() => {
+    const c = { all:projects.length, starred:0, recent:Math.min(projects.length,6), dirty:0, daw:{}, collection:{} };
+    projects.forEach(p => {
+      if (p.starred) c.starred++;
+      if (p.status==='dirty'||p.status==='pending') c.dirty++;
+      c.daw[p.daw] = (c.daw[p.daw]||0)+1;
+      if (p.collection) c.collection[p.collection] = (c.collection[p.collection]||0)+1;
+    });
+    return c;
+  }, [projects]);
+
+  const drive = { synced:projects.filter(p=>p.status==='synced').length, total:projects.length, used:'47.3 GB', quota:'200 GB' };
+
+  const onSync = p => { setProjects(prev => prev.map(x => x.id===p.id ? {...x,status:'syncing',lastSyncLabel:'syncing…'} : x)); showToast(`Syncing ${p.title}…`); };
+  const onOpen = p => showToast(`Opening ${p.title} in ${DAWS[p.daw].name}…`);
+  const onStar = p => setProjects(prev => prev.map(x => x.id===p.id ? {...x,starred:!x.starred} : x));
+  const onDragOver = e => { e.preventDefault(); setDropping(true); };
+  const onDragLeave = e => { if (e.currentTarget.contains(e.relatedTarget)) return; setDropping(false); };
+  const onDrop = e => {
+    e.preventDefault(); setDropping(false);
+    if (!selected) return;
+    patch({ attachments:[...(selected.attachments||[]), {type:'doc',name:'dropped_file.txt',size:'3 KB'}] });
+    showToast(`Attached to ${selected.title}`);
+  };
+
+  return (
+    <div className="app">
+      <div className="titlebar">
+        <div className="traffic">
+          <div className="dot r"/><div className="dot y"/><div className="dot g"/>
+        </div>
+        <div className="title" style={{ display:'flex', alignItems:'center', gap:7 }}>
+          <svg width="18" height="22" viewBox="6 6 60 68" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink:0 }}>
+            <rect x="8"  y="8"  width="40" height="9" rx="2.5" fill="#ff5a00"/>
+            <rect x="52" y="8"  width="14" height="9" rx="2.5" fill="#ff5a00" opacity="0.3"/>
+            <rect x="8"  y="21" width="20" height="9" rx="2.5" fill="rgba(255,255,255,0.14)"/>
+            <rect x="32" y="21" width="34" height="9" rx="2.5" fill="rgba(255,255,255,0.14)"/>
+            <rect x="8"  y="34" width="30" height="9" rx="2.5" fill="#ff5a00" opacity="0.6"/>
+            <rect x="42" y="34" width="24" height="9" rx="2.5" fill="rgba(255,255,255,0.14)"/>
+            <rect x="8"  y="47" width="14" height="9" rx="2.5" fill="rgba(255,255,255,0.14)"/>
+            <rect x="26" y="47" width="40" height="9" rx="2.5" fill="#ff5a00" opacity="0.85"/>
+            <rect x="8"  y="60" width="24" height="9" rx="2.5" fill="#ff5a00" opacity="0.35"/>
+            <rect x="36" y="60" width="30" height="9" rx="2.5" fill="rgba(255,255,255,0.14)"/>
+          </svg>
+          <span style={{ fontSize:13, fontWeight:700, letterSpacing:'-0.01em', color:'var(--text-0)' }}>Sessions</span>
+          <span style={{ fontSize:13, fontWeight:700, letterSpacing:'-0.01em', color:'#ff5a00' }}>Vault</span>
+        </div>
+        <div className="search">
+          <Icon name="search" size={12} style={{ color:'var(--text-2)' }} />
+          <input placeholder="Search projects, lyrics, tags…" value={filter.search}
+            onChange={e => setFilter({...filter,search:e.target.value})} />
+          <span className="kbd">⌘K</span>
+        </div>
+        <div className="tb-actions">
+          <button className="tb-btn" onClick={() => showToast('Syncing all projects…')}>
+            <Icon name="sync" size={12} /> Sync all
+          </button>
+          <button className="tb-btn" onClick={() => setTweaksOpen(o=>!o)}>
+            <Icon name="tune" size={12} />
+          </button>
+          <button className="tb-btn primary">
+            <Icon name="plus" size={12} /> New
+          </button>
+        </div>
+      </div>
+
+      <Sidebar filter={filter} setFilter={setFilter} counts={counts} drive={drive} />
+
+      <main className={`main ${showDetail?'':'no-detail'}`}>
+        <ListPane projects={filtered} filter={filter} setFilter={setFilter}
+          sort={sort} setSort={setSort} selectedId={selectedId}
+          onSelect={id => { setSelectedId(id); setShowDetail(true); }}
+          onSync={onSync} onOpen={onOpen} onStar={onStar}
+          dropping={dropping} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop} />
+        {showDetail && selected && (
+          <DetailPanel p={selected} onClose={() => setShowDetail(false)}
+            onOpen={onOpen} onSync={onSync} patch={patch} />
+        )}
+      </main>
+
+      <div className="statusbar">
+        <span>{filtered.length} of {projects.length} projects</span>
+        <span className="sep" />
+        <span><span className="status-dot synced" style={{ marginRight:5 }}/>{drive.synced} synced</span>
+        <span><span className="status-dot dirty" style={{ marginRight:5 }}/>{counts.dirty} need backup</span>
+        <div className="right">
+          <span>Google Drive · {drive.used} / {drive.quota}</span>
+          <span className="sep" />
+          <span>Watching ~/Music</span>
+        </div>
+      </div>
+
+      {toast && (
+        <div style={{ position:'fixed', bottom:40, left:'50%', transform:'translateX(-50%)', background:'var(--bg-3)', border:'1px solid var(--line-2)', padding:'8px 14px', borderRadius:8, fontSize:12, boxShadow:'0 8px 24px rgba(0,0,0,0.4)', zIndex:200, whiteSpace:'nowrap' }}>
+          {toast}
+        </div>
+      )}
+
+      {tweaksOpen && (
+        <div className="tweaks">
+          <div className="hd">
+            Tweaks
+            <button onClick={() => setTweaksOpen(false)}><Icon name="x" size={10} /></button>
+          </div>
+          <div className="bd">
+            <div className="tweak-row">
+              <div className="l">Accent color</div>
+              <div className="tweak-opts">
+                {[['#ff7a45','orange'],['#5e9cff','blue'],['#a98bff','violet'],['#5cd18b','green'],['#ffcc66','amber']].map(([c,n]) => (
+                  <button key={c} className={tweaks.accent===c?'on':''} style={tweaks.accent===c?{background:c,color:'#000',borderColor:c}:{}}
+                    onClick={() => setTweaks({...tweaks,accent:c})}>{n}</button>
+                ))}
+              </div>
+            </div>
+            <div className="tweak-row">
+              <div className="l">Row density</div>
+              <div className="tweak-opts">
+                {['compact','default','comfortable'].map(d => (
+                  <button key={d} className={tweaks.density===d?'on':''}
+                    onClick={() => setTweaks({...tweaks,density:d})}>{d}</button>
+                ))}
+              </div>
+            </div>
+            <div className="tweak-row">
+              <div className="l">Detail panel</div>
+              <div className="tweak-opts">
+                <button className={showDetail?'on':''} onClick={() => setShowDetail(true)}>Visible</button>
+                <button className={!showDetail?'on':''} onClick={() => setShowDetail(false)}>Hidden</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

@@ -914,6 +914,203 @@ Suggested post title: *"Building SessionsVault — open source DAW project organ
 
 ---
 
+---
+
+## Task 11: Versioning & Release-Please Setup
+
+**Files:**
+- Create: `.github/workflows/release-please.yml`
+- Create: `release-please-config.json`
+- Create: `.release-please-manifest.json`
+
+- [ ] **Step 1: Write release-please-config.json**
+
+Create `release-please-config.json` at project root:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "changelog-sections": [
+        {"type": "feat", "section": "Features"},
+        {"type": "fix", "section": "Bug Fixes"},
+        {"type": "chore", "section": "Miscellaneous", "hidden": true},
+        {"type": "docs", "section": "Documentation", "hidden": true},
+        {"type": "ci", "section": "CI", "hidden": true}
+      ]
+    }
+  }
+}
+```
+
+- [ ] **Step 2: Write .release-please-manifest.json**
+
+Create `.release-please-manifest.json` at project root:
+
+```json
+{
+  ".": "0.1.0"
+}
+```
+
+- [ ] **Step 3: Write release-please.yml**
+
+Create `.github/workflows/release-please.yml`:
+
+```yaml
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add release-please-config.json .release-please-manifest.json .github/workflows/release-please.yml
+git commit -m "ci: add release-please for automated versioning and changelog"
+git push
+```
+
+- [ ] **Step 5: Verify workflow appears in GitHub**
+
+```bash
+gh workflow list --repo tomerlaor/sessions-vault
+```
+
+Expected: `Release Please` appears in the list.
+
+---
+
+## Task 12: Release Build Workflow (macOS .dmg)
+
+**Files:**
+- Create: `.github/workflows/release-build.yml`
+
+- [ ] **Step 1: Write release-build.yml**
+
+Create `.github/workflows/release-build.yml`:
+
+```yaml
+name: Release Build
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Tauri app (universal)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseBody: "See [CHANGELOG.md](https://github.com/tomerlaor/sessions-vault/blob/main/CHANGELOG.md) for details."
+          releaseDraft: false
+          prerelease: false
+          args: --target universal-apple-darwin
+
+      - name: Ad-hoc sign the DMG
+        run: |
+          DMG=$(find . -name "*.dmg" | head -1)
+          if [ -n "$DMG" ]; then
+            codesign --deep --force --sign - "$DMG"
+            echo "Signed: $DMG"
+          fi
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add .github/workflows/release-build.yml
+git commit -m "ci: add macOS release build workflow with ad-hoc signing"
+git push
+```
+
+- [ ] **Step 3: Verify workflow appears in GitHub**
+
+```bash
+gh workflow list --repo tomerlaor/sessions-vault
+```
+
+Expected: `Release Build` appears in the list.
+
+---
+
+## Task 13: Install Instructions in README
+
+**Files:**
+- Modify: `README.md`
+
+- [ ] **Step 1: Add Install section to README.md**
+
+Open `README.md` and insert the following section between the `## Screenshot` section and the `## Features (v1)` section:
+
+```markdown
+## Install
+
+Download the latest `.dmg` from the [Releases page](https://github.com/tomerlaor/sessions-vault/releases).
+
+1. Open the `.dmg` and drag **SessionsVault** to your Applications folder
+2. On first launch, macOS may show *"SessionsVault can't be opened because it is from an unidentified developer"*
+3. To bypass: right-click the app icon → **Open** → **Open** again in the dialog
+4. You only need to do this once — subsequent launches work normally
+
+> SessionsVault is open source (Apache 2.0). The app is not yet notarized with Apple. [View the source](https://github.com/tomerlaor/sessions-vault) if you'd like to verify it yourself or build from source.
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add README.md
+git commit -m "docs: add Install section with macOS Gatekeeper workaround"
+git push
+```
+
+---
+
 ## Deferred Tasks (next plan — after Tauri scaffold)
 
 These require a scaffolded Tauri project and are out of scope for this plan:
@@ -921,3 +1118,4 @@ These require a scaffolded Tauri project and are out of scope for this plan:
 - [ ] About window React component (`src/components/AboutWindow.tsx`) — show logo, version, copyright, license link, GitHub link, built-with credits
 - [ ] Wire icons into `tauri.conf.json` `tauri.bundle.icon` array — copy `docs/brand/icons/` to `src-tauri/icons/`
 - [ ] Window title bar icon — 32×32 PNG in `src-tauri/icons/`
+- [ ] Update `tauri.conf.json` version to match release-please manifest on first scaffold

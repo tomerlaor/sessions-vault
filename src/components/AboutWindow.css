@@ -1,0 +1,108 @@
+.about-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.about-modal {
+  position: relative;
+  width: 400px;
+  height: 320px;
+  background: #111111;
+  border-radius: 12px;
+  border: 1px solid #222222;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.about-tracks {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+  pointer-events: none;
+}
+
+.about-track {
+  height: 8px;
+  border-radius: 2px;
+  background: #ff5a00;
+  opacity: 0.04;
+}
+
+.about-content {
+  position: relative;
+  text-align: center;
+  padding: 24px;
+  width: 100%;
+}
+
+.about-icon {
+  display: block;
+  margin: 0 auto 14px;
+}
+
+.about-name {
+  font-size: 26px;
+  font-weight: 900;
+  color: #ffffff;
+  letter-spacing: 0.5px;
+  margin: 0 0 4px;
+  line-height: 1;
+  font-family: -apple-system, 'Helvetica Neue', sans-serif;
+}
+
+.about-name span {
+  color: #ff5a00;
+}
+
+.about-version {
+  font-size: 11px;
+  color: #555555;
+  margin: 0 0 16px;
+  letter-spacing: 0.5px;
+}
+
+.about-links {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin-bottom: 16px;
+}
+
+.about-link {
+  background: none;
+  border: none;
+  color: #ff5a00;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  letter-spacing: 0.3px;
+}
+
+.about-link:hover {
+  text-decoration: underline;
+}
+
+.about-built {
+  font-size: 10px;
+  color: #444444;
+  margin: 0 0 8px;
+  letter-spacing: 0.3px;
+}
+
+.about-copy {
+  font-size: 9px;
+  color: #333333;
+  margin: 0;
+  letter-spacing: 0.2px;
+}
