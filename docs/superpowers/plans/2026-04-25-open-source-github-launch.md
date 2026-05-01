@@ -11,6 +11,7 @@
 ---
 
 ## Deferred (requires Tauri scaffold — do in next plan)
+
 - About window React component
 - Wiring icons into `tauri.conf.json`
 - Window title bar icon
@@ -19,20 +20,20 @@
 
 ## File Map
 
-| File | Purpose |
-|---|---|
-| `.gitignore` | Excludes Rust/Node/Tauri/macOS/Windows build artifacts |
-| `LICENSE` | Apache 2.0, © 2026 Tomer Laor |
-| `README.md` | Project homepage, badges, tech stack, roadmap |
-| `CONTRIBUTING.md` | Contributor guide, branch naming, code style, CI gate |
-| `CODE_OF_CONDUCT.md` | Contributor Covenant v2.1 |
-| `.github/ISSUE_TEMPLATE/bug_report.md` | Structured bug report form |
-| `.github/ISSUE_TEMPLATE/feature_request.md` | Structured feature request form |
-| `.github/pull_request_template.md` | PR checklist |
-| `.github/workflows/ci.yml` | Lint + format check on push/PR |
-| `docs/brand/icon.svg` | App icon source — mark only, 512×512 ✅ exists |
-| `docs/brand/logo.svg` | Horizontal lockup — mark + wordmark ✅ exists |
-| `docs/brand/icons/` | Exported PNGs + .icns + .ico |
+| File                                        | Purpose                                                |
+| ------------------------------------------- | ------------------------------------------------------ |
+| `.gitignore`                                | Excludes Rust/Node/Tauri/macOS/Windows build artifacts |
+| `LICENSE`                                   | Apache 2.0, © 2026 Tomer Laor                          |
+| `README.md`                                 | Project homepage, badges, tech stack, roadmap          |
+| `CONTRIBUTING.md`                           | Contributor guide, branch naming, code style, CI gate  |
+| `CODE_OF_CONDUCT.md`                        | Contributor Covenant v2.1                              |
+| `.github/ISSUE_TEMPLATE/bug_report.md`      | Structured bug report form                             |
+| `.github/ISSUE_TEMPLATE/feature_request.md` | Structured feature request form                        |
+| `.github/pull_request_template.md`          | PR checklist                                           |
+| `.github/workflows/ci.yml`                  | Lint + format check on push/PR                         |
+| `docs/brand/icon.svg`                       | App icon source — mark only, 512×512 ✅ exists         |
+| `docs/brand/logo.svg`                       | Horizontal lockup — mark + wordmark ✅ exists          |
+| `docs/brand/icons/`                         | Exported PNGs + .icns + .ico                           |
 
 ---
 
@@ -65,6 +66,7 @@ git remote -v
 ```
 
 Expected:
+
 ```
 origin  https://github.com/<yourname>/sessions-vault.git (fetch)
 origin  https://github.com/<yourname>/sessions-vault.git (push)
@@ -75,6 +77,7 @@ origin  https://github.com/<yourname>/sessions-vault.git (push)
 ## Task 2: .gitignore and LICENSE
 
 **Files:**
+
 - Create: `.gitignore`
 - Create: `LICENSE`
 
@@ -260,6 +263,7 @@ git push -u origin main
 ## Task 3: README.md
 
 **Files:**
+
 - Create: `README.md`
 
 - [ ] **Step 1: Write README.md**
@@ -300,14 +304,14 @@ Full requirements: [REQUIREMENTS_1.md](./REQUIREMENTS_1.md)
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Desktop shell | [Tauri 2.x](https://tauri.app) |
-| Frontend | React + TypeScript + Tailwind |
-| Backend | Rust |
-| Local database | SQLite (`rusqlite` / `sqlx`) |
-| `.als` parsing | `flate2` + `quick-xml` |
-| Cloud sync | Dropbox API, Google Drive API, AWS S3 SDK |
+| Layer          | Technology                                |
+| -------------- | ----------------------------------------- |
+| Desktop shell  | [Tauri 2.x](https://tauri.app)            |
+| Frontend       | React + TypeScript + Tailwind             |
+| Backend        | Rust                                      |
+| Local database | SQLite (`rusqlite` / `sqlx`)              |
+| `.als` parsing | `flate2` + `quick-xml`                    |
+| Cloud sync     | Dropbox API, Google Drive API, AWS S3 SDK |
 
 ---
 
@@ -316,6 +320,7 @@ Full requirements: [REQUIREMENTS_1.md](./REQUIREMENTS_1.md)
 > _Build instructions will be added once the project is scaffolded._
 
 Requirements (coming soon):
+
 - Rust 1.75+
 - Node.js 20+
 - Tauri CLI
@@ -354,13 +359,14 @@ git commit -m "docs: add README with project overview, tech stack, and roadmap"
 ## Task 4: CONTRIBUTING.md
 
 **Files:**
+
 - Create: `CONTRIBUTING.md`
 
 - [ ] **Step 1: Write CONTRIBUTING.md**
 
 Create `CONTRIBUTING.md` at project root:
 
-```markdown
+````markdown
 # Contributing to SessionsVault
 
 Thanks for your interest in contributing. Here's everything you need to know.
@@ -371,11 +377,11 @@ Thanks for your interest in contributing. Here's everything you need to know.
 
 ## Branch Naming
 
-| Type | Pattern | Example |
-|---|---|---|
-| Feature | `feature/<short-name>` | `feature/ableton-parser` |
-| Bug fix | `fix/<short-name>` | `fix/scan-crash-on-symlink` |
-| Chore / config | `chore/<short-name>` | `chore/update-dependencies` |
+| Type           | Pattern                | Example                     |
+| -------------- | ---------------------- | --------------------------- |
+| Feature        | `feature/<short-name>` | `feature/ableton-parser`    |
+| Bug fix        | `fix/<short-name>`     | `fix/scan-crash-on-symlink` |
+| Chore / config | `chore/<short-name>`   | `chore/update-dependencies` |
 
 Always branch off `dev`, not `main`.
 
@@ -389,12 +395,15 @@ Always branch off `dev`, not `main`.
 ## Code Style
 
 **Rust:** Format with `rustfmt` before committing.
+
 ```bash
 cargo fmt
 cargo clippy -- -D warnings
 ```
+````
 
 **TypeScript / React:** Format with Prettier, lint with ESLint.
+
 ```bash
 npx prettier --write .
 npx eslint .
@@ -407,20 +416,22 @@ Every PR runs `cargo fmt --check`, `cargo clippy`, `prettier --check`, and `esli
 ## Getting Help
 
 Open a thread in [GitHub Discussions](https://github.com/<yourname>/sessions-vault/discussions) or reach out via the issue tracker.
-```
+
+````
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add CONTRIBUTING.md
 git commit -m "docs: add CONTRIBUTING guide with branch naming, code style, and CI gate"
-```
+````
 
 ---
 
 ## Task 5: CODE_OF_CONDUCT.md
 
 **Files:**
+
 - Create: `CODE_OF_CONDUCT.md`
 
 - [ ] **Step 1: Write CODE_OF_CONDUCT.md**
@@ -440,19 +451,19 @@ We pledge to act and interact in ways that contribute to an open, welcoming, div
 
 Examples of behavior that contributes to a positive environment:
 
-* Demonstrating empathy and kindness toward other people
-* Being respectful of differing opinions, viewpoints, and experiences
-* Giving and gracefully accepting constructive feedback
-* Accepting responsibility and apologizing to those affected by our mistakes
-* Focusing on what is best not just for us as individuals, but for the overall community
+- Demonstrating empathy and kindness toward other people
+- Being respectful of differing opinions, viewpoints, and experiences
+- Giving and gracefully accepting constructive feedback
+- Accepting responsibility and apologizing to those affected by our mistakes
+- Focusing on what is best not just for us as individuals, but for the overall community
 
 Examples of unacceptable behavior:
 
-* The use of sexualized language or imagery, and sexual attention or advances of any kind
-* Trolling, insulting or derogatory comments, and personal or political attacks
-* Public or private harassment
-* Publishing others' private information without their explicit permission
-* Other conduct which could reasonably be considered inappropriate in a professional setting
+- The use of sexualized language or imagery, and sexual attention or advances of any kind
+- Trolling, insulting or derogatory comments, and personal or political attacks
+- Public or private harassment
+- Publishing others' private information without their explicit permission
+- Other conduct which could reasonably be considered inappropriate in a professional setting
 
 ## Enforcement Responsibilities
 
@@ -483,6 +494,7 @@ git commit -m "docs: add Contributor Covenant v2.1 code of conduct"
 ## Task 6: GitHub Issue & PR Templates
 
 **Files:**
+
 - Create: `.github/ISSUE_TEMPLATE/bug_report.md`
 - Create: `.github/ISSUE_TEMPLATE/feature_request.md`
 - Create: `.github/pull_request_template.md`
@@ -504,9 +516,9 @@ labels: bug
 
 ## Steps to reproduce
 
-1. 
-2. 
-3. 
+1.
+2.
+3.
 
 ## Expected behavior
 
@@ -597,6 +609,7 @@ git commit -m "chore: add GitHub issue templates and PR template"
 ## Task 7: CI Workflow
 
 **Files:**
+
 - Create: `.github/workflows/ci.yml`
 
 - [ ] **Step 1: Write ci.yml**
@@ -697,6 +710,7 @@ git checkout main
 ## Task 8: Export Brand Icons
 
 **Files:**
+
 - Create: `docs/brand/icons/` — 32x32, 128x128, 256x256, 512x512 PNGs, icon.icns, icon.ico
 
 - [ ] **Step 1: Install rsvg-convert**
@@ -722,6 +736,7 @@ done
 ```
 
 Verify:
+
 ```bash
 ls -lh docs/brand/icons/
 ```
@@ -740,6 +755,7 @@ iconutil -c icns docs/brand/icons/SessionsVault.iconset -o docs/brand/icons/icon
 ```
 
 Verify:
+
 ```bash
 ls -lh docs/brand/icons/icon.icns
 ```
@@ -756,6 +772,7 @@ convert docs/brand/icons/32x32.png \
 ```
 
 Verify:
+
 ```bash
 ls -lh docs/brand/icons/icon.ico
 ```
@@ -862,6 +879,7 @@ git commit -m "docs: fix CI badge URL with correct GitHub username"
 - [ ] **Step 1: Final review pass**
 
 Check every file for:
+
 - `<yourname>` placeholder — replace with real GitHub username
 - Any local paths (e.g. `/Users/...`) that shouldn't be committed
 - Correct name in LICENSE (`Tomer Laor`) and CODE_OF_CONDUCT (`tomerlaor@gmail.com`)
@@ -905,12 +923,13 @@ gh release create v0.1.0-pre \
 - [ ] **Step 5: Share**
 
 Post to:
+
 - [r/ableton](https://reddit.com/r/ableton)
 - [r/WeAreTheMusicMakers](https://reddit.com/r/WeAreTheMusicMakers)
 - [r/rust](https://reddit.com/r/rust)
 - [r/tauri](https://reddit.com/r/tauri)
 
-Suggested post title: *"Building SessionsVault — open source DAW project organizer (Tauri + Rust + React). Looking for early feedback and contributors."*
+Suggested post title: _"Building SessionsVault — open source DAW project organizer (Tauri + Rust + React). Looking for early feedback and contributors."_
 
 ---
 
@@ -919,6 +938,7 @@ Suggested post title: *"Building SessionsVault — open source DAW project organ
 ## Task 11: Versioning & Release-Please Setup
 
 **Files:**
+
 - Create: `.github/workflows/release-please.yml`
 - Create: `release-please-config.json`
 - Create: `.release-please-manifest.json`
@@ -937,11 +957,11 @@ Create `release-please-config.json` at project root:
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "changelog-sections": [
-        {"type": "feat", "section": "Features"},
-        {"type": "fix", "section": "Bug Fixes"},
-        {"type": "chore", "section": "Miscellaneous", "hidden": true},
-        {"type": "docs", "section": "Documentation", "hidden": true},
-        {"type": "ci", "section": "CI", "hidden": true}
+        { "type": "feat", "section": "Features" },
+        { "type": "fix", "section": "Bug Fixes" },
+        { "type": "chore", "section": "Miscellaneous", "hidden": true },
+        { "type": "docs", "section": "Documentation", "hidden": true },
+        { "type": "ci", "section": "CI", "hidden": true }
       ]
     }
   }
@@ -1005,6 +1025,7 @@ Expected: `Release Please` appears in the list.
 ## Task 12: Release Build Workflow (macOS .dmg)
 
 **Files:**
+
 - Create: `.github/workflows/release-build.yml`
 
 - [ ] **Step 1: Write release-build.yml**
@@ -1082,6 +1103,7 @@ Expected: `Release Build` appears in the list.
 ## Task 13: Install Instructions in README
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Add Install section to README.md**
@@ -1094,7 +1116,7 @@ Open `README.md` and insert the following section between the `## Screenshot` se
 Download the latest `.dmg` from the [Releases page](https://github.com/tomerlaor/sessions-vault/releases).
 
 1. Open the `.dmg` and drag **SessionsVault** to your Applications folder
-2. On first launch, macOS may show *"SessionsVault can't be opened because it is from an unidentified developer"*
+2. On first launch, macOS may show _"SessionsVault can't be opened because it is from an unidentified developer"_
 3. To bypass: right-click the app icon → **Open** → **Open** again in the dialog
 4. You only need to do this once — subsequent launches work normally
 

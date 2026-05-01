@@ -33,6 +33,7 @@ pub fn zip_project(
 ```
 
 After the existing `.als` + `.dawmgr` logic, for each field:
+
 - If the value is `Some(s)` and `s` is non-empty after trimming → write as a zip entry (`lyrics.txt`, `tabs.txt`, `todos.txt`)
 - Otherwise → skip (no empty files in the zip)
 
@@ -75,9 +76,9 @@ At each call site for `backup_local` / `backup_gdrive`, pass the current project
 
 ## Files to Change
 
-| File | Change |
-|---|---|
-| `src-tauri/src/backup/mod.rs` | Add three `Option<&str>` params to `zip_project`; write text entries |
-| `src-tauri/src/backup/local.rs` | Pass params through to `zip_project` |
-| `src-tauri/src/commands.rs` | Add `Option<String>` params to `backup_local` and `backup_gdrive` |
-| Frontend backup call sites | Pass `lyrics`, `tabs`, `todos` from project state |
+| File                            | Change                                                               |
+| ------------------------------- | -------------------------------------------------------------------- |
+| `src-tauri/src/backup/mod.rs`   | Add three `Option<&str>` params to `zip_project`; write text entries |
+| `src-tauri/src/backup/local.rs` | Pass params through to `zip_project`                                 |
+| `src-tauri/src/commands.rs`     | Add `Option<String>` params to `backup_local` and `backup_gdrive`    |
+| Frontend backup call sites      | Pass `lyrics`, `tabs`, `todos` from project state                    |

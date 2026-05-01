@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS attachments (
 ```
 
 **Type** is inferred from extension at attach time:
+
 - `lyrics`: `.txt`, `.md`, `.rtf`
 - `tab`: `.gp`, `.gpx`, `.gp5`, `.pdf`
 - `audio`: `.mp3`, `.wav`, `.aiff`, `.m4a`, `.flac`
@@ -52,13 +53,13 @@ New table definition added to `src/db/schema.ts`.
 
 ```ts
 export interface Attachment {
-  id: string
-  projectId: string
-  type: 'lyrics' | 'tab' | 'audio' | 'image' | 'other'
-  filePath: string
-  originalFilename: string
-  sizeBytes: number
-  createdAt: number
+  id: string;
+  projectId: string;
+  type: "lyrics" | "tab" | "audio" | "image" | "other";
+  filePath: string;
+  originalFilename: string;
+  sizeBytes: number;
+  createdAt: number;
 }
 ```
 
@@ -124,15 +125,17 @@ removeAttachment(id: string): Promise<void>
 **Location:** `src/components/detail/tabs/FilesTab.tsx`
 
 **Props:**
+
 ```ts
 interface Props {
-  project: Project
+  project: Project;
 }
 ```
 
 **State:** fetches attachments on mount and after add/remove via local `reload()`.
 
 **Layout:**
+
 - Header row: "Files" label + "Attach file" button (right-aligned)
 - Clicking "Attach file":
   1. Opens `@tauri-apps/plugin-dialog` file picker (no filter — any file)

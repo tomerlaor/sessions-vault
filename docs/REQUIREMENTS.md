@@ -11,6 +11,7 @@ Stories are added via the `feature-to-user-story` skill.
 As a music creator, I want to select the musical key (root note) of a project from a picklist so that I can accurately tag and later search/filter my projects by key.
 
 **Acceptance Criteria:**
+
 - [ ] The project detail view includes a "Key" field with a dropdown picklist
 - [ ] The picklist contains exactly 12 options: C, C#, D, D#, E, F, F#, G, G#, A, A#, B
 - [ ] The selected key is saved to the project record in the local database

@@ -31,7 +31,10 @@ fn build_auth_url(client_id: &str, redirect_uri: &str, challenge: &str) -> Strin
 
 /// Starts the PKCE OAuth flow: opens a browser and waits for the redirect.
 /// Blocks (run via spawn_blocking) until the user completes the flow.
-pub fn start_auth_sync(client_id: &str, client_secret: &str) -> Result<super::GDriveTokens, String> {
+pub fn start_auth_sync(
+    client_id: &str,
+    client_secret: &str,
+) -> Result<super::GDriveTokens, String> {
     let (verifier, challenge) = generate_pkce();
 
     // Find a free port
@@ -50,8 +53,8 @@ pub fn start_auth_sync(client_id: &str, client_secret: &str) -> Result<super::GD
 
     // Wait for redirect
     let request = server.recv().map_err(|e| format!("OAuth server: {e}"))?;
-    let url = Url::parse(&format!("http://localhost{}", request.url()))
-        .map_err(|e| e.to_string())?;
+    let url =
+        Url::parse(&format!("http://localhost{}", request.url())).map_err(|e| e.to_string())?;
 
     let code = url
         .query_pairs()
@@ -158,7 +161,11 @@ pub async fn refresh_token(
 // ── Upload ────────────────────────────────────────────────────────────────────
 
 /// Uploads the zip to Google Drive. Returns the Drive file ID.
-pub async fn upload(zip_path: &Path, file_name: &str, access_token: &str) -> Result<String, String> {
+pub async fn upload(
+    zip_path: &Path,
+    file_name: &str,
+    access_token: &str,
+) -> Result<String, String> {
     let client = reqwest::Client::new();
     let folder_id = ensure_folder(&client, access_token).await?;
     upload_file(&client, access_token, zip_path, file_name, &folder_id).await

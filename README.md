@@ -21,14 +21,13 @@ SessionsVault is a local-first desktop app for music creators to organize, searc
 Download the latest `.dmg` from the [Releases page](https://github.com/tomerlaor/sessions-vault/releases).
 
 1. Open the `.dmg` and drag **SessionsVault** to your Applications folder
-2. On first launch, macOS may show *"SessionsVault can't be opened because it is from an unidentified developer"*
+2. On first launch, macOS may show _"SessionsVault can't be opened because it is from an unidentified developer"_
 3. To bypass: right-click the app icon → **Open** → **Open** again in the dialog
 4. You only need to do this once — subsequent launches work normally
 
 > SessionsVault is open source (Apache 2.0). The app is not yet notarized with Apple. [View the source](https://github.com/tomerlaor/sessions-vault) if you'd like to verify it yourself or build from source.
 
 ---
-
 
 ## Features (v1)
 
@@ -45,20 +44,21 @@ Full requirements: [REQUIREMENTS_1.md](./docs/REQUIREMENTS_1.md)
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Desktop shell | [Tauri 2.x](https://tauri.app) |
-| Frontend | React + TypeScript + Tailwind |
-| Backend | Rust |
-| Local database | SQLite (`rusqlite` / `sqlx`) |
-| `.als` parsing | `flate2` + `quick-xml` |
-| Cloud sync | Dropbox API, Google Drive API, AWS S3 SDK |
+| Layer          | Technology                                |
+| -------------- | ----------------------------------------- |
+| Desktop shell  | [Tauri 2.x](https://tauri.app)            |
+| Frontend       | React + TypeScript + Tailwind             |
+| Backend        | Rust                                      |
+| Local database | SQLite (`rusqlite` / `sqlx`)              |
+| `.als` parsing | `flate2` + `quick-xml`                    |
+| Cloud sync     | Dropbox API, Google Drive API, AWS S3 SDK |
 
 ---
 
 ## Building Locally
 
 **Requirements:**
+
 - [Rust](https://rustup.rs) 1.75+
 - [Node.js](https://nodejs.org) 20+
 

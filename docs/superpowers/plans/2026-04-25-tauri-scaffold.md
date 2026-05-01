@@ -12,24 +12,24 @@
 
 ## File Map
 
-| File | Purpose |
-|---|---|
-| `src/main.tsx` | React entry point (from scaffold) |
-| `src/App.tsx` | App shell — minimal placeholder, mounts AboutWindow |
-| `src/index.css` | Tailwind directives |
-| `src/components/AboutWindow.tsx` | About modal component |
-| `src/components/AboutWindow.css` | Track motif styles |
-| `src-tauri/tauri.conf.json` | App name, bundle ID, icons, window size |
-| `src-tauri/src/lib.rs` | Tauri Builder — registers Help menu, emits show-about |
-| `src-tauri/src/main.rs` | Thin entry point (from scaffold, unchanged) |
-| `src-tauri/Cargo.toml` | Rust dependencies (from scaffold) |
-| `src-tauri/icons/` | Brand icons copied from docs/brand/icons/ |
-| `src-tauri/capabilities/default.json` | Tauri capability permissions |
-| `package.json` | Node dependencies (from scaffold) |
-| `tailwind.config.js` | Tailwind content paths |
-| `postcss.config.js` | PostCSS config |
-| `vite.config.ts` | Vite config (from scaffold, unchanged) |
-| `tsconfig.json` | TypeScript config (from scaffold, unchanged) |
+| File                                  | Purpose                                               |
+| ------------------------------------- | ----------------------------------------------------- |
+| `src/main.tsx`                        | React entry point (from scaffold)                     |
+| `src/App.tsx`                         | App shell — minimal placeholder, mounts AboutWindow   |
+| `src/index.css`                       | Tailwind directives                                   |
+| `src/components/AboutWindow.tsx`      | About modal component                                 |
+| `src/components/AboutWindow.css`      | Track motif styles                                    |
+| `src-tauri/tauri.conf.json`           | App name, bundle ID, icons, window size               |
+| `src-tauri/src/lib.rs`                | Tauri Builder — registers Help menu, emits show-about |
+| `src-tauri/src/main.rs`               | Thin entry point (from scaffold, unchanged)           |
+| `src-tauri/Cargo.toml`                | Rust dependencies (from scaffold)                     |
+| `src-tauri/icons/`                    | Brand icons copied from docs/brand/icons/             |
+| `src-tauri/capabilities/default.json` | Tauri capability permissions                          |
+| `package.json`                        | Node dependencies (from scaffold)                     |
+| `tailwind.config.js`                  | Tailwind content paths                                |
+| `postcss.config.js`                   | PostCSS config                                        |
+| `vite.config.ts`                      | Vite config (from scaffold, unchanged)                |
+| `tsconfig.json`                       | TypeScript config (from scaffold, unchanged)          |
 
 ---
 
@@ -47,6 +47,7 @@ npx create-tauri-app@latest sessions-vault-tmp -- --template react-ts --manager 
 ```
 
 If it prompts interactively, answer:
+
 - Project name: `sessions-vault-tmp` (or press Enter)
 - Choose template: `react-ts`
 - Package manager: `npm`
@@ -113,6 +114,7 @@ Expected: `api`, `cli`, `plugin-opener` (or similar) directories present.
 ## Task 3: Configure tauri.conf.json
 
 **Files:**
+
 - Modify: `src-tauri/tauri.conf.json`
 
 - [ ] **Step 1: Read the scaffold-generated tauri.conf.json**
@@ -177,6 +179,7 @@ git commit -m "feat: scaffold Tauri 2.x + React + TypeScript project"
 ## Task 4: Wire Brand Icons
 
 **Files:**
+
 - Create: `src-tauri/icons/` (contents copied from `docs/brand/icons/`)
 
 - [ ] **Step 1: Copy icons, renaming 256x256.png → 128x128@2x.png**
@@ -212,6 +215,7 @@ git commit -m "chore: wire brand icons into src-tauri/icons"
 ## Task 5: Install and Configure Tailwind CSS v3
 
 **Files:**
+
 - Create: `tailwind.config.js`
 - Create: `postcss.config.js`
 - Modify: `src/index.css`
@@ -241,15 +245,12 @@ Replace contents of `tailwind.config.js`:
 ```js
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {},
   },
   plugins: [],
-}
+};
 ```
 
 - [ ] **Step 4: Replace src/index.css with Tailwind directives**
@@ -267,16 +268,16 @@ Replace entire contents of `src/index.css`:
 Read `src/main.tsx` and confirm it contains `import './index.css'`. If not, add it:
 
 ```tsx
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import App from './App.tsx'
-import './index.css'
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App.tsx";
+import "./index.css";
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>,
-)
+);
 ```
 
 - [ ] **Step 6: Commit**
@@ -292,6 +293,7 @@ git commit -m "chore: install and configure Tailwind CSS v3"
 ## Task 6: Replace App.tsx with Minimal Placeholder
 
 **Files:**
+
 - Modify: `src/App.tsx`
 
 - [ ] **Step 1: Write minimal App.tsx**
@@ -299,7 +301,7 @@ git commit -m "chore: install and configure Tailwind CSS v3"
 Replace entire contents of `src/App.tsx`:
 
 ```tsx
-import './App.css'
+import "./App.css";
 
 function App() {
   return (
@@ -308,10 +310,10 @@ function App() {
         SessionsVault — coming soon
       </p>
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
 ```
 
 - [ ] **Step 2: Clear App.css**
@@ -319,6 +321,7 @@ export default App
 Replace entire contents of `src/App.css` with empty (Tailwind handles styling):
 
 ```css
+
 ```
 
 - [ ] **Step 3: Commit**
@@ -334,6 +337,7 @@ git commit -m "chore: replace scaffold placeholder with minimal app shell"
 ## Task 7: Implement AboutWindow Component
 
 **Files:**
+
 - Create: `src/components/AboutWindow.tsx`
 - Create: `src/components/AboutWindow.css`
 
@@ -407,7 +411,7 @@ Create `src/components/AboutWindow.css`:
   letter-spacing: 0.5px;
   margin: 0 0 4px;
   line-height: 1;
-  font-family: -apple-system, 'Helvetica Neue', sans-serif;
+  font-family: -apple-system, "Helvetica Neue", sans-serif;
 }
 
 .about-name span {
@@ -463,42 +467,44 @@ Create `src/components/AboutWindow.css`:
 Create `src/components/AboutWindow.tsx`:
 
 ```tsx
-import { useEffect, useState, useCallback } from 'react'
-import { getVersion } from '@tauri-apps/api/app'
-import { open } from '@tauri-apps/plugin-opener'
-import './AboutWindow.css'
+import { useEffect, useState, useCallback } from "react";
+import { getVersion } from "@tauri-apps/api/app";
+import { open } from "@tauri-apps/plugin-opener";
+import "./AboutWindow.css";
 
 interface Props {
-  onClose: () => void
+  onClose: () => void;
 }
 
 export function AboutWindow({ onClose }: Props) {
-  const [version, setVersion] = useState('...')
+  const [version, setVersion] = useState("...");
 
   useEffect(() => {
-    getVersion().then(setVersion)
-  }, [])
+    getVersion().then(setVersion);
+  }, []);
 
   const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() },
-    [onClose]
-  )
+    (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    },
+    [onClose],
+  );
 
   useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleKeyDown])
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
 
   return (
     <div className="about-overlay" onClick={onClose}>
-      <div className="about-modal" onClick={e => e.stopPropagation()}>
+      <div className="about-modal" onClick={(e) => e.stopPropagation()}>
         <div className="about-tracks" aria-hidden="true">
-          <div className="about-track" style={{ width: '78%' }} />
-          <div className="about-track" style={{ width: '44%' }} />
-          <div className="about-track" style={{ width: '63%' }} />
-          <div className="about-track" style={{ width: '29%' }} />
-          <div className="about-track" style={{ width: '71%' }} />
-          <div className="about-track" style={{ width: '50%' }} />
+          <div className="about-track" style={{ width: "78%" }} />
+          <div className="about-track" style={{ width: "44%" }} />
+          <div className="about-track" style={{ width: "63%" }} />
+          <div className="about-track" style={{ width: "29%" }} />
+          <div className="about-track" style={{ width: "71%" }} />
+          <div className="about-track" style={{ width: "50%" }} />
         </div>
 
         <div className="about-content">
@@ -510,15 +516,47 @@ export function AboutWindow({ onClose }: Props) {
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
           >
-            <rect x="0"  y="0"  width="36" height="8" rx="2" fill="#ff5a00" />
-            <rect x="40" y="0"  width="12" height="8" rx="2" fill="#ff5a00" opacity="0.3" />
-            <rect x="0"  y="13" width="18" height="8" rx="2" fill="#2a2a2a" />
+            <rect x="0" y="0" width="36" height="8" rx="2" fill="#ff5a00" />
+            <rect
+              x="40"
+              y="0"
+              width="12"
+              height="8"
+              rx="2"
+              fill="#ff5a00"
+              opacity="0.3"
+            />
+            <rect x="0" y="13" width="18" height="8" rx="2" fill="#2a2a2a" />
             <rect x="22" y="13" width="30" height="8" rx="2" fill="#2a2a2a" />
-            <rect x="0"  y="26" width="26" height="8" rx="2" fill="#ff5a00" opacity="0.6" />
+            <rect
+              x="0"
+              y="26"
+              width="26"
+              height="8"
+              rx="2"
+              fill="#ff5a00"
+              opacity="0.6"
+            />
             <rect x="30" y="26" width="22" height="8" rx="2" fill="#2a2a2a" />
-            <rect x="0"  y="39" width="12" height="8" rx="2" fill="#2a2a2a" />
-            <rect x="16" y="39" width="36" height="8" rx="2" fill="#ff5a00" opacity="0.85" />
-            <rect x="0"  y="52" width="22" height="8" rx="2" fill="#ff5a00" opacity="0.35" />
+            <rect x="0" y="39" width="12" height="8" rx="2" fill="#2a2a2a" />
+            <rect
+              x="16"
+              y="39"
+              width="36"
+              height="8"
+              rx="2"
+              fill="#ff5a00"
+              opacity="0.85"
+            />
+            <rect
+              x="0"
+              y="52"
+              width="22"
+              height="8"
+              rx="2"
+              fill="#ff5a00"
+              opacity="0.35"
+            />
             <rect x="26" y="52" width="26" height="8" rx="2" fill="#2a2a2a" />
           </svg>
 
@@ -531,13 +569,17 @@ export function AboutWindow({ onClose }: Props) {
           <div className="about-links">
             <button
               className="about-link"
-              onClick={() => open('https://www.apache.org/licenses/LICENSE-2.0')}
+              onClick={() =>
+                open("https://www.apache.org/licenses/LICENSE-2.0")
+              }
             >
               License ↗
             </button>
             <button
               className="about-link"
-              onClick={() => open('https://github.com/tomerlaor/sessions-vault')}
+              onClick={() =>
+                open("https://github.com/tomerlaor/sessions-vault")
+              }
             >
               GitHub ↗
             </button>
@@ -548,7 +590,7 @@ export function AboutWindow({ onClose }: Props) {
         </div>
       </div>
     </div>
-  )
+  );
 }
 ```
 
@@ -565,6 +607,7 @@ git commit -m "feat: add AboutWindow component — Bold & Branded design"
 ## Task 8: Register Help Menu and Event in lib.rs
 
 **Files:**
+
 - Modify: `src-tauri/src/lib.rs`
 
 - [ ] **Step 1: Read current lib.rs**
@@ -621,6 +664,7 @@ git commit -m "feat: register Help → About menu item, emit show-about event"
 ## Task 9: Wire AboutWindow in App.tsx
 
 **Files:**
+
 - Modify: `src/App.tsx`
 
 - [ ] **Step 1: Update App.tsx to listen for show-about and mount AboutWindow**
@@ -628,19 +672,21 @@ git commit -m "feat: register Help → About menu item, emit show-about event"
 Replace entire contents of `src/App.tsx`:
 
 ```tsx
-import { useEffect, useState, useCallback } from 'react'
-import { listen } from '@tauri-apps/api/event'
-import { AboutWindow } from './components/AboutWindow'
-import './App.css'
+import { useEffect, useState, useCallback } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { AboutWindow } from "./components/AboutWindow";
+import "./App.css";
 
 function App() {
-  const [showAbout, setShowAbout] = useState(false)
-  const closeAbout = useCallback(() => setShowAbout(false), [])
+  const [showAbout, setShowAbout] = useState(false);
+  const closeAbout = useCallback(() => setShowAbout(false), []);
 
   useEffect(() => {
-    const promise = listen('show-about', () => setShowAbout(true))
-    return () => { promise.then(unlisten => unlisten()) }
-  }, [])
+    const promise = listen("show-about", () => setShowAbout(true));
+    return () => {
+      promise.then((unlisten) => unlisten());
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#111111] flex items-center justify-center">
@@ -649,10 +695,10 @@ function App() {
       </p>
       {showAbout && <AboutWindow onClose={closeAbout} />}
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
 ```
 
 - [ ] **Step 2: Commit**
@@ -668,6 +714,7 @@ git commit -m "feat: wire About window into app shell via show-about event"
 ## Task 10: Add opener permission to Tauri capability
 
 **Files:**
+
 - Modify: `src-tauri/capabilities/default.json`
 
 - [ ] **Step 1: Read current capabilities file**
@@ -686,10 +733,7 @@ The file should look like this (preserve any existing permissions, add `opener:d
   "identifier": "default",
   "description": "Capability for the main window",
   "windows": ["main"],
-  "permissions": [
-    "core:default",
-    "opener:default"
-  ]
+  "permissions": ["core:default", "opener:default"]
 }
 ```
 
@@ -721,6 +765,7 @@ npm run tauri dev
 ```
 
 Expected:
+
 - Vite dev server starts on `http://localhost:1420`
 - Rust compiles (first run takes ~2–5 minutes)
 - App window opens titled "SessionsVault"

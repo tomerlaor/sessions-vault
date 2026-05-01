@@ -1,33 +1,37 @@
-import { nanoid } from 'nanoid'
-import type { ProjectMetadata } from '../types'
+import { nanoid } from "nanoid";
+import type { ProjectMetadata } from "../types";
 
 export interface UpsertRow {
-  id: string
-  filePath: string
-  fileHash: string
-  title: string
-  daw: string
-  dawVersion: string | null
-  bpm: number | null
-  key: string | null
-  timeSignature: string | null
-  trackCount: number | null
-  durationSecs: number | null
-  sizeBytes: number
-  status: 'draft' | 'mixed' | 'released' | 'archived'
-  rating: number | null
-  notes: string | null
-  createdAt: number
-  modifiedAt: number
-  lastScannedAt: number
+  id: string;
+  filePath: string;
+  fileHash: string;
+  title: string;
+  daw: string;
+  dawVersion: string | null;
+  bpm: number | null;
+  key: string | null;
+  timeSignature: string | null;
+  trackCount: number | null;
+  durationSecs: number | null;
+  sizeBytes: number;
+  status: "draft" | "mixed" | "released" | "archived";
+  rating: number | null;
+  notes: string | null;
+  createdAt: number;
+  modifiedAt: number;
+  lastScannedAt: number;
 }
 
-export function buildUpsertRow(meta: ProjectMetadata, existingTitle: string | null): UpsertRow {
-  const derivedTitle = meta.filePath
-    .split('/')
-    .pop()
-    ?.replace(/\.[^.]+$/, '')
-    ?.replace(/[-_]/g, ' ') ?? 'Untitled'
+export function buildUpsertRow(
+  meta: ProjectMetadata,
+  existingTitle: string | null,
+): UpsertRow {
+  const derivedTitle =
+    meta.filePath
+      .split("/")
+      .pop()
+      ?.replace(/\.[^.]+$/, "")
+      ?.replace(/[-_]/g, " ") ?? "Untitled";
 
   return {
     id: nanoid(),
@@ -42,11 +46,11 @@ export function buildUpsertRow(meta: ProjectMetadata, existingTitle: string | nu
     trackCount: meta.trackCount,
     durationSecs: meta.durationSecs,
     sizeBytes: meta.sizeBytes,
-    status: 'draft',
+    status: "draft",
     rating: null,
     notes: null,
     createdAt: meta.createdAt,
     modifiedAt: meta.modifiedAt,
     lastScannedAt: Math.floor(Date.now() / 1000),
-  }
+  };
 }

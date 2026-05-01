@@ -12,14 +12,14 @@ Pre-development. `REQUIREMENTS_1.md` is the authoritative spec. No code exists y
 
 ## Planned tech stack
 
-| Layer | Choice |
-|---|---|
-| Desktop shell | Tauri 2.x |
-| Frontend | React + TypeScript + Tailwind |
-| Backend (Rust) | Tauri commands, filesystem, cloud sync |
-| Local DB | SQLite via `rusqlite` or `sqlx` |
-| `.als` parsing | `flate2` (gzip) + `quick-xml` (Ableton files are gzipped XML) |
-| Cloud | Dropbox API, Google Drive API, AWS S3 SDK — behind a `CloudProvider` trait |
+| Layer          | Choice                                                                             |
+| -------------- | ---------------------------------------------------------------------------------- |
+| Desktop shell  | Tauri 2.x                                                                          |
+| Frontend       | React + TypeScript + Tailwind                                                      |
+| Backend (Rust) | Tauri commands, filesystem, cloud sync                                             |
+| Local DB       | SQLite via `rusqlite` or `sqlx`                                                    |
+| `.als` parsing | `flate2` (gzip) + `quick-xml` (Ableton files are gzipped XML)                      |
+| Cloud          | Dropbox API, Google Drive API, AWS S3 SDK — behind a `CloudProvider` trait         |
 | OS credentials | OS keychain (Keychain on macOS, Credential Manager on Windows, libsecret on Linux) |
 
 ## Architecture principles from the spec

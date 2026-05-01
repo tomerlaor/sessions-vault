@@ -12,7 +12,9 @@ fn is_daw_file(path: &std::path::Path) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| {
             let lower = e.to_lowercase();
-            crate::scanner::DAW_EXTENSIONS.iter().any(|(ext, _)| *ext == lower.as_str())
+            crate::scanner::DAW_EXTENSIONS
+                .iter()
+                .any(|(ext, _)| *ext == lower.as_str())
         })
         .unwrap_or(false)
 }
@@ -35,9 +37,7 @@ pub fn start(paths: Vec<String>, app: AppHandle) {
                         if crate::scanner::is_backup_path(path) {
                             continue;
                         }
-                        let ext = path.extension()
-                            .and_then(|e| e.to_str())
-                            .unwrap_or("");
+                        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                         let lower = ext.to_lowercase();
                         let daw = crate::scanner::DAW_EXTENSIONS
                             .iter()
@@ -48,18 +48,19 @@ pub fn start(paths: Vec<String>, app: AppHandle) {
                             let _ = app_clone.emit("project:updated", meta);
                         }
                     } else {
-                        let _ = app_clone.emit("project:deleted", path.to_string_lossy().to_string());
+                        let _ =
+                            app_clone.emit("project:deleted", path.to_string_lossy().to_string());
                     }
                 }
             }
-        }
-    ).expect("failed to create watcher");
+        },
+    )
+    .expect("failed to create watcher");
 
     for path in &paths {
-        let _ = debouncer.watcher().watch(
-            std::path::Path::new(path),
-            RecursiveMode::Recursive,
-        );
+        let _ = debouncer
+            .watcher()
+            .watch(std::path::Path::new(path), RecursiveMode::Recursive);
     }
 
     *handle.lock().unwrap() = Some(debouncer);
@@ -68,10 +69,9 @@ pub fn start(paths: Vec<String>, app: AppHandle) {
 pub fn add_path(path: &str) {
     if let Some(handle) = WATCHER.get() {
         if let Some(ref mut debouncer) = *handle.lock().unwrap() {
-            let _ = debouncer.watcher().watch(
-                std::path::Path::new(path),
-                RecursiveMode::Recursive,
-            );
+            let _ = debouncer
+                .watcher()
+                .watch(std::path::Path::new(path), RecursiveMode::Recursive);
         }
     }
 }
