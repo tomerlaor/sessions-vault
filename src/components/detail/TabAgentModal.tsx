@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { getAIConfig } from "../../db/queries/ai";
-import { generateTabStructure } from "../../lib/ai";
+import { generateTabStructure, chatWithTabAgent } from "../../lib/ai";
 import { parseLyricsStructure } from "../../lib/lyrics-structure";
 import type { Project, TabPart, Instrument, AIConfig } from "../../types";
 
@@ -65,11 +65,20 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
   const [lyricsHint, setLyricsHint] = useState<
     { name: string; chords: string }[]
   >([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatSending, setChatSending] = useState(false);
+  const chatRef = useRef<HTMLDivElement>(null);
 
   const addAgent = (text: string) =>
     setMessages((m) => [...m, { role: "agent", text }]);
   const addUser = (text: string) =>
     setMessages((m) => [...m, { role: "user", text }]);
+
+  useEffect(() => {
+    if (chatRef.current) {
+      chatRef.current.scrollTop = chatRef.current.scrollHeight;
+    }
+  }, [messages, chatSending]);
 
   useEffect(() => {
     getAIConfig().then((cfg) => {
@@ -214,6 +223,33 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
     onClose();
   };
 
+  const sendFreeformMessage = async () => {
+    const text = chatInput.trim();
+    if (!text || !aiCfg || chatSending) return;
+    setChatInput("");
+    addUser(text);
+    setChatSending(true);
+    try {
+      const sectionCtx =
+        lyricsHint.length > 0
+          ? `\nSections in this project's lyrics:\n${lyricsHint.map((s) => `• ${s.name}${s.chords ? ` — ${s.chords}` : ""}`).join("\n")}`
+          : "";
+      const system = `You are a music tab structure assistant. Help the user generate or refine guitar/bass/drums tab structures. Be concise and practical.${sectionCtx}`;
+      const history: { role: "user" | "assistant"; content: string }[] =
+        messages.map((m) => ({
+          role: m.role === "agent" ? "assistant" : "user",
+          content: m.text,
+        }));
+      history.push({ role: "user", content: text });
+      const reply = await chatWithTabAgent(aiCfg, system, history);
+      addAgent(reply);
+    } catch (e) {
+      addAgent(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setChatSending(false);
+    }
+  };
+
   return (
     <div
       className="agent-overlay"
@@ -234,7 +270,7 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
         </div>
 
         {/* Chat history */}
-        <div className="agent-chat">
+        <div className="agent-chat" ref={chatRef}>
           {step === "loading" && (
             <div className="agent-thinking">Analysing your project…</div>
           )}
@@ -254,12 +290,14 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
             <Bubble key={i} msg={msg} />
           ))}
 
-          {step === "generating" && (
-            <div className="agent-thinking">Calling AI…</div>
+          {(step === "generating" || chatSending) && (
+            <div className="agent-thinking">
+              {chatSending ? "Thinking…" : "Calling AI…"}
+            </div>
           )}
         </div>
 
-        {/* Input area — changes per step */}
+        {/* Step controls — guided shortcuts, changes per step */}
         <div className="agent-input-area">
           {step === "section" && (
             <SectionStep
@@ -343,6 +381,41 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
               </button>
             </div>
           )}
+        </div>
+
+        {/* Compose bar — always visible */}
+        <div className="agent-compose">
+          <input
+            className="agent-text-input"
+            placeholder="Ask anything… (e.g. 'add a bridge section with funk feel')"
+            value={chatInput}
+            disabled={
+              chatSending ||
+              step === "loading" ||
+              step === "no-config" ||
+              step === "generating"
+            }
+            onChange={(e) => setChatInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendFreeformMessage();
+              }
+            }}
+          />
+          <button
+            className="agent-send-btn"
+            disabled={
+              !chatInput.trim() ||
+              chatSending ||
+              step === "loading" ||
+              step === "no-config" ||
+              step === "generating"
+            }
+            onClick={sendFreeformMessage}
+          >
+            {chatSending ? "…" : "↑"}
+          </button>
         </div>
       </div>
     </div>

@@ -1144,6 +1144,35 @@ textarea {
   flex-direction: column;
   gap: 6px;
 }
+.agent-compose {
+  display: flex;
+  gap: 6px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--line-2);
+  background: var(--bg-1);
+  flex-shrink: 0;
+}
+.agent-send-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-m);
+  background: var(--accent);
+  color: #1a0a00;
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity 120ms;
+}
+.agent-send-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.agent-send-btn:not(:disabled):hover {
+  opacity: 0.85;
+}
 .agent-choice-btn {
   display: flex;
   align-items: center;
