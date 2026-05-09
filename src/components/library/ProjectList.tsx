@@ -42,6 +42,7 @@ interface ProjectListProps {
   onReveal: (p: Project) => void;
   onOpen: (p: Project) => void;
   onStar: (p: Project) => void;
+  onArchive: (p: Project) => void;
   label: string;
 }
 
@@ -54,6 +55,7 @@ export default function ProjectList({
   onReveal,
   onOpen,
   onStar,
+  onArchive,
   label,
 }: ProjectListProps) {
   const sortIcon = (key: string) =>
@@ -96,6 +98,7 @@ export default function ProjectList({
                 onReveal={() => onReveal(p)}
                 onOpen={() => onOpen(p)}
                 onStar={() => onStar(p)}
+                onArchive={() => onArchive(p)}
               />
             ))}
             {projects.length === 0 && (

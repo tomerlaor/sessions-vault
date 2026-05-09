@@ -1,3 +1,5 @@
+import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import Icon from "../shared/Icon";
 import WaveArt from "../shared/WaveArt";
 import type { Project } from "../../types";
@@ -26,6 +28,7 @@ interface ProjectRowProps {
   onReveal: () => void;
   onOpen: () => void;
   onStar: () => void;
+  onArchive: () => void;
 }
 
 export default function ProjectRow({
@@ -37,9 +40,33 @@ export default function ProjectRow({
   onReveal,
   onOpen,
   onStar,
+  onArchive,
 }: ProjectRowProps) {
   const starred = p.rating != null && p.rating > 0;
   const daw = DAWS[p.daw] ?? { name: p.daw, color: "#888" };
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState({ top: 0, right: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen]);
+
+  const handleMoreClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!btnRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    setMenuOpen((o) => !o);
+  };
   const modifiedDate = new Date(p.modifiedAt * 1000).toLocaleDateString(
     "en-US",
     { month: "short", day: "numeric" },
@@ -128,9 +155,42 @@ export default function ProjectRow({
           >
             <Icon name="folder" size={12} />
           </button>
-          <button className="row-btn" title="More">
+          <button
+            ref={btnRef}
+            className="row-btn"
+            title="More"
+            onClick={handleMoreClick}
+          >
             <Icon name="dots" size={12} />
           </button>
+          {menuOpen &&
+            createPortal(
+              <div
+                ref={menuRef}
+                className="row-menu"
+                style={{ top: menuPos.top, right: menuPos.right }}
+              >
+                <button
+                  className="row-menu-item"
+                  onClick={() => {
+                    navigator.clipboard.writeText(p.filePath);
+                    setMenuOpen(false);
+                  }}
+                >
+                  Copy path
+                </button>
+                <button
+                  className="row-menu-item"
+                  onClick={() => {
+                    onArchive();
+                    setMenuOpen(false);
+                  }}
+                >
+                  {p.status === "archived" ? "Unarchive" : "Archive"}
+                </button>
+              </div>,
+              document.body,
+            )}
         </div>
       </td>
     </tr>
