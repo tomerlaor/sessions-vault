@@ -100,6 +100,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
     const [status, setStatus] = useState<
       "idle" | "loading" | "streaming" | "ready" | "error"
     >("idle");
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [popupItems, setPopupItems] = useState<PopupItem[]>([]);
 
     const [tagChipVisible, setTagChipVisible] = useState(false);
@@ -204,10 +205,11 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               setPopupItems(result.suggestions);
               setStatus("ready");
             }
-          } catch {
+          } catch (err) {
             if (!aborted) {
+              setErrorMsg(err instanceof Error ? err.message : "AI request failed");
               setStatus("error");
-              setTimeout(() => setStatus("idle"), 3000);
+              setTimeout(() => { setStatus("idle"); setErrorMsg(null); }, 6000);
             }
           }
         } else {
@@ -236,11 +238,12 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
             } else if (!aborted) {
               setStatus("idle");
             }
-          } catch {
+          } catch (err) {
             if (!aborted) {
               setGhostText("");
+              setErrorMsg(err instanceof Error ? err.message : "AI request failed");
               setStatus("error");
-              setTimeout(() => setStatus("idle"), 3000);
+              setTimeout(() => { setStatus("idle"); setErrorMsg(null); }, 6000);
             }
           }
         }
@@ -367,6 +370,17 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
 
     if (!cfg.enabled) return null;
 
+    if (!aiConfig) {
+      return (
+        <div style={{
+          position: "absolute", right: 10, top: 8,
+          fontSize: 11, color: "var(--text-3)", pointerEvents: "none", zIndex: 5,
+        }}>
+          AI suggestions on — configure a provider in Settings
+        </div>
+      );
+    }
+
     return (
       <>
         {cfg.mode === "inline" && (
@@ -474,20 +488,23 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
           )}
 
         {status === "error" && (
-          <span
-            title="AI suggestion failed"
+          <div
             style={{
               position: "absolute",
-              right: 10,
-              top: 8,
-              fontSize: 13,
-              opacity: 0.6,
+              left: 0,
+              right: 0,
+              top: 0,
+              padding: "5px 10px",
+              fontSize: 11,
+              color: "#ff7a7a",
+              background: "rgba(255,60,60,0.08)",
+              borderBottom: "1px solid rgba(255,60,60,0.2)",
               pointerEvents: "none",
               zIndex: 5,
             }}
           >
-            ⚠
-          </span>
+            ⚠ AI error: {errorMsg ?? "request failed"} — check Settings → AI Assistant
+          </div>
         )}
 
         {tagChipVisible && (

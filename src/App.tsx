@@ -124,6 +124,14 @@ export default function App() {
     },
     [reload],
   );
+  const onArchive = useCallback(
+    async (p: Project) => {
+      const next = p.status === "archived" ? "draft" : "archived";
+      await updateProjectField(p.id, "status", next);
+      reload();
+    },
+    [reload],
+  );
 
   return (
     <div className="app">
@@ -287,6 +295,7 @@ export default function App() {
           onReveal={onReveal}
           onOpen={onOpen}
           onStar={onStar}
+          onArchive={onArchive}
         />
 
         {showDetail && selected && (

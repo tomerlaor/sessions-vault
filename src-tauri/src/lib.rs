@@ -2,6 +2,7 @@ mod backup;
 mod commands;
 mod parser;
 mod scanner;
+mod secrets;
 mod watcher;
 
 use tauri::menu::{Menu, MenuItem, Submenu};
