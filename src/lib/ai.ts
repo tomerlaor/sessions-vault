@@ -124,6 +124,21 @@ Return exactly ${input.instruments.length} part(s), one per requested instrument
   return result.object;
 }
 
+export async function chatWithTabAgent(
+  cfg: AIConfig,
+  system: string,
+  messages: { role: "user" | "assistant"; content: string }[],
+): Promise<string> {
+  const provider = buildProvider(cfg);
+  const result = await generateText({
+    model: provider,
+    system,
+    messages,
+    maxOutputTokens: 400,
+  });
+  return result.text.trim();
+}
+
 // ── Lyrics AI ─────────────────────────────────────────────────────────────────
 
 export async function* streamLyricsSuggestion(
