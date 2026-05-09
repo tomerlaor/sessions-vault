@@ -69,6 +69,7 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
+  const initialized = useRef(false);
 
   const addAgent = (text: string) =>
     setMessages((m) => [...m, { role: "agent", text }]);
@@ -82,6 +83,8 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
   }, [messages, chatSending]);
 
   useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
     getAIConfig().then((cfg) => {
       if (
         !cfg?.apiKey &&
