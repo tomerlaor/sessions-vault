@@ -13,6 +13,7 @@ interface Props {
 type Step =
   | "loading"
   | "no-config"
+  | "confirm"
   | "section"
   | "instruments"
   | "chords"
@@ -100,18 +101,19 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
 
       if (sections.length > 0) {
         addAgent(
-          `I found ${sections.length} section${sections.length > 1 ? "s" : ""} in your lyrics:\n` +
+          `Here is the song structure I identified:\n` +
             sections
               .map((s) => `• ${s.name}${s.chords ? ` — ${s.chords}` : ""}`)
               .join("\n") +
-            `\n\nWhich section would you like to generate a tab structure for?`,
+            `\n\nShall I proceed with creating the tab structure?`,
         );
+        setStep("confirm");
       } else {
         addAgent(
           "Let's build a tab structure. What's the name of this section? (e.g. Verse, Chorus, Bridge)",
         );
+        setStep("section");
       }
-      setStep("section");
     });
   }, [project.lyrics]);
 
@@ -299,6 +301,36 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
 
         {/* Step controls — guided shortcuts, changes per step */}
         <div className="agent-input-area">
+          {step === "confirm" && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="tb-btn primary"
+                style={{ flex: 1, justifyContent: "center" }}
+                onClick={() => {
+                  addUser("Yes, proceed");
+                  addAgent(
+                    "Which section would you like to start with?",
+                  );
+                  setStep("section");
+                }}
+              >
+                Proceed →
+              </button>
+              <button
+                className="tb-btn"
+                onClick={() => {
+                  addUser("Let me pick a different section");
+                  addAgent(
+                    "No problem — which section would you like to create tabs for?",
+                  );
+                  setStep("section");
+                }}
+              >
+                Customize
+              </button>
+            </div>
+          )}
+
           {step === "section" && (
             <SectionStep
               hints={lyricsHint}
