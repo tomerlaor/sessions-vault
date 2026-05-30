@@ -1042,6 +1042,208 @@ textarea {
   justify-content: center;
 }
 
+/* Tab grid editor */
+.tab-annotation-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+  min-height: 36px;
+}
+.tab-annotation-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.tab-annotation-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--line);
+  margin: 0 4px;
+}
+.tab-annotation-label {
+  font-size: 9px;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: 2px;
+  font-family: var(--font-sans, sans-serif);
+}
+.tab-annotation-btn {
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-2);
+  border-radius: 3px;
+  background: var(--bg-2);
+}
+.tab-annotation-btn:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+.tab-annotation-btn.active {
+  background: var(--accent);
+  color: #1a0a00;
+}
+.tab-annotation-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--accent);
+  font-family: var(--font-sans, sans-serif);
+}
+.tab-annotation-status button {
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+.tab-grid-wrap {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-0);
+}
+.tab-grid-scroll {
+  overflow-x: auto;
+  padding: 16px 12px 8px;
+}
+.tab-grid-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.tab-grid-label {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-3);
+  width: 22px;
+  text-align: right;
+  padding-right: 2px;
+  flex-shrink: 0;
+}
+.tab-grid-bar {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-3);
+  flex-shrink: 0;
+  user-select: none;
+}
+.tab-grid-line {
+  position: relative;
+  height: 28px;
+  flex-shrink: 0;
+  cursor: crosshair;
+}
+.tab-grid-bg-line {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--text-3);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.tab-grid-tick {
+  position: absolute;
+  top: 50%;
+  width: 1px;
+  height: 5px;
+  background: var(--line);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.tab-grid-tick.bar {
+  height: 12px;
+  background: var(--text-3);
+}
+.tab-grid-token {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 700;
+  background: var(--bg-0);
+  padding: 0 1px;
+  cursor: pointer;
+  z-index: 1;
+  white-space: nowrap;
+}
+.tab-grid-token.fret {
+  color: #e0c97a;
+}
+.tab-grid-token.annotation {
+  color: var(--accent);
+}
+.tab-grid-input-wrap {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  background: var(--bg-0);
+  padding: 0 1px;
+}
+.tab-grid-input {
+  width: 22px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--accent);
+  color: var(--accent);
+  font-size: 12.5px;
+  font-family: var(--font-mono);
+  text-align: center;
+  outline: none;
+  padding: 0;
+}
+.tab-grid-col-highlight {
+  position: absolute;
+  background: rgba(224, 201, 122, 0.06);
+  border-left: 1px solid rgba(224, 201, 122, 0.15);
+  border-right: 1px solid rgba(224, 201, 122, 0.15);
+  pointer-events: none;
+  z-index: 0;
+}
+.tab-grid-footer {
+  padding: 6px 12px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Expanded modal */
+.tab-expanded-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tab-expanded-modal {
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  width: min(1100px, 95vw);
+  max-height: 85vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.tab-expanded-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+}
+
 /* Agent modal */
 .agent-overlay {
   position: fixed;

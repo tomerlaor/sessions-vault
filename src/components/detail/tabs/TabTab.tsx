@@ -1,21 +1,11 @@
 import { useState, useCallback } from "react";
 import TabAgentModal from "../TabAgentModal";
-import type { Project, TabPart, Instrument } from "../../../types";
-
-const STARTER: Record<Instrument, string> = {
-  guitar:
-    "e|------------------|\nB|------------------|\nG|------------------|\nD|------------------|\nA|------------------|\nE|------------------|",
-  bass: "G|------------------|\nD|------------------|\nA|------------------|\nE|------------------|",
-  drums: "BD|--x---x---x---x--|\nSN|---------x-------|\nHH|x-x-x-x-x-x-x-x--|",
-};
-
-const INST_HINT: Record<Instrument, string> = {
-  guitar:
-    "Fret number on string  ·  h hammer-on  ·  / slide  ·  b bend  ·  ~ vibrato",
-  bass: "Fret number on string  ·  h hammer-on  ·  / slide  ·  b bend",
-  drums:
-    "x hit  ·  o ghost  ·  X accent  ·  Rows: BD bass drum  SN snare  HH hi-hat  OH open hi-hat  CY cymbal",
-};
+import TabGridEditor from "./TabGridEditor";
+import AnnotationToolbar from "./AnnotationToolbar";
+import TabExpandedModal from "./TabExpandedModal";
+import { useTabGrid } from "../../../hooks/useTabGrid";
+import type { Project, TabPart, Instrument, TabGrid } from "../../../types";
+import { defaultGrid } from "../../../lib/tab-grid";
 
 function parseParts(raw: string | null): TabPart[] {
   try {
@@ -32,7 +22,8 @@ function makeNew(instrument: Instrument, existing: TabPart[]): TabPart {
     id: crypto.randomUUID(),
     name: count > 0 ? `${base} ${count + 1}` : base,
     instrument,
-    content: STARTER[instrument],
+    content: "",
+    grid: defaultGrid(instrument),
   };
 }
 
@@ -41,22 +32,93 @@ interface Props {
   onUpdate: (field: string, value: unknown) => void;
 }
 
+// Inner component so key={active.id} remounts useTabGrid on part switch
+function ActivePartEditor({
+  part,
+  onPartUpdate,
+  expanded,
+  onCollapse,
+}: {
+  part: TabPart;
+  onPartUpdate: (changes: Partial<TabPart>) => void;
+  expanded: boolean;
+  onCollapse: () => void;
+}) {
+  const handleGridUpdate = useCallback(
+    (grid: TabGrid, text: string) => onPartUpdate({ grid, content: text }),
+    [onPartUpdate],
+  );
+
+  const {
+    grid,
+    selectedCell,
+    activeAnnotation,
+    selectCell,
+    placeValue,
+    clearCell,
+    setActiveAnnotation,
+    extend,
+    moveSelection,
+  } = useTabGrid(part.instrument, part.content, part.grid, handleGridUpdate);
+
+  return (
+    <>
+      <AnnotationToolbar active={activeAnnotation} onChange={setActiveAnnotation} />
+      <TabGridEditor
+        grid={grid}
+        selectedCell={selectedCell}
+        activeAnnotation={activeAnnotation}
+        onCellClick={selectCell}
+        onPlaceValue={placeValue}
+        onClearCell={clearCell}
+        onExtend={extend}
+        onMoveSelection={moveSelection}
+      />
+      {expanded && (
+        <TabExpandedModal
+          grid={grid}
+          selectedCell={selectedCell}
+          activeAnnotation={activeAnnotation}
+          onCellClick={selectCell}
+          onPlaceValue={placeValue}
+          onClearCell={clearCell}
+          onExtend={extend}
+          onMoveSelection={moveSelection}
+          onAnnotationChange={setActiveAnnotation}
+          onClose={onCollapse}
+        />
+      )}
+    </>
+  );
+}
+
 export default function TabTab({ project: p, onUpdate }: Props) {
   const [parts, setParts] = useState<TabPart[]>(() => parseParts(p.tabs));
   const [activeId, setActiveId] = useState<string | null>(
     () => parseParts(p.tabs)[0]?.id ?? null,
   );
-  const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   const active = parts.find((pt) => pt.id === activeId) ?? null;
 
   const persist = useCallback(
-    (updated: TabPart[]) => {
-      onUpdate("tabs", JSON.stringify(updated));
-    },
+    (updated: TabPart[]) => onUpdate("tabs", JSON.stringify(updated)),
     [onUpdate],
+  );
+
+  const updateActive = useCallback(
+    (changes: Partial<TabPart>) => {
+      if (!active) return;
+      const updated = parts.map((pt) =>
+        pt.id === active.id ? { ...pt, ...changes } : pt,
+      );
+      setParts(updated);
+      persist(updated);
+    },
+    [active, parts, persist],
   );
 
   const handleInsertGenerated = useCallback(
@@ -75,16 +137,6 @@ export default function TabTab({ project: p, onUpdate }: Props) {
     setParts(updated);
     setActiveId(part.id);
     setAdding(false);
-    setEditing(true);
-    persist(updated);
-  };
-
-  const updateActive = (changes: Partial<TabPart>) => {
-    if (!active) return;
-    const updated = parts.map((pt) =>
-      pt.id === active.id ? { ...pt, ...changes } : pt,
-    );
-    setParts(updated);
     persist(updated);
   };
 
@@ -92,7 +144,7 @@ export default function TabTab({ project: p, onUpdate }: Props) {
     const updated = parts.filter((pt) => pt.id !== id);
     setParts(updated);
     setActiveId(updated[0]?.id ?? null);
-    setEditing(false);
+    setEditingName(false);
     persist(updated);
   };
 
@@ -108,24 +160,16 @@ export default function TabTab({ project: p, onUpdate }: Props) {
               fontSize: 12,
             }}
           >
-            No tablature yet — add a part manually or let the AI generate a
-            structure.
+            No tablature yet — add a part manually or let the AI generate a structure.
           </div>
           <div className="tab-add-row">
-            <button
-              className="tb-btn primary"
-              onClick={() => setAgentOpen(true)}
-            >
+            <button className="tb-btn primary" onClick={() => setAgentOpen(true)}>
               ✦ Generate with AI
             </button>
           </div>
           <div className="tab-add-row" style={{ paddingTop: 0 }}>
             {(["guitar", "bass", "drums"] as Instrument[]).map((inst) => (
-              <button
-                key={inst}
-                className="tb-btn"
-                onClick={() => addPart(inst)}
-              >
+              <button key={inst} className="tb-btn" onClick={() => addPart(inst)}>
                 + {inst.charAt(0).toUpperCase() + inst.slice(1)}
               </button>
             ))}
@@ -153,8 +197,9 @@ export default function TabTab({ project: p, onUpdate }: Props) {
               className={`tab-part-btn ${pt.id === activeId ? "active" : ""}`}
               onClick={() => {
                 setActiveId(pt.id);
-                setEditing(false);
+                setEditingName(false);
                 setAdding(false);
+                setExpanded(false);
               }}
             >
               {pt.name}
@@ -174,11 +219,7 @@ export default function TabTab({ project: p, onUpdate }: Props) {
                 </button>
               ))}
               <button
-                style={{
-                  fontSize: 11,
-                  color: "var(--text-3)",
-                  padding: "2px 6px",
-                }}
+                style={{ fontSize: 11, color: "var(--text-3)", padding: "2px 6px" }}
                 onClick={() => setAdding(false)}
               >
                 ✕
@@ -186,9 +227,7 @@ export default function TabTab({ project: p, onUpdate }: Props) {
             </div>
           ) : (
             <>
-              <button className="tab-part-btn" onClick={() => setAdding(true)}>
-                + Part
-              </button>
+              <button className="tab-part-btn" onClick={() => setAdding(true)}>+ Part</button>
               <button
                 className="tab-part-btn"
                 style={{ color: "var(--accent)" }}
@@ -204,7 +243,7 @@ export default function TabTab({ project: p, onUpdate }: Props) {
           <>
             {/* Part header */}
             <div className="tab-part-header">
-              {editing ? (
+              {editingName ? (
                 <>
                   {(["guitar", "bass", "drums"] as Instrument[]).map((inst) => (
                     <button
@@ -230,7 +269,7 @@ export default function TabTab({ project: p, onUpdate }: Props) {
                   </button>
                   <button
                     style={{ fontSize: 11, color: "var(--accent)" }}
-                    onClick={() => setEditing(false)}
+                    onClick={() => setEditingName(false)}
                   >
                     Done
                   </button>
@@ -248,13 +287,18 @@ export default function TabTab({ project: p, onUpdate }: Props) {
                   >
                     {active.instrument}
                   </span>
-                  <span style={{ fontSize: 13, color: "var(--text-0)" }}>
-                    {active.name}
-                  </span>
+                  <span style={{ fontSize: 13, color: "var(--text-0)" }}>{active.name}</span>
                   <div style={{ flex: 1 }} />
                   <button
+                    style={{ fontSize: 11, color: "var(--text-3)" }}
+                    title="Expand to 4 bars"
+                    onClick={() => setExpanded(true)}
+                  >
+                    ⤢
+                  </button>
+                  <button
                     style={{ fontSize: 11, color: "var(--accent)" }}
-                    onClick={() => setEditing(true)}
+                    onClick={() => setEditingName(true)}
                   >
                     ✎ Edit
                   </button>
@@ -262,29 +306,18 @@ export default function TabTab({ project: p, onUpdate }: Props) {
               )}
             </div>
 
-            {/* Content */}
-            {editing ? (
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                <textarea
-                  className="tab-content-edit"
-                  value={active.content}
-                  onChange={(e) => updateActive({ content: e.target.value })}
-                  spellCheck={false}
-                />
-                <div className="tab-hint">{INST_HINT[active.instrument]}</div>
-              </div>
-            ) : (
-              <pre className="tab-content-view">
-                {active.content || (
-                  <span style={{ color: "var(--text-3)", fontStyle: "italic" }}>
-                    (empty — click ✎ Edit to add content)
-                  </span>
-                )}
-              </pre>
-            )}
+            {/* key={active.id} remounts ActivePartEditor (and useTabGrid) when switching parts */}
+            <ActivePartEditor
+              key={active.id}
+              part={active}
+              onPartUpdate={updateActive}
+              expanded={expanded}
+              onCollapse={() => setExpanded(false)}
+            />
           </>
         )}
       </div>
+
       {agentOpen && (
         <TabAgentModal
           project={p}
