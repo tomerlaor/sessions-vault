@@ -996,45 +996,6 @@ textarea {
   color: #1a0a00 !important;
   font-weight: 600;
 }
-.tab-content-view {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.85;
-  color: var(--text-0);
-  padding: 14px 16px;
-  margin: 0;
-  white-space: pre;
-  overflow-x: auto;
-  background: var(--bg-0);
-}
-.tab-content-edit {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.85;
-  color: var(--text-0);
-  padding: 14px 16px;
-  width: 100%;
-  min-height: 200px;
-  resize: vertical;
-  background: var(--bg-0);
-  border: none;
-  white-space: pre;
-  display: block;
-}
-.tab-content-edit:focus {
-  outline: none;
-}
-.tab-hint {
-  padding: 6px 12px;
-  font-size: 10px;
-  color: var(--text-3);
-  border-top: 1px solid var(--line);
-  background: var(--bg-1);
-  line-height: 1.8;
-}
-.tab-hint b {
-  color: var(--text-2);
-}
 .tab-add-row {
   display: flex;
   gap: 6px;

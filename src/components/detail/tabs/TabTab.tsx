@@ -93,10 +93,9 @@ function ActivePartEditor({
 }
 
 export default function TabTab({ project: p, onUpdate }: Props) {
-  const [parts, setParts] = useState<TabPart[]>(() => parseParts(p.tabs));
-  const [activeId, setActiveId] = useState<string | null>(
-    () => parseParts(p.tabs)[0]?.id ?? null,
-  );
+  const initialParts = parseParts(p.tabs);
+  const [parts, setParts] = useState<TabPart[]>(initialParts);
+  const [activeId, setActiveId] = useState<string | null>(initialParts[0]?.id ?? null);
   const [adding, setAdding] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
   const [editingName, setEditingName] = useState(false);
@@ -147,6 +146,8 @@ export default function TabTab({ project: p, onUpdate }: Props) {
     setEditingName(false);
     persist(updated);
   };
+
+  const handleCollapse = useCallback(() => setExpanded(false), []);
 
   if (parts.length === 0) {
     return (
@@ -250,7 +251,7 @@ export default function TabTab({ project: p, onUpdate }: Props) {
                       key={inst}
                       className={`tb-btn ${active.instrument === inst ? "active-inst" : ""}`}
                       style={{ fontSize: 11, padding: "2px 8px" }}
-                      onClick={() => updateActive({ instrument: inst })}
+                      onClick={() => updateActive({ instrument: inst, grid: defaultGrid(inst) })}
                     >
                       {inst.charAt(0).toUpperCase() + inst.slice(1)}
                     </button>
@@ -312,7 +313,7 @@ export default function TabTab({ project: p, onUpdate }: Props) {
               part={active}
               onPartUpdate={updateActive}
               expanded={expanded}
-              onCollapse={() => setExpanded(false)}
+              onCollapse={handleCollapse}
             />
           </>
         )}
