@@ -15,6 +15,16 @@ export interface ProjectMetadata {
 
 export type Instrument = "guitar" | "bass" | "drums";
 
+export type CellValue =
+  | { kind: "fret"; value: string }
+  | { kind: "annotation"; value: string };
+
+export interface TabGrid {
+  strings: string[];
+  colCount: number;
+  cells: Record<string, CellValue>; // key: `${stringIdx}:${colIdx}`
+}
+
 export type AIProvider = "openai" | "anthropic" | "ollama" | "lmstudio";
 
 export interface AIConfig {
@@ -29,6 +39,7 @@ export interface TabPart {
   name: string;
   instrument: Instrument;
   content: string;
+  grid?: TabGrid;
 }
 
 export interface Project {
