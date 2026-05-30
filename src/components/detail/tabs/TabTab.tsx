@@ -307,9 +307,9 @@ export default function TabTab({ project: p, onUpdate }: Props) {
               )}
             </div>
 
-            {/* key={active.id} remounts ActivePartEditor (and useTabGrid) when switching parts */}
+            {/* key includes instrument so editor remounts when instrument changes */}
             <ActivePartEditor
-              key={active.id}
+              key={`${active.id}-${active.instrument}`}
               part={active}
               onPartUpdate={updateActive}
               expanded={expanded}
