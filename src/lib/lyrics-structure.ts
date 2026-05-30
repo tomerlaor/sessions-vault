@@ -13,6 +13,9 @@ function isChordToken(token: string): boolean {
 function isSectionHeader(line: string): boolean {
   const t = line.trim();
   if (!/^\[.+\]$/.test(t)) return false;
+  // Lines with multiple bracket groups are chord progressions, not section headers
+  const groups = t.match(/\[[^\]]+\]/g) ?? [];
+  if (groups.length > 1) return false;
   return !isChordToken(t);
 }
 
@@ -58,5 +61,23 @@ export function parseLyricsStructure(lyrics: string | null): LyricsSection[] {
 
   flush();
 
-  return sections.filter((s) => s.chords || s.name);
+  // Deduplicate by name — keep first occurrence, merge any extra chords into it
+  const deduped: LyricsSection[] = [];
+  const byName = new Map<string, LyricsSection>();
+  for (const s of sections) {
+    if (!s.chords && !s.name) continue;
+    if (byName.has(s.name)) {
+      const existing = byName.get(s.name)!;
+      if (s.chords && !existing.chords.includes(s.chords)) {
+        existing.chords = existing.chords
+          ? `${existing.chords} - ${s.chords}`
+          : s.chords;
+      }
+    } else {
+      const entry = { ...s };
+      byName.set(s.name, entry);
+      deduped.push(entry);
+    }
+  }
+  return deduped;
 }

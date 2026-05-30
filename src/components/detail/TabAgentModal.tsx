@@ -237,9 +237,22 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
     try {
       const sectionCtx =
         lyricsHint.length > 0
-          ? `\nSections in this project's lyrics:\n${lyricsHint.map((s) => `• ${s.name}${s.chords ? ` — ${s.chords}` : ""}`).join("\n")}`
+          ? `\nProject sections:\n${lyricsHint.map((s) => `• ${s.name}${s.chords ? ` — ${s.chords}` : ""}`).join("\n")}`
           : "";
-      const system = `You are a music tab structure assistant. Help the user generate or refine guitar/bass/drums tab structures. Be concise and practical.${sectionCtx}`;
+      const wizardCtx = wizard.sectionName
+        ? `\nCurrent tab in progress: section="${wizard.sectionName}", instruments=${wizard.instruments.join(", ")}, chords="${wizard.chords}", bars=${wizard.bars}, time=${wizard.timeSignature}${wizard.styleNote ? `, style="${wizard.styleNote}"` : ""}`
+        : "";
+      const system = `You are a music tab structure assistant embedded in a DAW project manager.
+When the user asks you to generate a tab, produce ASCII tablature following these rules exactly:
+- Guitar (6 strings, high→low): e B G D A E — one string per line, bar lines with |
+- Bass (4 strings, high→low): G D A E — one string per line, bar lines with |
+- Drums: rows BD SN HH (add OH CY if useful), bar lines with |, dashes for empty beats
+- Use ONLY dashes for empty beats — do NOT fill in any fret numbers
+- Start each instrument block with // Section Instrument (e.g. // Verse Guitar)
+- Include the chord progression as a comment: // chords: Am – F – C – G
+- Use the exact chords, section name, number of bars, time signature, and style the user specifies
+
+If the user asks a question rather than requesting generation, answer concisely.${sectionCtx}${wizardCtx}`;
       const history: { role: "user" | "assistant"; content: string }[] =
         messages.map((m) => ({
           role: m.role === "agent" ? "assistant" : "user",
@@ -477,11 +490,14 @@ function SectionStep({
           onClick={() => onConfirm(h.name, h.chords)}
         >
           <span style={{ fontWeight: 600 }}>{h.name}</span>
-          {h.chords && (
-            <span style={{ color: "var(--text-3)", fontSize: 11 }}>
-              {h.chords}
-            </span>
-          )}
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {h.chords && (
+              <span style={{ color: "var(--text-3)", fontSize: 11 }}>
+                {h.chords}
+              </span>
+            )}
+            <span style={{ color: "var(--accent)", fontSize: 13 }}>→</span>
+          </span>
         </button>
       ))}
       <div style={{ display: "flex", gap: 6 }}>
