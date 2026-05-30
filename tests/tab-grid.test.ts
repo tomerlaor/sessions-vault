@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { gridToText, defaultGrid, COL_WIDTH, COLS_PER_BAR } from "../src/lib/tab-grid";
+import { gridToText, defaultGrid, COL_WIDTH, COLS_PER_BAR, parseTabToGrid } from "../src/lib/tab-grid";
 import type { TabGrid } from "../src/types";
 
 describe("constants", () => {
@@ -84,5 +84,75 @@ describe("gridToText", () => {
     expect(lines[0]).toBe("e|-7--|");
     expect(lines[1]).toBe("B|-8--|");
     expect(lines[2]).toBe("G|----|");
+  });
+});
+
+describe("parseTabToGrid", () => {
+  it("returns null for empty/unparseable content", () => {
+    expect(parseTabToGrid("")).toBeNull();
+    expect(parseTabToGrid("not a tab")).toBeNull();
+  });
+
+  it("parses a simple guitar tab with fret numbers", () => {
+    const content = [
+      "e|--7-----|",
+      "B|--8-----|",
+      "G|--------|",
+      "D|--------|",
+      "A|--------|",
+      "E|--------|",
+    ].join("\n");
+    const grid = parseTabToGrid(content);
+    expect(grid).not.toBeNull();
+    expect(grid!.strings).toEqual(["e", "B", "G", "D", "A", "E"]);
+    expect(grid!.cells["0:2"]).toEqual({ kind: "fret", value: "7" });
+    expect(grid!.cells["1:2"]).toEqual({ kind: "fret", value: "8" });
+    expect(Object.keys(grid!.cells)).toHaveLength(2);
+  });
+
+  it("parses a two-digit fret", () => {
+    const content = [
+      "e|--12----|",
+      "B|--------|",
+      "G|--------|",
+      "D|--------|",
+      "A|--------|",
+      "E|--------|",
+    ].join("\n");
+    const grid = parseTabToGrid(content);
+    expect(grid!.cells["0:2"]).toEqual({ kind: "fret", value: "12" });
+  });
+
+  it("parses a known single-char annotation", () => {
+    const content = [
+      "e|---h----|",
+      "B|--------|",
+      "G|--------|",
+      "D|--------|",
+      "A|--------|",
+      "E|--------|",
+    ].join("\n");
+    const grid = parseTabToGrid(content);
+    expect(grid!.cells["0:3"]).toEqual({ kind: "annotation", value: "h" });
+  });
+
+  it("round-trips through gridToText → parseTabToGrid", () => {
+    const original: TabGrid = {
+      strings: ["e", "B", "G", "D", "A", "E"],
+      colCount: 8,
+      cells: {
+        "0:2": { kind: "fret", value: "7" },
+        "0:3": { kind: "annotation", value: "h" },
+        "0:4": { kind: "fret", value: "9" },
+        "1:2": { kind: "fret", value: "8" },
+      },
+    };
+    const text = gridToText(original);
+    const parsed = parseTabToGrid(text);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.cells["0:2"]).toEqual({ kind: "fret", value: "7" });
+    expect(parsed!.cells["0:3"]).toEqual({ kind: "annotation", value: "h" });
+    expect(parsed!.cells["0:4"]).toEqual({ kind: "fret", value: "9" });
+    expect(parsed!.cells["1:2"]).toEqual({ kind: "fret", value: "8" });
   });
 });
