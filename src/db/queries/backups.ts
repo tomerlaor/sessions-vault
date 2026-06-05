@@ -62,11 +62,10 @@ export async function getGDriveConfig(): Promise<GDriveConfig | null> {
     GDriveConfig,
     "clientId" | "tokenExpiry"
   >;
-  const [clientSecret, accessToken, refreshToken] = await Promise.all([
-    getSecret(K_GDRIVE_CLIENT_SECRET),
-    getSecret(K_GDRIVE_ACCESS_TOKEN),
-    getSecret(K_GDRIVE_REFRESH_TOKEN),
-  ]);
+  // Sequential reads prevent macOS from showing multiple keychain dialogs simultaneously.
+  const clientSecret = await getSecret(K_GDRIVE_CLIENT_SECRET);
+  const accessToken = await getSecret(K_GDRIVE_ACCESS_TOKEN);
+  const refreshToken = await getSecret(K_GDRIVE_REFRESH_TOKEN);
   return {
     ...safe,
     clientSecret: clientSecret ?? "",
