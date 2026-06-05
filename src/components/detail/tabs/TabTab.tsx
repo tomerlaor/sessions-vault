@@ -37,11 +37,13 @@ function ActivePartEditor({
   part,
   onPartUpdate,
   expanded,
+  onExpand,
   onCollapse,
 }: {
   part: TabPart;
   onPartUpdate: (changes: Partial<TabPart>) => void;
   expanded: boolean;
+  onExpand: () => void;
   onCollapse: () => void;
 }) {
   const handleGridUpdate = useCallback(
@@ -61,6 +63,11 @@ function ActivePartEditor({
     moveSelection,
   } = useTabGrid(part.instrument, part.content, part.grid, handleGridUpdate);
 
+  const handleExtend = useCallback(() => {
+    extend();
+    onExpand();
+  }, [extend, onExpand]);
+
   return (
     <>
       <AnnotationToolbar active={activeAnnotation} onChange={setActiveAnnotation} />
@@ -71,7 +78,7 @@ function ActivePartEditor({
         onCellClick={selectCell}
         onPlaceValue={placeValue}
         onClearCell={clearCell}
-        onExtend={extend}
+        onExtend={handleExtend}
         onMoveSelection={moveSelection}
       />
       {expanded && (
@@ -313,6 +320,7 @@ export default function TabTab({ project: p, onUpdate }: Props) {
               part={active}
               onPartUpdate={updateActive}
               expanded={expanded}
+              onExpand={() => setExpanded(true)}
               onCollapse={handleCollapse}
             />
           </>
