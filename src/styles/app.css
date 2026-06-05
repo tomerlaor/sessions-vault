@@ -938,7 +938,7 @@ textarea {
   background: var(--bg-0);
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
 }
@@ -951,6 +951,7 @@ textarea {
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
   min-height: 34px;
+  border-radius: var(--radius-m) var(--radius-m) 0 0;
 }
 .tab-part-btn {
   padding: 3px 9px;
@@ -1001,6 +1002,9 @@ textarea {
   gap: 6px;
   padding: 12px 14px;
   justify-content: center;
+}
+.tab-add-row:last-child {
+  border-radius: 0 0 var(--radius-m) var(--radius-m);
 }
 
 /* Tab grid editor */
@@ -1174,6 +1178,7 @@ textarea {
   border-top: 1px solid var(--line);
   display: flex;
   justify-content: flex-end;
+  border-radius: 0 0 var(--radius-m) var(--radius-m);
 }
 
 /* Expanded modal */
