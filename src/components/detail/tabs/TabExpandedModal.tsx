@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import type { TabGrid } from "../../../types";
 import TabGridEditor from "./TabGridEditor";
 import AnnotationToolbar from "./AnnotationToolbar";
@@ -39,7 +40,7 @@ export default function TabExpandedModal({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div className="tab-expanded-overlay" onClick={onClose}>
       <div
         className="tab-expanded-modal"
@@ -68,6 +69,7 @@ export default function TabExpandedModal({
           onMoveSelection={onMoveSelection}
         />
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
