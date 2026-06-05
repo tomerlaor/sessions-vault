@@ -81,7 +81,11 @@ export default function TabGridEditor({
   function commitInput() {
     if (!editingCell) return;
     const v = inputValue.trim();
-    if (v) onPlaceValue(editingCell.stringIdx, editingCell.colIdx, v);
+    if (v) {
+      onPlaceValue(editingCell.stringIdx, editingCell.colIdx, v);
+    } else if (grid.cells[`${editingCell.stringIdx}:${editingCell.colIdx}`]) {
+      onClearCell(editingCell.stringIdx, editingCell.colIdx);
+    }
     setEditingCell(null);
   }
 
