@@ -26,10 +26,20 @@ export default function TabGridEditor({
   const [editingCell, setEditingCell] = useState<{ stringIdx: number; colIdx: number } | null>(null);
   const [inputValue, setInputValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const prevColCount = useRef(grid.colCount);
 
   useEffect(() => {
     if (editingCell) inputRef.current?.focus();
   }, [editingCell]);
+
+  // Scroll to reveal new columns after extending
+  useEffect(() => {
+    if (grid.colCount > prevColCount.current && scrollRef.current) {
+      scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+    }
+    prevColCount.current = grid.colCount;
+  }, [grid.colCount]);
 
   const totalWidth = grid.colCount * COL_WIDTH;
 
@@ -106,7 +116,7 @@ export default function TabGridEditor({
   return (
     <div className="tab-grid-wrap">
       {/* Scrollable area */}
-      <div className="tab-grid-scroll">
+      <div className="tab-grid-scroll" ref={scrollRef}>
         <div style={{ display: "inline-block", position: "relative" }}>
           {/* Chord column highlight overlay */}
           {highlightCol !== null && (
