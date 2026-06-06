@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { TabGrid } from "../../../types";
 import { COL_WIDTH, STRING_HEIGHT, COLS_PER_BAR, COLS_PER_BEAT } from "../../../lib/tab-grid";
 
@@ -10,6 +10,7 @@ interface Props {
   onPlaceValue: (stringIdx: number, colIdx: number, value: string) => void;
   onClearCell: (stringIdx: number, colIdx: number) => void;
   onExtend: () => void;
+  onAddString?: (label: string) => void;
   onMoveSelection: (ds: number, dc: number) => void;
 }
 
@@ -21,17 +22,32 @@ export default function TabGridEditor({
   onPlaceValue,
   onClearCell,
   onExtend,
+  onAddString,
   onMoveSelection,
 }: Props) {
   const [editingCell, setEditingCell] = useState<{ stringIdx: number; colIdx: number } | null>(null);
   const [inputValue, setInputValue] = useState("");
+  const [addingString, setAddingString] = useState(false);
+  const [newStringLabel, setNewStringLabel] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const newStringInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevColCount = useRef(grid.colCount);
 
   useEffect(() => {
     if (editingCell) inputRef.current?.focus();
   }, [editingCell]);
+
+  useEffect(() => {
+    if (addingString) newStringInputRef.current?.focus();
+  }, [addingString]);
+
+  const commitNewString = useCallback(() => {
+    const label = newStringLabel.trim();
+    if (label && onAddString) onAddString(label);
+    setAddingString(false);
+    setNewStringLabel("");
+  }, [newStringLabel, onAddString]);
 
   // Scroll to reveal new columns after extending
   useEffect(() => {
@@ -202,11 +218,43 @@ export default function TabGridEditor({
         </div>
       </div>
 
-      {/* Extend button */}
+      {/* Footer */}
       <div className="tab-grid-footer">
         <button className="tb-btn" onClick={onExtend} style={{ fontSize: 11 }}>
           + Extend
         </button>
+        {onAddString && (
+          addingString ? (
+            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <input
+                ref={newStringInputRef}
+                className="tab-grid-input"
+                value={newStringLabel}
+                maxLength={3}
+                placeholder="e.g. e"
+                onChange={(e) => setNewStringLabel(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitNewString();
+                  if (e.key === "Escape") { setAddingString(false); setNewStringLabel(""); }
+                }}
+                style={{ width: 44, fontSize: 11 }}
+              />
+              <button className="tb-btn" onClick={commitNewString} style={{ fontSize: 11 }}>
+                Add
+              </button>
+              <button
+                style={{ fontSize: 11, color: "var(--text-3)", padding: "2px 4px" }}
+                onClick={() => { setAddingString(false); setNewStringLabel(""); }}
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <button className="tb-btn" onClick={() => setAddingString(true)} style={{ fontSize: 11 }}>
+              + Line
+            </button>
+          )
+        )}
       </div>
     </div>
   );

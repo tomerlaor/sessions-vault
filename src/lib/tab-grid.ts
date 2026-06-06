@@ -14,7 +14,7 @@ const STRINGS: Record<Instrument, string[]> = {
 export function defaultGrid(instrument: Instrument): TabGrid {
   return {
     strings: STRINGS[instrument],
-    colCount: 32,
+    colCount: 4 * COLS_PER_BAR,
     cells: {},
   };
 }

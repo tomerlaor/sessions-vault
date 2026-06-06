@@ -39,3 +39,19 @@ As a music creator, I want to place fret numbers and musical annotations directl
 
 **Priority:** High
 **Status:** Draft
+
+---
+
+### US-003: Add Custom String Lines and 4-Bar Default Grid
+
+**User Story:**
+As a music creator, I want to add extra string lines to the tab editor and have a 4-bar grid by default so that I can notate non-standard instruments and have enough space for a standard musical phrase without immediately needing to extend.
+
+**Acceptance Criteria:**
+- [ ] A new "Add Line" button appears in the tab grid footer alongside the existing "Extend" button
+- [ ] Clicking "Add Line" shows an inline label input; confirming appends a new string row to the grid
+- [ ] The new string row behaves identically to existing rows (clickable cells, fret/annotation placement)
+- [ ] A new tab part starts with 4 bars (64 columns) by default instead of 2 bars
+
+**Priority:** Medium
+**Status:** Draft

@@ -12,6 +12,7 @@ interface Props {
   onPlaceValue: (stringIdx: number, colIdx: number, value: string) => void;
   onClearCell: (stringIdx: number, colIdx: number) => void;
   onExtend: () => void;
+  onAddString?: (label: string) => void;
   onMoveSelection: (ds: number, dc: number) => void;
   onAnnotationChange: (value: string | null) => void;
   onClose: () => void;
@@ -25,6 +26,7 @@ export default function TabExpandedModal({
   onPlaceValue,
   onClearCell,
   onExtend,
+  onAddString,
   onMoveSelection,
   onAnnotationChange,
   onClose,
@@ -66,6 +68,7 @@ export default function TabExpandedModal({
           onPlaceValue={onPlaceValue}
           onClearCell={onClearCell}
           onExtend={onExtend}
+          onAddString={onAddString}
           onMoveSelection={onMoveSelection}
         />
       </div>

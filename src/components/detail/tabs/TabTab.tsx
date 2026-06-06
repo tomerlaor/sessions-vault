@@ -60,6 +60,7 @@ function ActivePartEditor({
     clearCell,
     setActiveAnnotation,
     extend,
+    addString,
     moveSelection,
   } = useTabGrid(part.instrument, part.content, part.grid, handleGridUpdate);
 
@@ -79,6 +80,7 @@ function ActivePartEditor({
         onPlaceValue={placeValue}
         onClearCell={clearCell}
         onExtend={handleExtend}
+        onAddString={addString}
         onMoveSelection={moveSelection}
       />
       {expanded && (
@@ -90,6 +92,7 @@ function ActivePartEditor({
           onPlaceValue={placeValue}
           onClearCell={clearCell}
           onExtend={extend}
+          onAddString={addString}
           onMoveSelection={moveSelection}
           onAnnotationChange={setActiveAnnotation}
           onClose={onCollapse}

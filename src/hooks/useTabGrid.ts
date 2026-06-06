@@ -16,6 +16,7 @@ export interface UseTabGridReturn {
   clearCell: (stringIdx: number, colIdx: number) => void;
   setActiveAnnotation: (annotation: string | null) => void;
   extend: () => void;
+  addString: (label: string) => void;
   moveSelection: (ds: number, dc: number) => void;
 }
 
@@ -72,6 +73,13 @@ export function useTabGrid(
     commit({ ...grid, colCount: grid.colCount + COLS_PER_BAR });
   }, [grid, commit]);
 
+  const addString = useCallback(
+    (label: string) => {
+      commit({ ...grid, strings: [...grid.strings, label] });
+    },
+    [grid, commit],
+  );
+
   const moveSelection = useCallback(
     (ds: number, dc: number) => {
       setSelectedCell((prev) => {
@@ -93,6 +101,7 @@ export function useTabGrid(
     clearCell,
     setActiveAnnotation,
     extend,
+    addString,
     moveSelection,
   };
 }
