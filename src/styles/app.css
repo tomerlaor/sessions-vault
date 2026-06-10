@@ -1311,6 +1311,8 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-height: 45vh;
+  overflow-y: auto;
 }
 .agent-compose {
   display: flex;

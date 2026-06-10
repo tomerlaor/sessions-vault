@@ -8,10 +8,10 @@ describe("constants", () => {
 });
 
 describe("defaultGrid", () => {
-  it("returns guitar grid with correct strings and 32 cols", () => {
+  it("returns guitar grid with correct strings and 64 cols (4 bars)", () => {
     const g = defaultGrid("guitar");
     expect(g.strings).toEqual(["e", "B", "G", "D", "A", "E"]);
-    expect(g.colCount).toBe(32);
+    expect(g.colCount).toBe(64);
     expect(g.cells).toEqual({});
   });
 
