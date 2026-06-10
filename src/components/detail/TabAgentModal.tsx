@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { getAIConfig } from "../../db/queries/ai";
 import { generateTabStructure, chatWithTabAgent } from "../../lib/ai";
 import { parseLyricsStructure } from "../../lib/lyrics-structure";
@@ -81,6 +82,14 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
       chatRef.current.scrollTop = chatRef.current.scrollHeight;
     }
   }, [messages, chatSending]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -268,7 +277,10 @@ If the user asks a question rather than requesting generation, answer concisely.
     }
   };
 
-  return (
+  const hasStepControls =
+    step !== "loading" && step !== "no-config" && step !== "generating";
+
+  return createPortal(
     <div
       className="agent-overlay"
       onClick={(e) => {
@@ -316,35 +328,36 @@ If the user asks a question rather than requesting generation, answer concisely.
         </div>
 
         {/* Step controls — guided shortcuts, changes per step */}
-        <div className="agent-input-area">
-          {step === "confirm" && (
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                className="tb-btn primary"
-                style={{ flex: 1, justifyContent: "center" }}
-                onClick={() => {
-                  addUser("Yes, proceed");
-                  addAgent(
-                    "Which section would you like to start with?",
-                  );
-                  setStep("section");
-                }}
-              >
-                Proceed →
-              </button>
-              <button
-                className="tb-btn"
-                onClick={() => {
-                  addUser("Let me pick a different section");
-                  addAgent(
-                    "No problem — which section would you like to create tabs for?",
-                  );
-                  setStep("section");
-                }}
-              >
-                Customize
-              </button>
-            </div>
+        {hasStepControls && (
+          <div className="agent-input-area">
+            {step === "confirm" && (
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  className="tb-btn primary"
+                  style={{ flex: 1, justifyContent: "center" }}
+                  onClick={() => {
+                    addUser("Yes, proceed");
+                    addAgent(
+                      "Which section would you like to start with?",
+                    );
+                    setStep("section");
+                  }}
+                >
+                  Proceed →
+                </button>
+                <button
+                  className="tb-btn"
+                  onClick={() => {
+                    addUser("Let me pick a different section");
+                    addAgent(
+                      "No problem — which section would you like to create tabs for?",
+                    );
+                    setStep("section");
+                  }}
+                >
+                  Customize
+                </button>
+              </div>
           )}
 
           {step === "section" && (
@@ -430,6 +443,7 @@ If the user asks a question rather than requesting generation, answer concisely.
             </div>
           )}
         </div>
+        )}
 
         {/* Compose bar — always visible */}
         <div className="agent-compose">
@@ -466,7 +480,8 @@ If the user asks a question rather than requesting generation, answer concisely.
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -607,8 +622,10 @@ function BarsStep({
   initial: number;
   onConfirm: (n: number) => void;
 }) {
-  const [val, setVal] = useState(initial);
+  const [raw, setRaw] = useState(String(initial));
   const OPTIONS = [4, 8, 12, 16];
+  const parsed = parseInt(raw, 10);
+  const valid = !Number.isNaN(parsed) && parsed >= 1 && parsed <= 64;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div style={{ display: "flex", gap: 6 }}>
@@ -617,7 +634,7 @@ function BarsStep({
             key={n}
             className="tb-btn"
             style={
-              val === n
+              valid && parsed === n
                 ? {
                     background: "var(--accent)",
                     borderColor: "var(--accent)",
@@ -626,7 +643,7 @@ function BarsStep({
                   }
                 : {}
             }
-            onClick={() => setVal(n)}
+            onClick={() => setRaw(String(n))}
           >
             {n}
           </button>
@@ -635,8 +652,8 @@ function BarsStep({
           type="number"
           min={1}
           max={64}
-          value={val}
-          onChange={(e) => setVal(Number(e.target.value))}
+          value={raw}
+          onChange={(e) => setRaw(e.target.value)}
           style={{
             width: 56,
             background: "var(--bg-2)",
@@ -652,7 +669,8 @@ function BarsStep({
       <button
         className="tb-btn primary"
         style={{ alignSelf: "flex-start" }}
-        onClick={() => onConfirm(val)}
+        disabled={!valid}
+        onClick={() => onConfirm(parsed)}
       >
         Confirm →
       </button>
