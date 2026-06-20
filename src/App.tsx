@@ -1,6 +1,8 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { checkpointDb } from "./db/client";
 import { AboutWindow } from "./components/AboutWindow";
 import Sidebar from "./components/layout/Sidebar";
 import ProjectList from "./components/library/ProjectList";
@@ -36,6 +38,24 @@ export default function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     listen("show-about", () => setShowAbout(true)).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    const win = getCurrentWindow();
+    let unlisten: (() => void) | undefined;
+    win.onCloseRequested(async (event) => {
+      event.preventDefault();
+      try {
+        await checkpointDb();
+      } finally {
+        win.destroy();
+      }
+    }).then((fn) => {
       unlisten = fn;
     });
     return () => {
