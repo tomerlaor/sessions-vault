@@ -27,18 +27,15 @@ pub fn get(key: &str) -> Result<Option<String>, String> {
         }
     }
 
-    // Return cached value if present — avoids repeated OS keychain prompts within
-    // the same app session. Cache stores None for confirmed-missing keys too.
-    if let Ok(c) = cache().lock() {
-        if let Some(cached) = c.get(key) {
-            return Ok(cached.clone());
-        }
+    // Hold the lock for the entire check+read so concurrent invocations of the
+    // same key block until the first read completes and populates the cache.
+    // This prevents multiple OS prompts when two callers race on the same key.
+    let mut c = cache().lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(cached) = c.get(key) {
+        return Ok(cached.clone());
     }
-
     let result = platform::get(SERVICE, key)?;
-    if let Ok(mut c) = cache().lock() {
-        c.insert(key.to_owned(), result.clone());
-    }
+    c.insert(key.to_owned(), result.clone());
     Ok(result)
 }
 

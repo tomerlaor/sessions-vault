@@ -13,7 +13,17 @@ async function getRaw(): Promise<Database> {
   return _raw;
 }
 
+export async function checkpointDb(): Promise<void> {
+  const raw = await getRaw();
+  await raw.execute(`PRAGMA wal_checkpoint(TRUNCATE)`, []);
+}
+
 async function runMigrations(raw: Database): Promise<void> {
+  // Recover any WAL data left uncommitted by a previous unclean shutdown
+  await raw.execute(`PRAGMA wal_checkpoint(FULL)`, []);
+  // Checkpoint every 50 pages instead of the default 1000, reducing data at risk
+  await raw.execute(`PRAGMA wal_autocheckpoint=50`, []);
+
   await raw.execute(
     `CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
