@@ -1,7 +1,19 @@
 const SERVICE: &str = "com.sessions.app";
 
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+fn cache() -> &'static Mutex<HashMap<String, Option<String>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 pub fn store(key: &str, value: &str) -> Result<(), String> {
-    platform::store(SERVICE, key, value)
+    platform::store(SERVICE, key, value)?;
+    if let Ok(mut c) = cache().lock() {
+        c.insert(key.to_owned(), Some(value.to_owned()));
+    }
+    Ok(())
 }
 
 pub fn get(key: &str) -> Result<Option<String>, String> {
@@ -14,11 +26,28 @@ pub fn get(key: &str) -> Result<Option<String>, String> {
             return Ok(Some(v));
         }
     }
-    platform::get(SERVICE, key)
+
+    // Return cached value if present — avoids repeated OS keychain prompts within
+    // the same app session. Cache stores None for confirmed-missing keys too.
+    if let Ok(c) = cache().lock() {
+        if let Some(cached) = c.get(key) {
+            return Ok(cached.clone());
+        }
+    }
+
+    let result = platform::get(SERVICE, key)?;
+    if let Ok(mut c) = cache().lock() {
+        c.insert(key.to_owned(), result.clone());
+    }
+    Ok(result)
 }
 
 pub fn delete(key: &str) -> Result<(), String> {
-    platform::delete(SERVICE, key)
+    platform::delete(SERVICE, key)?;
+    if let Ok(mut c) = cache().lock() {
+        c.remove(key);
+    }
+    Ok(())
 }
 
 // ── macOS ─────────────────────────────────────────────────────────────────────
