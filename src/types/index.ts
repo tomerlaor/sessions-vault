@@ -42,6 +42,9 @@ export interface AIConfig {
   // Optional per-feature overrides; fall back to `model` when empty.
   lyricsModel?: string;
   tabAgentModel?: string;
+  // Providers that have a key in the keychain, so Settings can show that
+  // without reading (and prompting for) the secret.
+  savedKeys?: AIProvider[];
 }
 
 export interface TabPart {

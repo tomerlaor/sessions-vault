@@ -4,12 +4,16 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   getLocalConfig,
   setLocalConfig,
-  getGDriveConfig,
+  isGDriveConnected,
   setGDriveConfig,
   getGDriveFolderConfig,
   setGDriveFolderConfig,
 } from "../../db/queries/backups";
-import { getAIConfig, getAIKey, setAIConfig } from "../../db/queries/ai";
+import {
+  getAIConfigWithoutKey,
+  getAIKey,
+  setAIConfig,
+} from "../../db/queries/ai";
 import { OpenRouterModelPicker } from "./OpenRouterModelPicker";
 import {
   getLyricsAIConfig,
@@ -113,7 +117,7 @@ export default function SettingsModal({ onClose }: Props) {
   const [gdriveFolderCfg, setGDriveFolderCfg] = useState<LocalConfig | null>(
     null,
   );
-  const [gdriveCfg, setGdriveCfg] = useState<GDriveConfig | null>(null);
+  const [gdriveConnected, setGdriveConnected] = useState(false);
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [connecting, setConnecting] = useState(false);
@@ -140,14 +144,14 @@ export default function SettingsModal({ onClose }: Props) {
     Promise.all([
       getLocalConfig(),
       getGDriveFolderConfig(),
-      getGDriveConfig(),
+      isGDriveConnected(),
       invoke<string[]>("detect_gdrive_paths"),
-      getAIConfig(),
+      getAIConfigWithoutKey(),
       getLyricsAIConfig(),
     ]).then(([lc, gf, gc, paths, ai, lyricsAI]) => {
       setLocalCfg(lc);
       setGDriveFolderCfg(gf);
-      setGdriveCfg(gc);
+      setGdriveConnected(gc);
       setDetectedPaths(paths);
       if (ai) setAiCfg(ai);
       setLyricsAICfgState(lyricsAI);
@@ -199,7 +203,7 @@ export default function SettingsModal({ onClose }: Props) {
         tokenExpiry: Math.floor(Date.now() / 1000) + tokens.expiresIn,
       };
       await setGDriveConfig(cfg);
-      setGdriveCfg(cfg);
+      setGdriveConnected(true);
       setClientId("");
       setClientSecret("");
     } catch (e) {
@@ -218,10 +222,17 @@ export default function SettingsModal({ onClose }: Props) {
       tokenExpiry: null,
     };
     await setGDriveConfig(blank);
-    setGdriveCfg(null);
+    setGdriveConnected(false);
   }, []);
 
-  const handleSaveAI = useCallback(async (next: AIConfig) => {
+  const handleSaveAI = useCallback(async (input: AIConfig) => {
+    const next =
+      input.apiKey && !input.savedKeys?.includes(input.provider)
+        ? {
+            ...input,
+            savedKeys: [...(input.savedKeys ?? []), input.provider],
+          }
+        : input;
     setAiCfg(next);
     setAiTestResult(null);
     await setAIConfig(next);
@@ -244,7 +255,9 @@ export default function SettingsModal({ onClose }: Props) {
     setAiTestResult(null);
     setAiTestErr(null);
     try {
-      await testAIConnection(aiCfg);
+      // The key is only read from the keychain when actually needed.
+      const apiKey = aiCfg.apiKey || (await getAIKey(aiCfg.provider));
+      await testAIConnection({ ...aiCfg, apiKey });
       setAiTestResult("ok");
     } catch (e) {
       setAiTestResult("error");
@@ -560,7 +573,7 @@ export default function SettingsModal({ onClose }: Props) {
                 </li>
               </ol>
 
-              {gdriveCfg?.refreshToken ? (
+              {gdriveConnected ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <div
                     style={{
@@ -663,12 +676,12 @@ export default function SettingsModal({ onClose }: Props) {
                         }
                       : {}
                   }
-                  onClick={async () =>
+                  onClick={() =>
                     handleSaveAI({
                       ...aiCfg,
                       provider: p.id,
                       // Keys are stored per provider; don't carry the previous one over.
-                      apiKey: await getAIKey(p.id),
+                      apiKey: "",
                       model: "",
                       lyricsModel: "",
                       tabAgentModel: "",
@@ -687,11 +700,13 @@ export default function SettingsModal({ onClose }: Props) {
                   className="notes-area"
                   type="password"
                   placeholder={
-                    aiCfg.provider === "openai"
-                      ? "OpenAI API key (sk-…)"
-                      : aiCfg.provider === "openrouter"
-                        ? "OpenRouter API key (sk-or-…)"
-                        : "Anthropic API key (sk-ant-…)"
+                    aiCfg.savedKeys?.includes(aiCfg.provider)
+                      ? "Saved in keychain — type to replace"
+                      : aiCfg.provider === "openai"
+                        ? "OpenAI API key (sk-…)"
+                        : aiCfg.provider === "openrouter"
+                          ? "OpenRouter API key (sk-or-…)"
+                          : "Anthropic API key (sk-ant-…)"
                   }
                   value={aiCfg.apiKey}
                   onChange={(e) =>

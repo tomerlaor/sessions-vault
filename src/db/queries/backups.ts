@@ -74,6 +74,21 @@ export async function getGDriveConfig(): Promise<GDriveConfig | null> {
   };
 }
 
+// Connection status for Settings. Reads a plain flag from SQLite so opening
+// Settings doesn't hit the keychain; configs saved before the flag existed
+// fall back to a single refresh-token read.
+export async function isGDriveConnected(): Promise<boolean> {
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(backupConfigs)
+    .where(eq(backupConfigs.id, "gdrive"));
+  if (!rows[0]) return false;
+  const safe = JSON.parse(rows[0].configJson) as { connected?: boolean };
+  if (typeof safe.connected === "boolean") return safe.connected;
+  return !!(await getSecret(K_GDRIVE_REFRESH_TOKEN));
+}
+
 export async function setGDriveConfig(config: GDriveConfig): Promise<void> {
   const db = await getDb();
   // Secrets go to the OS keychain; null means disconnecting — delete stored entries
@@ -87,7 +102,11 @@ export async function setGDriveConfig(config: GDriveConfig): Promise<void> {
     await storeSecret(K_GDRIVE_REFRESH_TOKEN, config.refreshToken);
   else await deleteSecret(K_GDRIVE_REFRESH_TOKEN);
   // Only non-sensitive config lives in SQLite
-  const safe = { clientId: config.clientId, tokenExpiry: config.tokenExpiry };
+  const safe = {
+    clientId: config.clientId,
+    tokenExpiry: config.tokenExpiry,
+    connected: !!config.refreshToken,
+  };
   await db
     .insert(backupConfigs)
     .values({ id: "gdrive", configJson: JSON.stringify(safe) })

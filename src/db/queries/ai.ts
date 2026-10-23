@@ -11,6 +11,22 @@ function aiKeyName(provider: string) {
   return `ai.apikey.${provider}`;
 }
 
+// Settings view: never touches the keychain, so opening Settings can't prompt.
+export async function getAIConfigWithoutKey(): Promise<AIConfig | null> {
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(backupConfigs)
+    .where(eq(backupConfigs.id, AI_CONFIG_ID));
+  if (!rows[0]) return null;
+  try {
+    const safe = JSON.parse(rows[0].configJson) as Omit<AIConfig, "apiKey">;
+    return { ...safe, apiKey: "" };
+  } catch {
+    return null;
+  }
+}
+
 export async function getAIConfig(): Promise<AIConfig | null> {
   const db = await getDb();
   const rows = await db
@@ -31,15 +47,22 @@ export async function getAIKey(provider: AIProvider): Promise<string> {
   return (await getSecret(aiKeyName(provider))) ?? "";
 }
 
-export async function getAIConfigFor(feature: AIFeature): Promise<AIConfig | null> {
+export async function getAIConfigFor(
+  feature: AIFeature,
+): Promise<AIConfig | null> {
   const cfg = await getAIConfig();
   return cfg ? resolveFeatureConfig(cfg, feature) : null;
 }
 
 export async function setAIConfig(cfg: AIConfig): Promise<void> {
   const db = await getDb();
-  if (cfg.apiKey) await storeSecret(aiKeyName(cfg.provider), cfg.apiKey);
-  const { apiKey: _, ...safe } = cfg;
+  const saved = new Set(cfg.savedKeys ?? []);
+  if (cfg.apiKey) {
+    await storeSecret(aiKeyName(cfg.provider), cfg.apiKey);
+    saved.add(cfg.provider);
+  }
+  const { apiKey: _, ...rest } = cfg;
+  const safe = { ...rest, savedKeys: [...saved] };
   await db
     .insert(backupConfigs)
     .values({ id: AI_CONFIG_ID, configJson: JSON.stringify(safe) })
