@@ -78,7 +78,7 @@ mod platform {
 
         fn SecAccessCreate(
             descriptor: CFTypeRef,
-            trusted_list: *const CFTypeRef, // CFArrayRef
+            trusted_list: CFTypeRef, // CFArrayRef (the array itself, not a pointer to it)
             access: *mut CFTypeRef,
         ) -> OSStatus;
 
@@ -120,7 +120,7 @@ mod platform {
 
         let descriptor = CFString::new("SessionsVault");
         let mut access: CFTypeRef = ptr::null();
-        let status = SecAccessCreate(descriptor.as_CFTypeRef(), &array as *const _ as _, &mut access);
+        let status = SecAccessCreate(descriptor.as_CFTypeRef(), array as CFTypeRef, &mut access);
         CFRelease(array as _);
 
         if status == 0 && !access.is_null() {

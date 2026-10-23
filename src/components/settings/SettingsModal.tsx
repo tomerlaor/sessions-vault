@@ -710,8 +710,10 @@ export default function SettingsModal({ onClose }: Props) {
                   }
                   value={aiCfg.apiKey}
                   onChange={(e) =>
-                    handleSaveAI({ ...aiCfg, apiKey: e.target.value })
+                    setAiCfg({ ...aiCfg, apiKey: e.target.value })
                   }
+                  // Write to the keychain once, not on every keystroke.
+                  onBlur={() => aiCfg.apiKey && handleSaveAI(aiCfg)}
                   style={{
                     fontSize: 11,
                     padding: "6px 8px",
