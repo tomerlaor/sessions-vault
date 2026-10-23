@@ -66,7 +66,9 @@ function logAI(
   if (prompt) console.log("prompt     :", clip(prompt));
   if (messages?.length) {
     console.group("messages");
-    messages.forEach((m) => console.log(`  ${m.role.padEnd(9)}:`, clip(m.content)));
+    messages.forEach((m) =>
+      console.log(`  ${m.role.padEnd(9)}:`, clip(m.content)),
+    );
     console.groupEnd();
   }
   console.log("duration   :", `${durationMs}ms`);
@@ -83,7 +85,10 @@ function logAI(
 }
 
 // Returns cfg with `model` replaced by the feature's override, if one is set.
-export function resolveFeatureConfig(cfg: AIConfig, feature: AIFeature): AIConfig {
+export function resolveFeatureConfig(
+  cfg: AIConfig,
+  feature: AIFeature,
+): AIConfig {
   const override = feature === "lyrics" ? cfg.lyricsModel : cfg.tabAgentModel;
   return override ? { ...cfg, model: override } : cfg;
 }
@@ -103,7 +108,9 @@ function buildProvider(cfg: AIConfig) {
         baseURL: OPENROUTER_BASE_URL,
         apiKey: cfg.apiKey,
         headers: { "X-Title": "Sessions" },
-      })(model);
+        // OpenRouter's stable API is chat completions, not the Responses API
+        // that createOpenAI(...)(model) targets by default.
+      }).chat(model);
 
     case "ollama":
       return createOpenAI({
