@@ -53,10 +53,30 @@ export function OpenRouterModelPicker({ value, onChange, placeholder }: Props) {
         value={query}
         onFocus={() => setOpenList(true)}
         onChange={(e) => {
+          // Typing only searches; the model is saved on pick or blur.
           setQuery(e.target.value);
           setOpenList(true);
-          // Typing a full ID by hand is valid, so persist as the user types.
-          onChange(e.target.value.trim());
+        }}
+        onBlur={() => {
+          const typed = query.trim();
+          if (typed === value) return;
+          const known = models.some((m) => m.id === typed);
+          // Accept a hand-typed ID if it's in the catalog, if it's cleared,
+          // or if the catalog couldn't load (offline). Otherwise it was just
+          // a search, so revert instead of saving a bogus model ID.
+          if (known || typed === "" || (loadFailed && typed.includes("/"))) {
+            onChange(typed);
+          } else {
+            setQuery(value);
+          }
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && matches.length > 0) {
+            e.preventDefault();
+            setQuery(matches[0].id);
+            onChange(matches[0].id);
+            setOpenList(false);
+          }
         }}
         style={{
           width: "100%",
