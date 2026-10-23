@@ -92,6 +92,12 @@ pub fn get_secret(key: String) -> Result<Option<String>, String> {
     crate::secrets::get(&key)
 }
 
+/// Whether a secret is stored, without reading it (so no keychain prompt).
+#[tauri::command]
+pub fn secret_exists(key: String) -> Result<bool, String> {
+    crate::secrets::exists(&key)
+}
+
 #[tauri::command]
 pub fn delete_secret(key: String) -> Result<(), String> {
     crate::secrets::delete(&key)

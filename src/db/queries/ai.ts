@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { getDb } from "../client";
 import { backupConfigs } from "../schema";
-import { storeSecret, getSecret } from "../../lib/keychain";
+import { storeSecret, getSecret, secretExists } from "../../lib/keychain";
 import type { AIConfig, AIFeature, AIProvider } from "../../types";
 import { resolveFeatureConfig } from "../../lib/ai";
 
@@ -47,6 +47,10 @@ export async function getAIKey(provider: AIProvider): Promise<string> {
   return (await getSecret(aiKeyName(provider))) ?? "";
 }
 
+export function hasAIKey(provider: AIProvider): Promise<boolean> {
+  return secretExists(aiKeyName(provider));
+}
+
 export async function getAIConfigFor(
   feature: AIFeature,
 ): Promise<AIConfig | null> {
@@ -56,13 +60,8 @@ export async function getAIConfigFor(
 
 export async function setAIConfig(cfg: AIConfig): Promise<void> {
   const db = await getDb();
-  const saved = new Set(cfg.savedKeys ?? []);
-  if (cfg.apiKey) {
-    await storeSecret(aiKeyName(cfg.provider), cfg.apiKey);
-    saved.add(cfg.provider);
-  }
-  const { apiKey: _, ...rest } = cfg;
-  const safe = { ...rest, savedKeys: [...saved] };
+  if (cfg.apiKey) await storeSecret(aiKeyName(cfg.provider), cfg.apiKey);
+  const { apiKey: _, ...safe } = cfg;
   await db
     .insert(backupConfigs)
     .values({ id: AI_CONFIG_ID, configJson: JSON.stringify(safe) })

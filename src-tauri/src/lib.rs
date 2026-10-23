@@ -45,6 +45,7 @@ pub fn run() {
             commands::backup_gdrive,
             commands::store_secret,
             commands::get_secret,
+            commands::secret_exists,
             commands::delete_secret,
         ])
         .run(tauri::generate_context!())

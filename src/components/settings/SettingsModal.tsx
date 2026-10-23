@@ -9,9 +9,11 @@ import {
   getGDriveFolderConfig,
   setGDriveFolderConfig,
 } from "../../db/queries/backups";
+import { deleteSecret } from "../../lib/keychain";
 import {
   getAIConfigWithoutKey,
   getAIKey,
+  hasAIKey,
   setAIConfig,
 } from "../../db/queries/ai";
 import { OpenRouterModelPicker } from "./OpenRouterModelPicker";
@@ -137,8 +139,14 @@ export default function SettingsModal({ onClose }: Props) {
     feedbackMode: "minimal",
   });
   const [aiTesting, setAiTesting] = useState(false);
+  const [keySaved, setKeySaved] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<"ok" | "error" | null>(null);
   const [aiTestErr, setAiTestErr] = useState<string | null>(null);
+
+  // Existence check only: never reads the secret, so it can't prompt.
+  useEffect(() => {
+    hasAIKey(aiCfg.provider).then(setKeySaved, () => setKeySaved(false));
+  }, [aiCfg.provider]);
 
   useEffect(() => {
     Promise.all([
@@ -225,18 +233,18 @@ export default function SettingsModal({ onClose }: Props) {
     setGdriveConnected(false);
   }, []);
 
-  const handleSaveAI = useCallback(async (input: AIConfig) => {
-    const next =
-      input.apiKey && !input.savedKeys?.includes(input.provider)
-        ? {
-            ...input,
-            savedKeys: [...(input.savedKeys ?? []), input.provider],
-          }
-        : input;
+  const handleSaveAI = useCallback(async (next: AIConfig) => {
     setAiCfg(next);
     setAiTestResult(null);
     await setAIConfig(next);
+    if (next.apiKey) setKeySaved(true);
   }, []);
+
+  const handleRemoveKey = useCallback(async () => {
+    await deleteSecret(`ai.apikey.${aiCfg.provider}`);
+    setKeySaved(false);
+    setAiTestResult(null);
+  }, [aiCfg.provider]);
 
   const handleLyricsAIChange = useCallback(async (next: LyricsAIConfig) => {
     setLyricsAICfgState(next);
@@ -696,31 +704,59 @@ export default function SettingsModal({ onClose }: Props) {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {/* API key — cloud only */}
               {isCloud && (
-                <input
-                  className="notes-area"
-                  type="password"
-                  placeholder={
-                    aiCfg.savedKeys?.includes(aiCfg.provider)
-                      ? "Saved in keychain — type to replace"
-                      : aiCfg.provider === "openai"
-                        ? "OpenAI API key (sk-…)"
-                        : aiCfg.provider === "openrouter"
-                          ? "OpenRouter API key (sk-or-…)"
-                          : "Anthropic API key (sk-ant-…)"
-                  }
-                  value={aiCfg.apiKey}
-                  onChange={(e) =>
-                    setAiCfg({ ...aiCfg, apiKey: e.target.value })
-                  }
-                  // Write to the keychain once, not on every keystroke.
-                  onBlur={() => aiCfg.apiKey && handleSaveAI(aiCfg)}
-                  style={{
-                    fontSize: 11,
-                    padding: "6px 8px",
-                    height: "auto",
-                    fontFamily: "var(--font-mono)",
-                  }}
-                />
+                <>
+                  <input
+                    className="notes-area"
+                    type="password"
+                    placeholder={
+                      keySaved
+                        ? "Replace saved key…"
+                        : aiCfg.provider === "openai"
+                          ? "OpenAI API key (sk-…)"
+                          : aiCfg.provider === "openrouter"
+                            ? "OpenRouter API key (sk-or-…)"
+                            : "Anthropic API key (sk-ant-…)"
+                    }
+                    value={aiCfg.apiKey}
+                    onChange={(e) =>
+                      setAiCfg({ ...aiCfg, apiKey: e.target.value })
+                    }
+                    // Write to the keychain once, not on every keystroke, then
+                    // clear the field so the secret doesn't linger in the UI.
+                    onBlur={async () => {
+                      if (!aiCfg.apiKey) return;
+                      await handleSaveAI(aiCfg);
+                      setAiCfg((c) => ({ ...c, apiKey: "" }));
+                    }}
+                    style={{
+                      fontSize: 11,
+                      padding: "6px 8px",
+                      height: "auto",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  />
+                  {keySaved && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        fontSize: 11,
+                      }}
+                    >
+                      <span style={{ color: "var(--green)" }}>
+                        ✓ API key saved in keychain
+                      </span>
+                      <button
+                        className="tb-btn"
+                        style={{ fontSize: 10, padding: "2px 8px" }}
+                        onClick={handleRemoveKey}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
 
               {/* Base URL — local only */}

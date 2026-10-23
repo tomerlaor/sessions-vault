@@ -39,6 +39,23 @@ pub fn get(key: &str) -> Result<Option<String>, String> {
     Ok(result)
 }
 
+// Existence check that never reads the secret, so it can't trigger an OS prompt.
+pub fn exists(key: &str) -> Result<bool, String> {
+    #[cfg(debug_assertions)]
+    {
+        let env_key = key.to_uppercase().replace('-', "_");
+        if std::env::var(&env_key).is_ok() {
+            return Ok(true);
+        }
+    }
+    if let Ok(c) = cache().lock() {
+        if let Some(cached) = c.get(key) {
+            return Ok(cached.is_some());
+        }
+    }
+    platform::exists(SERVICE, key)
+}
+
 pub fn delete(key: &str) -> Result<(), String> {
     platform::delete(SERVICE, key)?;
     if let Ok(mut c) = cache().lock() {
@@ -156,6 +173,23 @@ mod platform {
         }
     }
 
+    // Attributes-only search: finds the item without loading its secret data.
+    pub fn exists(service: &str, key: &str) -> Result<bool, String> {
+        use security_framework::item::{ItemClass, ItemSearchOptions};
+        match ItemSearchOptions::new()
+            .class(ItemClass::generic_password())
+            .service(service)
+            .account(key)
+            .load_attributes(true)
+            .limit(1)
+            .search()
+        {
+            Ok(r) => Ok(!r.is_empty()),
+            Err(e) if e.code() == ERR_NOT_FOUND => Ok(false),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
     // SecItemDelete removes the item without reading its secret, so replacing a
     // key written by an earlier build doesn't trigger a keychain password prompt.
     pub fn delete(service: &str, key: &str) -> Result<(), String> {
@@ -190,6 +224,10 @@ mod platform {
             Err(KErr::NoEntry) => Ok(None),
             Err(e) => Err(e.to_string()),
         }
+    }
+
+    pub fn exists(service: &str, key: &str) -> Result<bool, String> {
+        get(service, key).map(|v| v.is_some())
     }
 
     pub fn delete(service: &str, key: &str) -> Result<(), String> {
