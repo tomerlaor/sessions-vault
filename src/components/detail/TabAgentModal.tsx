@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { getAIConfig } from "../../db/queries/ai";
+import { getAIConfigFor } from "../../db/queries/ai";
 import { generateTabStructure, chatWithTabAgent } from "../../lib/ai";
 import { parseLyricsStructure } from "../../lib/lyrics-structure";
 import type { Project, TabPart, Instrument, AIConfig } from "../../types";
@@ -94,10 +94,12 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
-    getAIConfig().then((cfg) => {
+    getAIConfigFor("tabAgent").then((cfg) => {
       if (
         !cfg?.apiKey &&
-        (cfg?.provider === "openai" || cfg?.provider === "anthropic")
+        (cfg?.provider === "openai" ||
+          cfg?.provider === "anthropic" ||
+          cfg?.provider === "openrouter")
       ) {
         setStep("no-config");
         return;

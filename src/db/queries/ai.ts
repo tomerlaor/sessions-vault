@@ -2,7 +2,8 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../client";
 import { backupConfigs } from "../schema";
 import { storeSecret, getSecret } from "../../lib/keychain";
-import type { AIConfig } from "../../types";
+import type { AIConfig, AIFeature, AIProvider } from "../../types";
+import { resolveFeatureConfig } from "../../lib/ai";
 
 const AI_CONFIG_ID = "ai";
 
@@ -24,6 +25,15 @@ export async function getAIConfig(): Promise<AIConfig | null> {
   } catch {
     return null;
   }
+}
+
+export async function getAIKey(provider: AIProvider): Promise<string> {
+  return (await getSecret(aiKeyName(provider))) ?? "";
+}
+
+export async function getAIConfigFor(feature: AIFeature): Promise<AIConfig | null> {
+  const cfg = await getAIConfig();
+  return cfg ? resolveFeatureConfig(cfg, feature) : null;
 }
 
 export async function setAIConfig(cfg: AIConfig): Promise<void> {

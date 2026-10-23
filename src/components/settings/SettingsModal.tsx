@@ -9,7 +9,8 @@ import {
   getGDriveFolderConfig,
   setGDriveFolderConfig,
 } from "../../db/queries/backups";
-import { getAIConfig, setAIConfig } from "../../db/queries/ai";
+import { getAIConfig, getAIKey, setAIConfig } from "../../db/queries/ai";
+import { OpenRouterModelPicker } from "./OpenRouterModelPicker";
 import {
   getLyricsAIConfig,
   setLyricsAIConfig,
@@ -256,11 +257,16 @@ export default function SettingsModal({ onClose }: Props) {
   const PROVIDERS: { id: AIProvider; label: string }[] = [
     { id: "openai", label: "OpenAI" },
     { id: "anthropic", label: "Anthropic" },
+    { id: "openrouter", label: "OpenRouter" },
     { id: "ollama", label: "Ollama" },
     { id: "lmstudio", label: "LM Studio" },
   ];
 
-  const isCloud = aiCfg.provider === "openai" || aiCfg.provider === "anthropic";
+  const isCloud =
+    aiCfg.provider === "openai" ||
+    aiCfg.provider === "anthropic" ||
+    aiCfg.provider === "openrouter";
+  const isOpenRouter = aiCfg.provider === "openrouter";
   const isLocal = aiCfg.provider === "ollama" || aiCfg.provider === "lmstudio";
   const modelOptions =
     aiCfg.provider === "openai"
@@ -657,8 +663,16 @@ export default function SettingsModal({ onClose }: Props) {
                         }
                       : {}
                   }
-                  onClick={() =>
-                    handleSaveAI({ ...aiCfg, provider: p.id, model: "" })
+                  onClick={async () =>
+                    handleSaveAI({
+                      ...aiCfg,
+                      provider: p.id,
+                      // Keys are stored per provider; don't carry the previous one over.
+                      apiKey: await getAIKey(p.id),
+                      model: "",
+                      lyricsModel: "",
+                      tabAgentModel: "",
+                    })
                   }
                 >
                   {p.label}
@@ -675,7 +689,9 @@ export default function SettingsModal({ onClose }: Props) {
                   placeholder={
                     aiCfg.provider === "openai"
                       ? "OpenAI API key (sk-…)"
-                      : "Anthropic API key (sk-ant-…)"
+                      : aiCfg.provider === "openrouter"
+                        ? "OpenRouter API key (sk-or-…)"
+                        : "Anthropic API key (sk-ant-…)"
                   }
                   value={aiCfg.apiKey}
                   onChange={(e) =>
@@ -709,32 +725,59 @@ export default function SettingsModal({ onClose }: Props) {
               )}
 
               {/* Model — editable with suggestions */}
-              {modelOptions && (
-                <datalist id="ai-model-list">
-                  {modelOptions.map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
+              {isOpenRouter ? (
+                <>
+                  <OpenRouterModelPicker
+                    value={aiCfg.model}
+                    onChange={(model) => handleSaveAI({ ...aiCfg, model })}
+                    placeholder="Default model — search or type an ID…"
+                  />
+                  <Hint>Optional: use a different model per feature.</Hint>
+                  <OpenRouterModelPicker
+                    value={aiCfg.lyricsModel ?? ""}
+                    onChange={(lyricsModel) =>
+                      handleSaveAI({ ...aiCfg, lyricsModel })
+                    }
+                    placeholder="Lyrics AI model (default if empty)"
+                  />
+                  <OpenRouterModelPicker
+                    value={aiCfg.tabAgentModel ?? ""}
+                    onChange={(tabAgentModel) =>
+                      handleSaveAI({ ...aiCfg, tabAgentModel })
+                    }
+                    placeholder="Tab Agent model (default if empty)"
+                  />
+                </>
+              ) : (
+                <>
+                  {modelOptions && (
+                    <datalist id="ai-model-list">
+                      {modelOptions.map((m) => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                  )}
+                  <input
+                    className="notes-area"
+                    list={modelOptions ? "ai-model-list" : undefined}
+                    placeholder={
+                      modelOptions
+                        ? "Model name or pick from list…"
+                        : "Model name (e.g. llama3, mistral)"
+                    }
+                    value={aiCfg.model}
+                    onChange={(e) =>
+                      handleSaveAI({ ...aiCfg, model: e.target.value })
+                    }
+                    style={{
+                      fontSize: 11,
+                      padding: "6px 8px",
+                      height: "auto",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  />
+                </>
               )}
-              <input
-                className="notes-area"
-                list={modelOptions ? "ai-model-list" : undefined}
-                placeholder={
-                  modelOptions
-                    ? "Model name or pick from list…"
-                    : "Model name (e.g. llama3, mistral)"
-                }
-                value={aiCfg.model}
-                onChange={(e) =>
-                  handleSaveAI({ ...aiCfg, model: e.target.value })
-                }
-                style={{
-                  fontSize: 11,
-                  padding: "6px 8px",
-                  height: "auto",
-                  fontFamily: "var(--font-mono)",
-                }}
-              />
 
               {/* Test row */}
               <div

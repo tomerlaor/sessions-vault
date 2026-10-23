@@ -25,13 +25,23 @@ export interface TabGrid {
   cells: Record<string, CellValue>; // key: `${stringIdx}:${colIdx}`
 }
 
-export type AIProvider = "openai" | "anthropic" | "ollama" | "lmstudio";
+export type AIProvider =
+  | "openai"
+  | "anthropic"
+  | "openrouter"
+  | "ollama"
+  | "lmstudio";
+
+export type AIFeature = "lyrics" | "tabAgent";
 
 export interface AIConfig {
   provider: AIProvider;
   apiKey: string;
   baseUrl: string;
   model: string;
+  // Optional per-feature overrides; fall back to `model` when empty.
+  lyricsModel?: string;
+  tabAgentModel?: string;
 }
 
 export interface TabPart {

@@ -55,3 +55,22 @@ As a music creator, I want to add extra string lines to the tab editor and have 
 
 **Priority:** Medium
 **Status:** Draft
+
+---
+
+### US-004: OpenRouter as an AI Provider
+
+**User Story:**
+As a music creator, I want to connect my OpenRouter API key and pick any model it offers so that I can use one account to access many AI models (for lyrics suggestions and the tab agent) without managing a separate key per vendor.
+
+**Acceptance Criteria:**
+- [ ] "OpenRouter" appears in the AI provider list in Settings alongside OpenAI, Anthropic, Ollama and LM Studio
+- [ ] The OpenRouter API key is stored in the OS keychain, never in the SQLite DB or plain-text settings
+- [ ] The model picker lists the full OpenRouter catalog (300+ models, fetched from OpenRouter) with a search box that filters by name or ID, and I can also type a model ID manually (e.g. `anthropic/claude-sonnet-4.6`)
+- [ ] I can choose a different model for Lyrics AI and for the Tab Agent; each falls back to the default model if not set
+- [ ] "Test connection" succeeds with a valid key and shows a clear error for an invalid key or unknown model
+- [ ] Lyrics AI suggestions and the Tab Agent work with OpenRouter, including streaming
+- [ ] If the model list cannot be fetched (offline), the app still works with a manually typed model ID
+
+**Priority:** Medium
+**Status:** Draft
