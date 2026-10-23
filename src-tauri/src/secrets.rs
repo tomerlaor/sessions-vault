@@ -156,13 +156,11 @@ mod platform {
         }
     }
 
+    // SecItemDelete removes the item without reading its secret, so replacing a
+    // key written by an earlier build doesn't trigger a keychain password prompt.
     pub fn delete(service: &str, key: &str) -> Result<(), String> {
-        let kc = SecKeychain::default().map_err(|e| e.to_string())?;
-        match kc.find_generic_password(service, key) {
-            Ok((_, item)) => {
-                item.delete();
-                Ok(())
-            }
+        match security_framework::passwords::delete_generic_password(service, key) {
+            Ok(()) => Ok(()),
             Err(e) if e.code() == ERR_NOT_FOUND => Ok(()),
             Err(e) => Err(e.to_string()),
         }
