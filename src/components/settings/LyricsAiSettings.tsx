@@ -8,6 +8,7 @@ interface Props {
 
 const SUGGESTION_MODES: { id: LyricSuggestionMode; label: string }[] = [
   { id: "completion", label: "Line completion" },
+  { id: "next_word", label: "Next word" },
   { id: "next_line", label: "Next line" },
   { id: "alternative", label: "Alternative phrasing" },
 ];

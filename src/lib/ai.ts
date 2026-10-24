@@ -48,6 +48,7 @@ function logAI(
     finishReason,
     text,
     durationMs,
+    servedBy,
   }: {
     model: string;
     system?: string;
@@ -57,11 +58,15 @@ function logAI(
     finishReason?: string;
     text?: string;
     durationMs: number;
+    // Model that actually answered, as reported by the provider. For routers
+    // such as typesafe/jev-router this may differ from `model`, or just echo it.
+    servedBy?: string;
   },
 ) {
   const clip = (s: string, n = 200) => (s.length > n ? s.slice(0, n) + "…" : s);
   console.group(`%c[AI] ${fn}`, "color:#ff7a45;font-weight:700");
   console.log("model      :", model);
+  console.log("served by  :", servedBy ?? "(not reported)");
   if (system) console.log("system     :", clip(system));
   if (prompt) console.log("prompt     :", clip(prompt));
   if (messages?.length) {
@@ -132,12 +137,13 @@ export async function testAIConnection(cfg: AIConfig): Promise<void> {
   await generateText({
     model: provider,
     prompt: "Reply with the single word: ok",
-    onFinish({ text, usage, finishReason }) {
+    onFinish({ text, usage, finishReason, response }) {
       logAI("testAIConnection", {
         model: cfg.model || cfg.provider,
         prompt: "Reply with the single word: ok",
         usage,
         finishReason,
+        servedBy: response?.modelId,
         text,
         durationMs: Date.now() - t0,
       });
@@ -205,6 +211,7 @@ Return exactly ${input.instruments.length} part(s), one per requested instrument
     prompt,
     usage: result.usage,
     finishReason: result.finishReason,
+    servedBy: result.response?.modelId,
     text: JSON.stringify(result.object),
     durationMs: Date.now() - t0,
   });
@@ -224,13 +231,14 @@ export async function chatWithTabAgent(
     system,
     messages,
     maxOutputTokens: 400,
-    onFinish({ text, usage, finishReason }) {
+    onFinish({ text, usage, finishReason, response }) {
       logAI("chatWithTabAgent", {
         model: cfg.model || cfg.provider,
         system,
         messages,
         usage,
         finishReason,
+        servedBy: response?.modelId,
         text,
         durationMs: Date.now() - t0,
       });
@@ -254,13 +262,14 @@ export async function* streamLyricsSuggestion(
     system,
     prompt,
     maxOutputTokens: 80,
-    onFinish({ text, usage, finishReason }) {
+    onFinish({ text, usage, finishReason, response }) {
       logAI("streamLyricsSuggestion", {
         model: cfg.model || cfg.provider,
         system,
         prompt,
         usage,
         finishReason,
+        servedBy: response?.modelId,
         text,
         durationMs: Date.now() - t0,
       });
@@ -271,10 +280,45 @@ export async function* streamLyricsSuggestion(
   }
 }
 
+export const nextWordOptionsSchema = z.object({
+  options: z.array(
+    z.object({
+      text: z.string(),
+      kind: z.enum(["rhyme", "continuation"]),
+    }),
+  ),
+});
+
+export async function generateNextWordOptions(
+  cfg: AIConfig,
+  system: string,
+  prompt: string,
+): Promise<z.infer<typeof nextWordOptionsSchema>> {
+  const provider = buildProvider(cfg);
+  const t0 = Date.now();
+  const result = await generateObject({
+    model: provider,
+    schema: nextWordOptionsSchema,
+    system,
+    prompt,
+  });
+  logAI("generateNextWordOptions", {
+    model: cfg.model || cfg.provider,
+    system,
+    prompt,
+    usage: result.usage,
+    finishReason: result.finishReason,
+    servedBy: result.response?.modelId,
+    text: JSON.stringify(result.object),
+    durationMs: Date.now() - t0,
+  });
+  return result.object;
+}
+
 export const popupSuggestionsSchema = z.object({
   suggestions: z.array(
     z.object({
-      mode: z.enum(["completion", "alternative", "next_line"]),
+      mode: z.enum(["completion", "alternative", "next_line", "next_word"]),
       text: z.string(),
     }),
   ),
@@ -301,6 +345,7 @@ export async function generatePopupSuggestions(
     prompt,
     usage: result.usage,
     finishReason: result.finishReason,
+    servedBy: result.response?.modelId,
     text: JSON.stringify(result.object),
     durationMs: Date.now() - t0,
   });
@@ -318,12 +363,13 @@ export async function generateStyleSummary(
     model: provider,
     prompt: `Analyse the following song lyric lines written by a musician. Write a 1-2 sentence description of their lyric writing style — focus on rhyme scheme, line length, imagery, tone, and vocabulary register. Be concise and specific.\n\nLines:\n${recentAccepted.map((t, i) => `${i + 1}. ${t}`).join("\n")}\n\nDescription:`,
     maxOutputTokens: 60,
-    onFinish({ text, usage, finishReason }) {
+    onFinish({ text, usage, finishReason, response }) {
       logAI("generateStyleSummary", {
         model: cfg.model || cfg.provider,
         prompt: `${recentAccepted.length} lyric lines`,
         usage,
         finishReason,
+        servedBy: response?.modelId,
         text,
         durationMs: Date.now() - t0,
       });

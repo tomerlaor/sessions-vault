@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import type { Project, LyricSuggestionMode } from "../../../types";
 import LyricsAiOverlay, { type LyricsAiOverlayHandle } from "./LyricsAiOverlay";
 
@@ -150,6 +150,19 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
   const [selectionStart, setSelectionStart] = useState(0);
   const [selectionEnd, setSelectionEnd] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
+  const [contextDraft, setContextDraft] = useState(p.lyricsContext ?? "");
+
+  // Follow the project when switching songs.
+  useEffect(
+    () => setContextDraft(p.lyricsContext ?? ""),
+    [p.id, p.lyricsContext],
+  );
+
+  const saveContext = () => {
+    const next = contextDraft.trim();
+    if (next !== (p.lyricsContext ?? ""))
+      onUpdate("lyricsContext", next || null);
+  };
 
   const text = p.lyrics ?? "";
   const autoRtl = useMemo(() => detectRtl(text || draft), [text, draft]);
@@ -175,7 +188,7 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
     const lineEnd = draft.indexOf("\n", selectionStart);
     const insertAt = lineEnd === -1 ? draft.length : lineEnd;
     setDraft((prev) => {
-      if (mode === "completion") {
+      if (mode === "completion" || mode === "next_word") {
         return (
           prev.slice(0, selectionStart) +
           suggestion +
@@ -271,6 +284,44 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
               ))}
             </div>
           )}
+          <div
+            style={{
+              padding: "8px 12px",
+              borderBottom: "1px solid var(--line)",
+              background: "var(--bg-1)",
+            }}
+          >
+            <label
+              style={{
+                display: "block",
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                color: "var(--text-3)",
+                marginBottom: 4,
+              }}
+            >
+              Song context — used by the AI
+            </label>
+            <textarea
+              className="notes-area"
+              dir="auto"
+              rows={2}
+              maxLength={500}
+              placeholder="What's the song about? Mood, meaning, story — a few short sentences. e.g. A breakup song. Bittersweet and nostalgic. She left in the summer; I'm still in our old apartment."
+              value={contextDraft}
+              onChange={(e) => setContextDraft(e.target.value)}
+              onBlur={saveContext}
+              style={{
+                width: "100%",
+                fontSize: 12,
+                padding: "6px 8px",
+                height: "auto",
+                resize: "vertical",
+              }}
+            />
+          </div>
           <div style={{ position: "relative" }}>
             <LyricsAiOverlay
               ref={overlayRef}

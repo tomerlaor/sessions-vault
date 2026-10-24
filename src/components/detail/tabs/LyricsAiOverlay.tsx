@@ -19,12 +19,16 @@ import {
 import {
   streamLyricsSuggestion,
   generatePopupSuggestions,
+  generateNextWordOptions,
   generateStyleSummary,
 } from "../../../lib/ai";
 import {
   buildLyricsSuggestionPrompt,
   buildLyricsPopupPrompt,
+  buildNextWordOptionsPrompt,
   determineSuggestionMode,
+  normalizeNextWord,
+  normalizeNextWordOptions,
 } from "../../../lib/lyrics-ai";
 import type {
   Project,
@@ -43,6 +47,8 @@ export interface LyricsAiOverlayHandle {
 interface PopupItem {
   mode: LyricSuggestionMode;
   text: string;
+  // Shown instead of the mode name, e.g. "rhyme" for a rhyming next-word option.
+  label?: string;
 }
 
 interface Props {
@@ -172,12 +178,14 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
           lineStart,
           lineEnd === -1 ? undefined : lineEnd,
         );
+        const lineTextBeforeCursor = draft.slice(lineStart, selectionStart);
 
         const recentAccepted = await getRecentAccepted(project.id, 5);
 
         const baseInput = {
           lyrics: draft,
           currentLine,
+          textBeforeCursor: lineTextBeforeCursor,
           selectionStart,
           selectionEnd,
           title: project.title,
@@ -187,9 +195,51 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
           globalProfile,
           projectProfile,
           recentAccepted,
+          songContext: project.lyricsContext,
         };
 
-        if (cfg.mode === "popup") {
+        if (mode === "next_word" && cfg.mode === "inline") {
+          // In popup display mode the popup prompt already lists several
+          // next_word options alongside the other modes.
+          // Several candidates (one rhyming), shown in the suggestion list.
+          setGhostText("");
+          setCurrentSuggestion(null);
+          setPopupItems([]);
+          setStatus("loading");
+          try {
+            const { system, prompt } = buildNextWordOptionsPrompt(baseInput);
+            const result = await generateNextWordOptions(
+              aiConfig,
+              system,
+              prompt,
+            );
+            if (aborted) return;
+            const options = normalizeNextWordOptions(
+              result.options,
+              lineTextBeforeCursor,
+            );
+            if (options.length === 0) {
+              setStatus("idle");
+              return;
+            }
+            setPopupItems(
+              options.map((o) => ({
+                mode: "next_word",
+                text: o.text,
+                label: o.kind === "rhyme" ? "rhyme" : undefined,
+              })),
+            );
+            // Tab accepts the first (most natural) option.
+            setCurrentSuggestion(options[0].text);
+            setStatus("ready");
+          } catch (err) {
+            if (!aborted) {
+              setErrorMsg(err instanceof Error ? err.message : "AI request failed");
+              setStatus("error");
+              setTimeout(() => { setStatus("idle"); setErrorMsg(null); }, 6000);
+            }
+          }
+        } else if (cfg.mode === "popup") {
           setStatus("loading");
           try {
             const { system, prompt } = buildLyricsPopupPrompt({
@@ -202,7 +252,16 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               prompt,
             );
             if (!aborted) {
-              setPopupItems(result.suggestions);
+              setPopupItems(
+                result.suggestions.map((s) =>
+                  s.mode === "next_word"
+                    ? {
+                        ...s,
+                        text: normalizeNextWord(s.text, lineTextBeforeCursor),
+                      }
+                    : s,
+                ),
+              );
               setStatus("ready");
             }
           } catch (err) {
@@ -212,7 +271,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               setTimeout(() => { setStatus("idle"); setErrorMsg(null); }, 6000);
             }
           }
-        } else {
+        } else if (mode !== "next_word") {
           setGhostText("");
           setCurrentSuggestion(null);
           setStatus("loading");
@@ -350,7 +409,9 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
     useImperativeHandle(
       ref,
       () => ({
-        hasSuggestion: () => cfg.mode === "inline" && !!currentSuggestion,
+        hasSuggestion: () =>
+          (cfg.mode === "inline" || currentMode === "next_word") &&
+          !!currentSuggestion,
         acceptSuggestion: () => {
           if (currentSuggestion && currentMode)
             handleAccept(currentSuggestion, currentMode);
@@ -413,7 +474,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
           </div>
         )}
 
-        {cfg.mode === "popup" &&
+        {(cfg.mode === "popup" || currentMode === "next_word") &&
           (status === "loading" || status === "ready") && (
             <div
               style={{
@@ -471,7 +532,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
                         paddingTop: 2,
                       }}
                     >
-                      {item.mode.replace("_", " ")}
+                      {item.label ?? item.mode.replace("_", " ")}
                     </span>
                     <span
                       style={{

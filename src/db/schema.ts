@@ -24,6 +24,7 @@ export const projects = sqliteTable("projects", {
   lyrics: text("lyrics"),
   todos: text("todos"),
   tabs: text("tabs"),
+  lyricsContext: text("lyrics_context"),
   durationSecs: real("duration_secs"),
   createdAt: integer("created_at").notNull(),
   modifiedAt: integer("modified_at").notNull(),

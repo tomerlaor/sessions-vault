@@ -70,6 +70,7 @@ export interface Project {
   lyrics: string | null;
   todos: string | null;
   tabs: string | null;
+  lyricsContext: string | null;
   durationSecs: number | null;
   createdAt: number;
   modifiedAt: number;
@@ -113,7 +114,11 @@ export interface WatchedFolder {
   addedAt: number;
 }
 
-export type LyricSuggestionMode = "completion" | "alternative" | "next_line";
+export type LyricSuggestionMode =
+  | "completion"
+  | "alternative"
+  | "next_line"
+  | "next_word";
 export type LyricFeedbackMode = "minimal" | "tagged";
 export type LyricDisplayMode = "inline" | "popup";
 export type LyricRejectionTag =
