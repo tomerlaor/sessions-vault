@@ -3,6 +3,9 @@ import {
   nextVersionLabel,
   markFinal,
   inferExportType,
+  formatAudioSummary,
+  audioWarnings,
+  formatMediaSummary,
 } from "../src/lib/project-files";
 
 describe("nextVersionLabel", () => {
@@ -56,5 +59,71 @@ describe("inferExportType", () => {
 
   it("defaults to mix", () => {
     expect(inferExportType("Song.wav")).toBe("mix");
+  });
+});
+
+describe("formatAudioSummary", () => {
+  it("joins rate, depth, duration and peak", () => {
+    expect(
+      formatAudioSummary({
+        sampleRate: 48000,
+        bitDepth: 24,
+        durationSecs: 222,
+        peakDb: -3.14,
+      }),
+    ).toBe("48 kHz · 24-bit · 3:42 · peak -3.1 dBFS");
+  });
+
+  it("shows 44.1 kHz with a decimal", () => {
+    expect(
+      formatAudioSummary({
+        sampleRate: 44100,
+        bitDepth: 16,
+        durationSecs: 60,
+        peakDb: 0,
+      }),
+    ).toBe("44.1 kHz · 16-bit · 1:00 · peak 0.0 dBFS");
+  });
+
+  it("skips fields that are unknown", () => {
+    expect(
+      formatAudioSummary({
+        sampleRate: null,
+        bitDepth: null,
+        durationSecs: null,
+        peakDb: null,
+      }),
+    ).toBe("");
+  });
+});
+
+describe("audioWarnings", () => {
+  it("warns about clipping and lossy files", () => {
+    expect(audioWarnings({ clipped: true, lossy: true })).toEqual([
+      "Clipping",
+      "Lossy",
+    ]);
+  });
+
+  it("returns nothing for a clean file", () => {
+    expect(audioWarnings({ clipped: false, lossy: false })).toEqual([]);
+  });
+});
+
+describe("formatMediaSummary", () => {
+  it("is null when the check did not run", () => {
+    expect(formatMediaSummary(null, null)).toBeNull();
+  });
+
+  it("says all media found when nothing is wrong", () => {
+    expect(formatMediaSummary(0, 0)).toBe("All media found");
+  });
+
+  it("lists missing and outside-folder counts", () => {
+    expect(formatMediaSummary(2, 5)).toBe("2 missing · 5 outside folder");
+  });
+
+  it("omits the zero part", () => {
+    expect(formatMediaSummary(0, 3)).toBe("3 outside folder");
   });
 });

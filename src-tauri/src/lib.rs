@@ -51,6 +51,7 @@ pub fn run() {
             commands::inspect_audio,
             commands::inspect_project_media,
             commands::file_exists_many,
+            commands::file_stat,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

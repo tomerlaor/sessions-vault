@@ -6,6 +6,7 @@ import OverviewTab from "./tabs/OverviewTab";
 import LyricsTab from "./tabs/LyricsTab";
 import TabTab from "./tabs/TabTab";
 import HistoryTab from "./tabs/HistoryTab";
+import FilesTab from "./tabs/FilesTab";
 import TodoTab from "./tabs/TodoTab";
 import { updateProjectField, renameProject } from "../../db/queries/projects";
 import type { Project, Tag } from "../../types";
@@ -32,6 +33,7 @@ const TABS = [
   { id: "overview", label: "Overview", icon: "music" },
   { id: "lyrics", label: "Lyrics", icon: "section" },
   { id: "tab", label: "Tab", icon: "music" },
+  { id: "files", label: "Files", icon: "paperclip" },
   { id: "history", label: "Sync", icon: "history" },
   { id: "todo", label: "To-do", icon: "check" },
 ] as const;
@@ -281,6 +283,7 @@ export default function DetailPanel({
         )}
         {tab === "lyrics" && <LyricsTab project={p} onUpdate={handleUpdate} />}
         {tab === "tab" && <TabTab project={p} onUpdate={handleUpdate} />}
+        {tab === "files" && <FilesTab key={p.id} project={p} />}
         {tab === "history" && <HistoryTab project={p} />}
         {tab === "todo" && (
           <TodoTab key={p.id} project={p} onUpdate={handleUpdate} />

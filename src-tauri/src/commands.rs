@@ -231,3 +231,8 @@ pub async fn inspect_project_media(
 pub fn file_exists_many(paths: Vec<String>) -> Vec<bool> {
     crate::fsutil::exists_many(&paths)
 }
+
+#[tauri::command]
+pub fn file_stat(path: String) -> Result<crate::fsutil::FileStat, String> {
+    crate::fsutil::stat(&path)
+}
