@@ -4,12 +4,19 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   getLocalConfig,
   setLocalConfig,
-  getGDriveConfig,
+  isGDriveConnected,
   setGDriveConfig,
   getGDriveFolderConfig,
   setGDriveFolderConfig,
 } from "../../db/queries/backups";
-import { getAIConfig, setAIConfig } from "../../db/queries/ai";
+import { deleteSecret } from "../../lib/keychain";
+import {
+  getAIConfigWithoutKey,
+  getAIKey,
+  hasAIKey,
+  setAIConfig,
+} from "../../db/queries/ai";
+import { OpenRouterModelPicker } from "./OpenRouterModelPicker";
 import {
   getLyricsAIConfig,
   setLyricsAIConfig,
@@ -112,7 +119,7 @@ export default function SettingsModal({ onClose }: Props) {
   const [gdriveFolderCfg, setGDriveFolderCfg] = useState<LocalConfig | null>(
     null,
   );
-  const [gdriveCfg, setGdriveCfg] = useState<GDriveConfig | null>(null);
+  const [gdriveConnected, setGdriveConnected] = useState(false);
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [connecting, setConnecting] = useState(false);
@@ -132,21 +139,27 @@ export default function SettingsModal({ onClose }: Props) {
     feedbackMode: "minimal",
   });
   const [aiTesting, setAiTesting] = useState(false);
+  const [keySaved, setKeySaved] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<"ok" | "error" | null>(null);
   const [aiTestErr, setAiTestErr] = useState<string | null>(null);
+
+  // Existence check only: never reads the secret, so it can't prompt.
+  useEffect(() => {
+    hasAIKey(aiCfg.provider).then(setKeySaved, () => setKeySaved(false));
+  }, [aiCfg.provider]);
 
   useEffect(() => {
     Promise.all([
       getLocalConfig(),
       getGDriveFolderConfig(),
-      getGDriveConfig(),
+      isGDriveConnected(),
       invoke<string[]>("detect_gdrive_paths"),
-      getAIConfig(),
+      getAIConfigWithoutKey(),
       getLyricsAIConfig(),
     ]).then(([lc, gf, gc, paths, ai, lyricsAI]) => {
       setLocalCfg(lc);
       setGDriveFolderCfg(gf);
-      setGdriveCfg(gc);
+      setGdriveConnected(gc);
       setDetectedPaths(paths);
       if (ai) setAiCfg(ai);
       setLyricsAICfgState(lyricsAI);
@@ -198,7 +211,7 @@ export default function SettingsModal({ onClose }: Props) {
         tokenExpiry: Math.floor(Date.now() / 1000) + tokens.expiresIn,
       };
       await setGDriveConfig(cfg);
-      setGdriveCfg(cfg);
+      setGdriveConnected(true);
       setClientId("");
       setClientSecret("");
     } catch (e) {
@@ -217,14 +230,21 @@ export default function SettingsModal({ onClose }: Props) {
       tokenExpiry: null,
     };
     await setGDriveConfig(blank);
-    setGdriveCfg(null);
+    setGdriveConnected(false);
   }, []);
 
   const handleSaveAI = useCallback(async (next: AIConfig) => {
     setAiCfg(next);
     setAiTestResult(null);
     await setAIConfig(next);
+    if (next.apiKey) setKeySaved(true);
   }, []);
+
+  const handleRemoveKey = useCallback(async () => {
+    await deleteSecret(`ai.apikey.${aiCfg.provider}`);
+    setKeySaved(false);
+    setAiTestResult(null);
+  }, [aiCfg.provider]);
 
   const handleLyricsAIChange = useCallback(async (next: LyricsAIConfig) => {
     setLyricsAICfgState(next);
@@ -243,7 +263,9 @@ export default function SettingsModal({ onClose }: Props) {
     setAiTestResult(null);
     setAiTestErr(null);
     try {
-      await testAIConnection(aiCfg);
+      // The key is only read from the keychain when actually needed.
+      const apiKey = aiCfg.apiKey || (await getAIKey(aiCfg.provider));
+      await testAIConnection({ ...aiCfg, apiKey });
       setAiTestResult("ok");
     } catch (e) {
       setAiTestResult("error");
@@ -256,11 +278,16 @@ export default function SettingsModal({ onClose }: Props) {
   const PROVIDERS: { id: AIProvider; label: string }[] = [
     { id: "openai", label: "OpenAI" },
     { id: "anthropic", label: "Anthropic" },
+    { id: "openrouter", label: "OpenRouter" },
     { id: "ollama", label: "Ollama" },
     { id: "lmstudio", label: "LM Studio" },
   ];
 
-  const isCloud = aiCfg.provider === "openai" || aiCfg.provider === "anthropic";
+  const isCloud =
+    aiCfg.provider === "openai" ||
+    aiCfg.provider === "anthropic" ||
+    aiCfg.provider === "openrouter";
+  const isOpenRouter = aiCfg.provider === "openrouter";
   const isLocal = aiCfg.provider === "ollama" || aiCfg.provider === "lmstudio";
   const modelOptions =
     aiCfg.provider === "openai"
@@ -554,7 +581,7 @@ export default function SettingsModal({ onClose }: Props) {
                 </li>
               </ol>
 
-              {gdriveCfg?.refreshToken ? (
+              {gdriveConnected ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <div
                     style={{
@@ -658,7 +685,15 @@ export default function SettingsModal({ onClose }: Props) {
                       : {}
                   }
                   onClick={() =>
-                    handleSaveAI({ ...aiCfg, provider: p.id, model: "" })
+                    handleSaveAI({
+                      ...aiCfg,
+                      provider: p.id,
+                      // Keys are stored per provider; don't carry the previous one over.
+                      apiKey: "",
+                      model: "",
+                      lyricsModel: "",
+                      tabAgentModel: "",
+                    })
                   }
                 >
                   {p.label}
@@ -669,25 +704,59 @@ export default function SettingsModal({ onClose }: Props) {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {/* API key — cloud only */}
               {isCloud && (
-                <input
-                  className="notes-area"
-                  type="password"
-                  placeholder={
-                    aiCfg.provider === "openai"
-                      ? "OpenAI API key (sk-…)"
-                      : "Anthropic API key (sk-ant-…)"
-                  }
-                  value={aiCfg.apiKey}
-                  onChange={(e) =>
-                    handleSaveAI({ ...aiCfg, apiKey: e.target.value })
-                  }
-                  style={{
-                    fontSize: 11,
-                    padding: "6px 8px",
-                    height: "auto",
-                    fontFamily: "var(--font-mono)",
-                  }}
-                />
+                <>
+                  <input
+                    className="notes-area"
+                    type="password"
+                    placeholder={
+                      keySaved
+                        ? "Replace saved key…"
+                        : aiCfg.provider === "openai"
+                          ? "OpenAI API key (sk-…)"
+                          : aiCfg.provider === "openrouter"
+                            ? "OpenRouter API key (sk-or-…)"
+                            : "Anthropic API key (sk-ant-…)"
+                    }
+                    value={aiCfg.apiKey}
+                    onChange={(e) =>
+                      setAiCfg({ ...aiCfg, apiKey: e.target.value })
+                    }
+                    // Write to the keychain once, not on every keystroke, then
+                    // clear the field so the secret doesn't linger in the UI.
+                    onBlur={async () => {
+                      if (!aiCfg.apiKey) return;
+                      await handleSaveAI(aiCfg);
+                      setAiCfg((c) => ({ ...c, apiKey: "" }));
+                    }}
+                    style={{
+                      fontSize: 11,
+                      padding: "6px 8px",
+                      height: "auto",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  />
+                  {keySaved && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        fontSize: 11,
+                      }}
+                    >
+                      <span style={{ color: "var(--green)" }}>
+                        ✓ API key saved in keychain
+                      </span>
+                      <button
+                        className="tb-btn"
+                        style={{ fontSize: 10, padding: "2px 8px" }}
+                        onClick={handleRemoveKey}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
 
               {/* Base URL — local only */}
@@ -709,32 +778,59 @@ export default function SettingsModal({ onClose }: Props) {
               )}
 
               {/* Model — editable with suggestions */}
-              {modelOptions && (
-                <datalist id="ai-model-list">
-                  {modelOptions.map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
+              {isOpenRouter ? (
+                <>
+                  <OpenRouterModelPicker
+                    value={aiCfg.model}
+                    onChange={(model) => handleSaveAI({ ...aiCfg, model })}
+                    placeholder="Default model — search or type an ID…"
+                  />
+                  <Hint>Optional: use a different model per feature.</Hint>
+                  <OpenRouterModelPicker
+                    value={aiCfg.lyricsModel ?? ""}
+                    onChange={(lyricsModel) =>
+                      handleSaveAI({ ...aiCfg, lyricsModel })
+                    }
+                    placeholder="Lyrics AI model (default if empty)"
+                  />
+                  <OpenRouterModelPicker
+                    value={aiCfg.tabAgentModel ?? ""}
+                    onChange={(tabAgentModel) =>
+                      handleSaveAI({ ...aiCfg, tabAgentModel })
+                    }
+                    placeholder="Tab Agent model (default if empty)"
+                  />
+                </>
+              ) : (
+                <>
+                  {modelOptions && (
+                    <datalist id="ai-model-list">
+                      {modelOptions.map((m) => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                  )}
+                  <input
+                    className="notes-area"
+                    list={modelOptions ? "ai-model-list" : undefined}
+                    placeholder={
+                      modelOptions
+                        ? "Model name or pick from list…"
+                        : "Model name (e.g. llama3, mistral)"
+                    }
+                    value={aiCfg.model}
+                    onChange={(e) =>
+                      handleSaveAI({ ...aiCfg, model: e.target.value })
+                    }
+                    style={{
+                      fontSize: 11,
+                      padding: "6px 8px",
+                      height: "auto",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  />
+                </>
               )}
-              <input
-                className="notes-area"
-                list={modelOptions ? "ai-model-list" : undefined}
-                placeholder={
-                  modelOptions
-                    ? "Model name or pick from list…"
-                    : "Model name (e.g. llama3, mistral)"
-                }
-                value={aiCfg.model}
-                onChange={(e) =>
-                  handleSaveAI({ ...aiCfg, model: e.target.value })
-                }
-                style={{
-                  fontSize: 11,
-                  padding: "6px 8px",
-                  height: "auto",
-                  fontFamily: "var(--font-mono)",
-                }}
-              />
 
               {/* Test row */}
               <div

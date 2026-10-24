@@ -6,7 +6,7 @@ import {
   useImperativeHandle,
   forwardRef,
 } from "react";
-import { getAIConfig } from "../../../db/queries/ai";
+import { getAIConfigFor } from "../../../db/queries/ai";
 import {
   getLyricsAIConfig,
   getStyleProfile,
@@ -116,7 +116,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
     );
 
     useEffect(() => {
-      Promise.all([getAIConfig(), getLyricsAIConfig()]).then(
+      Promise.all([getAIConfigFor("lyrics"), getLyricsAIConfig()]).then(
         ([ai, lyricsAI]) => {
           setAiConfig(ai);
           setCfg(lyricsAI);

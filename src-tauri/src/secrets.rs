@@ -39,6 +39,23 @@ pub fn get(key: &str) -> Result<Option<String>, String> {
     Ok(result)
 }
 
+// Existence check that never reads the secret, so it can't trigger an OS prompt.
+pub fn exists(key: &str) -> Result<bool, String> {
+    #[cfg(debug_assertions)]
+    {
+        let env_key = key.to_uppercase().replace('-', "_");
+        if std::env::var(&env_key).is_ok() {
+            return Ok(true);
+        }
+    }
+    if let Ok(c) = cache().lock() {
+        if let Some(cached) = c.get(key) {
+            return Ok(cached.is_some());
+        }
+    }
+    platform::exists(SERVICE, key)
+}
+
 pub fn delete(key: &str) -> Result<(), String> {
     platform::delete(SERVICE, key)?;
     if let Ok(mut c) = cache().lock() {
@@ -78,7 +95,7 @@ mod platform {
 
         fn SecAccessCreate(
             descriptor: CFTypeRef,
-            trusted_list: *const CFTypeRef, // CFArrayRef
+            trusted_list: CFTypeRef, // CFArrayRef (the array itself, not a pointer to it)
             access: *mut CFTypeRef,
         ) -> OSStatus;
 
@@ -120,7 +137,7 @@ mod platform {
 
         let descriptor = CFString::new("SessionsVault");
         let mut access: CFTypeRef = ptr::null();
-        let status = SecAccessCreate(descriptor.as_CFTypeRef(), &array as *const _ as _, &mut access);
+        let status = SecAccessCreate(descriptor.as_CFTypeRef(), array as CFTypeRef, &mut access);
         CFRelease(array as _);
 
         if status == 0 && !access.is_null() {
@@ -156,13 +173,28 @@ mod platform {
         }
     }
 
+    // Attributes-only search: finds the item without loading its secret data.
+    pub fn exists(service: &str, key: &str) -> Result<bool, String> {
+        use security_framework::item::{ItemClass, ItemSearchOptions};
+        match ItemSearchOptions::new()
+            .class(ItemClass::generic_password())
+            .service(service)
+            .account(key)
+            .load_attributes(true)
+            .limit(1)
+            .search()
+        {
+            Ok(r) => Ok(!r.is_empty()),
+            Err(e) if e.code() == ERR_NOT_FOUND => Ok(false),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    // SecItemDelete removes the item without reading its secret, so replacing a
+    // key written by an earlier build doesn't trigger a keychain password prompt.
     pub fn delete(service: &str, key: &str) -> Result<(), String> {
-        let kc = SecKeychain::default().map_err(|e| e.to_string())?;
-        match kc.find_generic_password(service, key) {
-            Ok((_, item)) => {
-                item.delete();
-                Ok(())
-            }
+        match security_framework::passwords::delete_generic_password(service, key) {
+            Ok(()) => Ok(()),
             Err(e) if e.code() == ERR_NOT_FOUND => Ok(()),
             Err(e) => Err(e.to_string()),
         }
@@ -192,6 +224,10 @@ mod platform {
             Err(KErr::NoEntry) => Ok(None),
             Err(e) => Err(e.to_string()),
         }
+    }
+
+    pub fn exists(service: &str, key: &str) -> Result<bool, String> {
+        get(service, key).map(|v| v.is_some())
     }
 
     pub fn delete(service: &str, key: &str) -> Result<(), String> {

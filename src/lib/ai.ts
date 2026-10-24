@@ -3,11 +3,13 @@ import type { LanguageModelUsage } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
-import type { AIConfig, Instrument } from "../types";
+import type { AIConfig, AIFeature, Instrument } from "../types";
+import { OPENROUTER_BASE_URL } from "./openrouter";
 
 const DEFAULT_MODELS: Record<string, string> = {
   openai: "gpt-4.1-mini",
   anthropic: "claude-haiku-4-5-20251001",
+  openrouter: "anthropic/claude-haiku-4.5",
   ollama: "llama3",
   lmstudio: "local-model",
 };
@@ -64,7 +66,9 @@ function logAI(
   if (prompt) console.log("prompt     :", clip(prompt));
   if (messages?.length) {
     console.group("messages");
-    messages.forEach((m) => console.log(`  ${m.role.padEnd(9)}:`, clip(m.content)));
+    messages.forEach((m) =>
+      console.log(`  ${m.role.padEnd(9)}:`, clip(m.content)),
+    );
     console.groupEnd();
   }
   console.log("duration   :", `${durationMs}ms`);
@@ -80,6 +84,15 @@ function logAI(
   console.groupEnd();
 }
 
+// Returns cfg with `model` replaced by the feature's override, if one is set.
+export function resolveFeatureConfig(
+  cfg: AIConfig,
+  feature: AIFeature,
+): AIConfig {
+  const override = feature === "lyrics" ? cfg.lyricsModel : cfg.tabAgentModel;
+  return override ? { ...cfg, model: override } : cfg;
+}
+
 function buildProvider(cfg: AIConfig) {
   const model = cfg.model || DEFAULT_MODELS[cfg.provider];
 
@@ -89,6 +102,15 @@ function buildProvider(cfg: AIConfig) {
 
     case "anthropic":
       return createAnthropic({ apiKey: cfg.apiKey })(model);
+
+    case "openrouter":
+      return createOpenAI({
+        baseURL: OPENROUTER_BASE_URL,
+        apiKey: cfg.apiKey,
+        headers: { "X-Title": "Sessions" },
+        // OpenRouter's stable API is chat completions, not the Responses API
+        // that createOpenAI(...)(model) targets by default.
+      }).chat(model);
 
     case "ollama":
       return createOpenAI({
