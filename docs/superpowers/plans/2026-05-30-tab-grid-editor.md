@@ -12,23 +12,24 @@
 
 ## File Map
 
-| Action | File | Responsibility |
-|---|---|---|
-| Modify | `src/types/index.ts` | Add `CellValue`, `TabGrid`; add `grid?` to `TabPart` |
-| Create | `src/lib/tab-grid.ts` | Constants, `defaultGrid`, `gridToText`, `parseTabToGrid` |
-| Create | `tests/tab-grid.test.ts` | Unit tests for utility functions |
-| Create | `src/hooks/useTabGrid.ts` | Grid state, selected cell, active annotation, place/clear/extend |
-| Create | `src/components/detail/tabs/AnnotationToolbar.tsx` | Grouped annotation buttons, active annotation tracking |
-| Create | `src/components/detail/tabs/TabGridEditor.tsx` | String lines, floating tokens, chord highlight, click-to-place |
-| Create | `src/components/detail/tabs/TabExpandedModal.tsx` | Modal wrapper for 64-col expanded view |
-| Modify | `src/components/detail/tabs/TabTab.tsx` | Wire all new components, remove textarea/pre |
-| Modify | `src/styles/app.css` | Add CSS for grid editor, annotation toolbar, expanded modal |
+| Action | File                                               | Responsibility                                                   |
+| ------ | -------------------------------------------------- | ---------------------------------------------------------------- |
+| Modify | `src/types/index.ts`                               | Add `CellValue`, `TabGrid`; add `grid?` to `TabPart`             |
+| Create | `src/lib/tab-grid.ts`                              | Constants, `defaultGrid`, `gridToText`, `parseTabToGrid`         |
+| Create | `tests/tab-grid.test.ts`                           | Unit tests for utility functions                                 |
+| Create | `src/hooks/useTabGrid.ts`                          | Grid state, selected cell, active annotation, place/clear/extend |
+| Create | `src/components/detail/tabs/AnnotationToolbar.tsx` | Grouped annotation buttons, active annotation tracking           |
+| Create | `src/components/detail/tabs/TabGridEditor.tsx`     | String lines, floating tokens, chord highlight, click-to-place   |
+| Create | `src/components/detail/tabs/TabExpandedModal.tsx`  | Modal wrapper for 64-col expanded view                           |
+| Modify | `src/components/detail/tabs/TabTab.tsx`            | Wire all new components, remove textarea/pre                     |
+| Modify | `src/styles/app.css`                               | Add CSS for grid editor, annotation toolbar, expanded modal      |
 
 ---
 
 ## Task 1: Add Types
 
 **Files:**
+
 - Modify: `src/types/index.ts`
 
 - [ ] **Step 1: Add `CellValue` and `TabGrid` types, extend `TabPart`**
@@ -37,8 +38,7 @@ Open `src/types/index.ts` and add after the `Instrument` type definition (line 1
 
 ```typescript
 export type CellValue =
-  | { kind: "fret"; value: string }
-  | { kind: "annotation"; value: string };
+  { kind: "fret"; value: string } | { kind: "annotation"; value: string };
 
 export interface TabGrid {
   strings: string[];
@@ -79,6 +79,7 @@ git commit -m "feat: add TabGrid and CellValue types"
 ## Task 2: Utility Library — Constants, `defaultGrid`, and `gridToText`
 
 **Files:**
+
 - Create: `src/lib/tab-grid.ts`
 - Create: `tests/tab-grid.test.ts`
 
@@ -88,7 +89,12 @@ Create `tests/tab-grid.test.ts`:
 
 ```typescript
 import { describe, it, expect } from "vitest";
-import { gridToText, defaultGrid, COL_WIDTH, COLS_PER_BAR } from "../src/lib/tab-grid";
+import {
+  gridToText,
+  defaultGrid,
+  COL_WIDTH,
+  COLS_PER_BAR,
+} from "../src/lib/tab-grid";
 import type { TabGrid } from "../src/types";
 
 describe("constants", () => {
@@ -251,6 +257,7 @@ git commit -m "feat: add tab-grid utility — constants, defaultGrid, gridToText
 ## Task 3: Utility Library — `parseTabToGrid`
 
 **Files:**
+
 - Modify: `src/lib/tab-grid.ts`
 - Modify: `tests/tab-grid.test.ts`
 
@@ -345,7 +352,19 @@ Expected: `parseTabToGrid` tests FAIL with "parseTabToGrid is not a function".
 Add after `gridToText`:
 
 ```typescript
-const ANNOTATION_CHARS = new Set(["h", "p", "b", "r", "~", "/", "\\", "x", "T", "V", "s"]);
+const ANNOTATION_CHARS = new Set([
+  "h",
+  "p",
+  "b",
+  "r",
+  "~",
+  "/",
+  "\\",
+  "x",
+  "T",
+  "V",
+  "s",
+]);
 
 export function parseTabToGrid(content: string): TabGrid | null {
   if (!content) return null;
@@ -361,12 +380,15 @@ export function parseTabToGrid(content: string): TabGrid | null {
     if (pipeIdx === -1) continue;
     const label = line.slice(0, pipeIdx).trim();
     const lastPipe = line.lastIndexOf("|");
-    const body = line.slice(pipeIdx + 1, lastPipe === pipeIdx ? undefined : lastPipe);
+    const body = line.slice(
+      pipeIdx + 1,
+      lastPipe === pipeIdx ? undefined : lastPipe,
+    );
 
     strings.push(label);
     const cells: Record<string, CellValue> = {};
     let ci = 0; // column index
-    let i = 0;  // char index in body
+    let i = 0; // char index in body
     while (i < body.length) {
       const ch = body[i];
       if (ch === "-") {
@@ -450,6 +472,7 @@ git commit -m "feat: add parseTabToGrid to tab-grid utilities"
 ## Task 4: `useTabGrid` Hook
 
 **Files:**
+
 - Create: `src/hooks/useTabGrid.ts`
 
 - [ ] **Step 1: Create the hook**
@@ -459,7 +482,12 @@ Create `src/hooks/useTabGrid.ts`:
 ```typescript
 import { useState, useCallback } from "react";
 import type { TabGrid, CellValue, Instrument } from "../types";
-import { defaultGrid, gridToText, parseTabToGrid, COLS_PER_BAR } from "../lib/tab-grid";
+import {
+  defaultGrid,
+  gridToText,
+  parseTabToGrid,
+  COLS_PER_BAR,
+} from "../lib/tab-grid";
 
 export interface SelectedCell {
   stringIdx: number;
@@ -478,7 +506,11 @@ export interface UseTabGridReturn {
   moveSelection: (ds: number, dc: number) => void;
 }
 
-function initGrid(instrument: Instrument, content: string, existingGrid?: TabGrid): TabGrid {
+function initGrid(
+  instrument: Instrument,
+  content: string,
+  existingGrid?: TabGrid,
+): TabGrid {
   if (existingGrid) return existingGrid;
   const parsed = content ? parseTabToGrid(content) : null;
   return parsed ?? defaultGrid(instrument);
@@ -511,7 +543,9 @@ export function useTabGrid(
   const placeValue = useCallback(
     (stringIdx: number, colIdx: number, value: string) => {
       const key = `${stringIdx}:${colIdx}`;
-      const kind: CellValue["kind"] = /^\d+$/.test(value) ? "fret" : "annotation";
+      const kind: CellValue["kind"] = /^\d+$/.test(value)
+        ? "fret"
+        : "annotation";
       commit({ ...grid, cells: { ...grid.cells, [key]: { kind, value } } });
     },
     [grid, commit],
@@ -535,8 +569,14 @@ export function useTabGrid(
     (ds: number, dc: number) => {
       setSelectedCell((prev) => {
         if (!prev) return prev;
-        const nextS = Math.max(0, Math.min(grid.strings.length - 1, prev.stringIdx + ds));
-        const nextC = Math.max(0, Math.min(grid.colCount - 1, prev.colIdx + dc));
+        const nextS = Math.max(
+          0,
+          Math.min(grid.strings.length - 1, prev.stringIdx + ds),
+        );
+        const nextC = Math.max(
+          0,
+          Math.min(grid.colCount - 1, prev.colIdx + dc),
+        );
         return { stringIdx: nextS, colIdx: nextC };
       });
     },
@@ -577,6 +617,7 @@ git commit -m "feat: add useTabGrid hook"
 ## Task 5: `AnnotationToolbar` Component
 
 **Files:**
+
 - Create: `src/components/detail/tabs/AnnotationToolbar.tsx`
 
 - [ ] **Step 1: Create the component**
@@ -692,6 +733,7 @@ git commit -m "feat: add AnnotationToolbar component"
 ## Task 6: `TabGridEditor` Component
 
 **Files:**
+
 - Create: `src/components/detail/tabs/TabGridEditor.tsx`
 
 - [ ] **Step 1: Create the component**
@@ -921,6 +963,7 @@ git commit -m "feat: add TabGridEditor component"
 ## Task 7: `TabExpandedModal` Component
 
 **Files:**
+
 - Create: `src/components/detail/tabs/TabExpandedModal.tsx`
 
 - [ ] **Step 1: Create the component**
@@ -1025,6 +1068,7 @@ git commit -m "feat: add TabExpandedModal component"
 > Note: the grid section is wrapped with `key={active.id}` so that `useTabGrid` re-initializes when the user switches between parts.
 
 **Files:**
+
 - Modify: `src/components/detail/tabs/TabTab.tsx`
 - Modify: `src/styles/app.css`
 
@@ -1604,6 +1648,7 @@ git commit -m "feat: wire tab grid editor into TabTab — replace textarea with 
 The current `TabTab.tsx` draft in Task 8 has duplicated grid mutation logic between `PartEditor` and the expanded modal lifted state. This task consolidates it.
 
 **Files:**
+
 - Modify: `src/components/detail/tabs/TabTab.tsx`
 
 - [ ] **Step 1: Move `useTabGrid` out of `PartEditor` into `TabTab` and pass handlers down**

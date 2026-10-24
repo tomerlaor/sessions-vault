@@ -20,7 +20,7 @@ pub fn run() {
             let about_item =
                 MenuItem::with_id(app, "about", "About SessionsVault", true, None::<&str>)?;
             let help_menu = Submenu::with_items(app, "Help", true, &[&about_item])?;
-            let menu = Menu::default(&app.handle())?;
+            let menu = Menu::default(app.handle())?;
             menu.append(&help_menu)?;
             app.set_menu(menu)?;
             Ok(())

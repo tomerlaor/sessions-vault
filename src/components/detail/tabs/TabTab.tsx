@@ -71,7 +71,10 @@ function ActivePartEditor({
 
   return (
     <>
-      <AnnotationToolbar active={activeAnnotation} onChange={setActiveAnnotation} />
+      <AnnotationToolbar
+        active={activeAnnotation}
+        onChange={setActiveAnnotation}
+      />
       <TabGridEditor
         grid={grid}
         selectedCell={selectedCell}
@@ -105,7 +108,9 @@ function ActivePartEditor({
 export default function TabTab({ project: p, onUpdate }: Props) {
   const initialParts = parseParts(p.tabs);
   const [parts, setParts] = useState<TabPart[]>(initialParts);
-  const [activeId, setActiveId] = useState<string | null>(initialParts[0]?.id ?? null);
+  const [activeId, setActiveId] = useState<string | null>(
+    initialParts[0]?.id ?? null,
+  );
   const [adding, setAdding] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
   const [editingName, setEditingName] = useState(false);
@@ -171,16 +176,24 @@ export default function TabTab({ project: p, onUpdate }: Props) {
               fontSize: 12,
             }}
           >
-            No tablature yet — add a part manually or let the AI generate a structure.
+            No tablature yet — add a part manually or let the AI generate a
+            structure.
           </div>
           <div className="tab-add-row">
-            <button className="tb-btn primary" onClick={() => setAgentOpen(true)}>
+            <button
+              className="tb-btn primary"
+              onClick={() => setAgentOpen(true)}
+            >
               ✦ Generate with AI
             </button>
           </div>
           <div className="tab-add-row" style={{ paddingTop: 0 }}>
             {(["guitar", "bass", "drums"] as Instrument[]).map((inst) => (
-              <button key={inst} className="tb-btn" onClick={() => addPart(inst)}>
+              <button
+                key={inst}
+                className="tb-btn"
+                onClick={() => addPart(inst)}
+              >
                 + {inst.charAt(0).toUpperCase() + inst.slice(1)}
               </button>
             ))}
@@ -230,7 +243,11 @@ export default function TabTab({ project: p, onUpdate }: Props) {
                 </button>
               ))}
               <button
-                style={{ fontSize: 11, color: "var(--text-3)", padding: "2px 6px" }}
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-3)",
+                  padding: "2px 6px",
+                }}
                 onClick={() => setAdding(false)}
               >
                 ✕
@@ -238,7 +255,9 @@ export default function TabTab({ project: p, onUpdate }: Props) {
             </div>
           ) : (
             <>
-              <button className="tab-part-btn" onClick={() => setAdding(true)}>+ Part</button>
+              <button className="tab-part-btn" onClick={() => setAdding(true)}>
+                + Part
+              </button>
               <button
                 className="tab-part-btn"
                 style={{ color: "var(--accent)" }}
@@ -261,7 +280,12 @@ export default function TabTab({ project: p, onUpdate }: Props) {
                       key={inst}
                       className={`tb-btn ${active.instrument === inst ? "active-inst" : ""}`}
                       style={{ fontSize: 11, padding: "2px 8px" }}
-                      onClick={() => updateActive({ instrument: inst, grid: defaultGrid(inst) })}
+                      onClick={() =>
+                        updateActive({
+                          instrument: inst,
+                          grid: defaultGrid(inst),
+                        })
+                      }
                     >
                       {inst.charAt(0).toUpperCase() + inst.slice(1)}
                     </button>
@@ -298,7 +322,9 @@ export default function TabTab({ project: p, onUpdate }: Props) {
                   >
                     {active.instrument}
                   </span>
-                  <span style={{ fontSize: 13, color: "var(--text-0)" }}>{active.name}</span>
+                  <span style={{ fontSize: 13, color: "var(--text-0)" }}>
+                    {active.name}
+                  </span>
                   <div style={{ flex: 1 }} />
                   <button
                     style={{ fontSize: 11, color: "var(--text-3)" }}

@@ -29,6 +29,7 @@ As a music creator, I want to select the musical key (root note) of a project fr
 As a music creator, I want to place fret numbers and musical annotations directly onto fixed-width string lines in a visual tab editor so that I can compose tablature intuitively without manually editing raw text.
 
 **Acceptance Criteria:**
+
 - [ ] Tab strings are rendered as a fixed-width grid of cells; the grid width never changes as fret numbers are placed
 - [ ] Clicking a cell on a string line opens a small input to enter a fret number (0–24), which is placed at that column position
 - [ ] Fret numbers placed in the same column across multiple strings are vertically aligned, representing a chord
@@ -48,6 +49,7 @@ As a music creator, I want to place fret numbers and musical annotations directl
 As a music creator, I want to add extra string lines to the tab editor and have a 4-bar grid by default so that I can notate non-standard instruments and have enough space for a standard musical phrase without immediately needing to extend.
 
 **Acceptance Criteria:**
+
 - [ ] A new "Add Line" button appears in the tab grid footer alongside the existing "Extend" button
 - [ ] Clicking "Add Line" shows an inline label input; confirming appends a new string row to the grid
 - [ ] The new string row behaves identically to existing rows (clickable cells, fret/annotation placement)
@@ -64,6 +66,7 @@ As a music creator, I want to add extra string lines to the tab editor and have 
 As a music creator, I want to connect my OpenRouter API key and pick any model it offers so that I can use one account to access many AI models (for lyrics suggestions and the tab agent) without managing a separate key per vendor.
 
 **Acceptance Criteria:**
+
 - [ ] "OpenRouter" appears in the AI provider list in Settings alongside OpenAI, Anthropic, Ollama and LM Studio
 - [ ] The OpenRouter API key is stored in the OS keychain, never in the SQLite DB or plain-text settings
 - [ ] The model picker lists the full OpenRouter catalog (300+ models, fetched from OpenRouter) with a search box that filters by name or ID, and I can also type a model ID manually (e.g. `anthropic/claude-sonnet-4.6`)
@@ -83,6 +86,7 @@ As a music creator, I want to connect my OpenRouter API key and pick any model i
 As a songwriter, I want the lyrics helper to suggest just the next word (or two) while I'm mid-line so that I can keep my own phrasing and get a nudge without the AI writing the whole line.
 
 **Acceptance Criteria:**
+
 - [ ] "Next word" appears as a mode in the Lyrics AI settings alongside Line completion, Next line and Alternative phrasing
 - [ ] With it enabled, I get at least three options for the next word (each one word, two at most), and at least one of them rhymes with the end of the line above
 - [ ] The AI sees the entire song, my song context and the songwriting craft guidance when suggesting words
@@ -102,6 +106,7 @@ As a songwriter, I want the lyrics helper to suggest just the next word (or two)
 As a songwriter, I want to describe my song in a few short sentences (what it's about, its mood and meaning) so that the lyrics helper's suggestions, especially the next line, fit what I'm trying to say.
 
 **Acceptance Criteria:**
+
 - [ ] The lyrics editor has a "Song context" input where I can write a few short sentences about the song's meaning, mood and subject
 - [ ] The context is saved per song and is still there when I reopen the project
 - [ ] The context is sent to the AI with every suggestion (next line, next word, line completion, alternative phrasing and popup)
@@ -120,6 +125,7 @@ As a songwriter, I want to describe my song in a few short sentences (what it's 
 As a music producer, I want a single song project to hold several files with a defined stage (record & mix DAW project, mastering DAW project, and one or more exported WAV versions) so that I can follow a song from the first recording to the final delivered master in one place.
 
 **Acceptance Criteria:**
+
 - [x] A project can contain multiple files, each tagged with a type: "Record/Mix project", "Mastering project", or "Export"
 - [x] Exports have a subtype: mix bounce, master, stem set, instrumental, or alternate
 - [x] I can add a DAW project file (e.g. an Ableton .als) as the mix project and another DAW project file as the mastering project, and they may come from different people or folders
@@ -141,6 +147,7 @@ As a music producer, I want a single song project to hold several files with a d
 As a music producer, I want backups to include the mix project, mastering project, and all exported versions of a song so that I can restore the whole production history, not just one DAW file.
 
 **Acceptance Criteria:**
+
 - [ ] A project backup (local and Google Drive) includes every file listed in the project's Files tab, grouped by stage
 - [ ] I can choose which stages to include (e.g. skip large stem sets)
 - [ ] Each backed-up file has its own checksum recorded in the backup record
@@ -160,6 +167,7 @@ As a music producer, I want backups to include the mix project, mastering projec
 As a music producer, I want the app to suggest which scanned project is the mastering session for a song so that I don't have to link them by hand.
 
 **Acceptance Criteria:**
+
 - [ ] After a scan, the app suggests matches between projects based on similar names (e.g. "Song" and "Song - Master") or sibling folders
 - [ ] Suggestions are shown for review and are never linked automatically without my confirmation
 - [ ] Accepting a suggestion adds the project to the song as a "Mastering project" file
@@ -178,6 +186,7 @@ As a music producer, I want the app to suggest which scanned project is the mast
 As a music producer, I want sample rate, bit depth, duration, and peak level shown for AIFF and FLAC exports, not just WAV, so that I can check any delivered version at a glance.
 
 **Acceptance Criteria:**
+
 - [ ] AIFF and FLAC exports show sample rate, bit depth, channels, duration, and peak level
 - [ ] Clipping is flagged the same way as for WAV
 - [ ] Corrupt or truncated files show a clear error instead of crashing the app
@@ -195,6 +204,7 @@ As a music producer, I want sample rate, bit depth, duration, and peak level sho
 As a music producer, I want to group the stems of a song into one stem set so that I can manage and send them as a single deliverable.
 
 **Acceptance Criteria:**
+
 - [ ] I can create a stem set under a project and add multiple audio files to it
 - [ ] The stem set shows as one row with its file count and total size, and can be expanded
 - [ ] The stem set has its own version label and date
@@ -214,6 +224,7 @@ As a music producer, I want to group the stems of a song into one stem set so th
 As a mastering engineer, I want integrated loudness (LUFS) and true peak shown for each export so that I can compare versions and check them against streaming targets.
 
 **Acceptance Criteria:**
+
 - [ ] Each WAV export shows integrated loudness in LUFS and true peak in dBTP
 - [ ] Measurement follows ITU-R BS.1770 / EBU R128
 - [ ] I can compare two versions side by side and see the loudness difference
@@ -232,6 +243,7 @@ As a mastering engineer, I want integrated loudness (LUFS) and true peak shown f
 As a music producer who uses more than one DAW, I want missing and external samples flagged for Logic, FL Studio, Reaper, and other projects, not only Ableton, so that I can trust the check on every project.
 
 **Acceptance Criteria:**
+
 - [ ] Reaper projects report missing and outside-folder media
 - [ ] Logic, FL Studio, and other supported DAWs report media where the format allows it
 - [ ] If a DAW format cannot be parsed, the flag is hidden instead of showing wrong numbers

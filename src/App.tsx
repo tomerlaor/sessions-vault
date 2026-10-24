@@ -48,16 +48,18 @@ export default function App() {
   useEffect(() => {
     const win = getCurrentWindow();
     let unlisten: (() => void) | undefined;
-    win.onCloseRequested(async (event) => {
-      event.preventDefault();
-      try {
-        await checkpointDb();
-      } finally {
-        win.destroy();
-      }
-    }).then((fn) => {
-      unlisten = fn;
-    });
+    win
+      .onCloseRequested(async (event) => {
+        event.preventDefault();
+        try {
+          await checkpointDb();
+        } finally {
+          win.destroy();
+        }
+      })
+      .then((fn) => {
+        unlisten = fn;
+      });
     return () => {
       unlisten?.();
     };

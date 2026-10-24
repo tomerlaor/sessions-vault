@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { gridToText, defaultGrid, COL_WIDTH, COLS_PER_BAR, parseTabToGrid } from "../src/lib/tab-grid";
+import {
+  gridToText,
+  defaultGrid,
+  COL_WIDTH,
+  COLS_PER_BAR,
+  parseTabToGrid,
+} from "../src/lib/tab-grid";
 import type { TabGrid } from "../src/types";
 
 describe("constants", () => {

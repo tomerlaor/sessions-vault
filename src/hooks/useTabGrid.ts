@@ -1,6 +1,11 @@
 import { useState, useCallback } from "react";
 import type { TabGrid, CellValue, Instrument } from "../types";
-import { defaultGrid, gridToText, parseTabToGrid, COLS_PER_BAR } from "../lib/tab-grid";
+import {
+  defaultGrid,
+  gridToText,
+  parseTabToGrid,
+  COLS_PER_BAR,
+} from "../lib/tab-grid";
 
 export interface SelectedCell {
   stringIdx: number;
@@ -20,7 +25,11 @@ export interface UseTabGridReturn {
   moveSelection: (ds: number, dc: number) => void;
 }
 
-function initGrid(instrument: Instrument, content: string, existingGrid?: TabGrid): TabGrid {
+function initGrid(
+  instrument: Instrument,
+  content: string,
+  existingGrid?: TabGrid,
+): TabGrid {
   if (existingGrid) return existingGrid;
   const parsed = content ? parseTabToGrid(content) : null;
   return parsed ?? defaultGrid(instrument);
@@ -53,7 +62,9 @@ export function useTabGrid(
   const placeValue = useCallback(
     (stringIdx: number, colIdx: number, value: string) => {
       const key = `${stringIdx}:${colIdx}`;
-      const kind: CellValue["kind"] = /^\d+$/.test(value) ? "fret" : "annotation";
+      const kind: CellValue["kind"] = /^\d+$/.test(value)
+        ? "fret"
+        : "annotation";
       commit({ ...grid, cells: { ...grid.cells, [key]: { kind, value } } });
     },
     [grid, commit],
@@ -84,8 +95,14 @@ export function useTabGrid(
     (ds: number, dc: number) => {
       setSelectedCell((prev) => {
         if (!prev) return prev;
-        const nextS = Math.max(0, Math.min(grid.strings.length - 1, prev.stringIdx + ds));
-        const nextC = Math.max(0, Math.min(grid.colCount - 1, prev.colIdx + dc));
+        const nextS = Math.max(
+          0,
+          Math.min(grid.strings.length - 1, prev.stringIdx + ds),
+        );
+        const nextC = Math.max(
+          0,
+          Math.min(grid.colCount - 1, prev.colIdx + dc),
+        );
         return { stringIdx: nextS, colIdx: nextC };
       });
     },

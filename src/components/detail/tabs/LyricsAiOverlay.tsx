@@ -234,9 +234,14 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
             setStatus("ready");
           } catch (err) {
             if (!aborted) {
-              setErrorMsg(err instanceof Error ? err.message : "AI request failed");
+              setErrorMsg(
+                err instanceof Error ? err.message : "AI request failed",
+              );
               setStatus("error");
-              setTimeout(() => { setStatus("idle"); setErrorMsg(null); }, 6000);
+              setTimeout(() => {
+                setStatus("idle");
+                setErrorMsg(null);
+              }, 6000);
             }
           }
         } else if (cfg.mode === "popup") {
@@ -266,9 +271,14 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
             }
           } catch (err) {
             if (!aborted) {
-              setErrorMsg(err instanceof Error ? err.message : "AI request failed");
+              setErrorMsg(
+                err instanceof Error ? err.message : "AI request failed",
+              );
               setStatus("error");
-              setTimeout(() => { setStatus("idle"); setErrorMsg(null); }, 6000);
+              setTimeout(() => {
+                setStatus("idle");
+                setErrorMsg(null);
+              }, 6000);
             }
           }
         } else if (mode !== "next_word") {
@@ -300,9 +310,14 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
           } catch (err) {
             if (!aborted) {
               setGhostText("");
-              setErrorMsg(err instanceof Error ? err.message : "AI request failed");
+              setErrorMsg(
+                err instanceof Error ? err.message : "AI request failed",
+              );
               setStatus("error");
-              setTimeout(() => { setStatus("idle"); setErrorMsg(null); }, 6000);
+              setTimeout(() => {
+                setStatus("idle");
+                setErrorMsg(null);
+              }, 6000);
             }
           }
         }
@@ -433,10 +448,17 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
 
     if (!aiConfig) {
       return (
-        <div style={{
-          position: "absolute", right: 10, top: 8,
-          fontSize: 11, color: "var(--text-3)", pointerEvents: "none", zIndex: 5,
-        }}>
+        <div
+          style={{
+            position: "absolute",
+            right: 10,
+            top: 8,
+            fontSize: 11,
+            color: "var(--text-3)",
+            pointerEvents: "none",
+            zIndex: 5,
+          }}
+        >
           AI suggestions on — configure a provider in Settings
         </div>
       );
@@ -564,7 +586,8 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               zIndex: 5,
             }}
           >
-            ⚠ AI error: {errorMsg ?? "request failed"} — check Settings → AI Assistant
+            ⚠ AI error: {errorMsg ?? "request failed"} — check Settings → AI
+            Assistant
           </div>
         )}
 

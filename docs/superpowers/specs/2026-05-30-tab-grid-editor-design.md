@@ -18,12 +18,12 @@ Replace the plain textarea tab editor in `TabTab.tsx` with an interactive visual
 
 ```typescript
 type CellValue =
-  | { kind: 'fret'; value: string }        // '0'–'24'
-  | { kind: 'annotation'; value: string }  // 'h', 'p', 'b', '/', 'P.M.', etc.
+  | { kind: "fret"; value: string } // '0'–'24'
+  | { kind: "annotation"; value: string }; // 'h', 'p', 'b', '/', 'P.M.', etc.
 
 interface TabGrid {
-  strings: string[];           // ['e','B','G','D','A','E'] for guitar; ['G','D','A','E'] for bass; ['BD','SN','HH','OH','CY'] for drums
-  colCount: number;            // default 32 (compact), 64 (expanded)
+  strings: string[]; // ['e','B','G','D','A','E'] for guitar; ['G','D','A','E'] for bass; ['BD','SN','HH','OH','CY'] for drums
+  colCount: number; // default 32 (compact), 64 (expanded)
   cells: Record<string, CellValue>; // sparse map, key: `${stringIdx}:${colIdx}`
 }
 ```
@@ -35,7 +35,7 @@ interface TabPart {
   id: string;
   name: string;
   instrument: Instrument;
-  content: string;   // plain text — derived from grid, kept in sync for copy/export/AI
+  content: string; // plain text — derived from grid, kept in sync for copy/export/AI
   grid?: TabGrid;
 }
 ```
@@ -45,6 +45,7 @@ interface TabPart {
 ### Migration
 
 On first render of a `TabPart` that has `content` but no `grid`:
+
 1. Run `parseTabToGrid(content)` — best-effort text parser.
 2. If parsing succeeds, save the resulting grid back via `onUpdate`.
 3. If parsing fails, start with an empty grid (same strings, `colCount: 32`, no cells).
@@ -83,6 +84,7 @@ The expanded modal shows the same layout with `colCount: 64` (4 bars).
 ### String lines
 
 Each string row is a `position: relative` flex container:
+
 - **Label** (`e`, `B`, etc.) — fixed-width, left-aligned
 - **Opening bar** (`|`) — fixed character
 - **Line container** — `position: relative`, fixed pixel width, `cursor: crosshair`
@@ -94,9 +96,9 @@ Each string row is a `position: relative` flex container:
 ### Constants
 
 ```typescript
-const COL_WIDTH = 20;      // px per column
-const STRING_HEIGHT = 28;  // px per string row
-const COLS_PER_BEAT = 2;   // 8th-note resolution
+const COL_WIDTH = 20; // px per column
+const STRING_HEIGHT = 28; // px per string row
+const COLS_PER_BEAT = 2; // 8th-note resolution
 const COLS_PER_BAR = 16;
 ```
 
@@ -138,13 +140,13 @@ Same renderer, different string labels (`BD`, `SN`, `HH`, `OH`, `CY`). Accepted 
 
 ### Keyboard navigation
 
-| Key | Action |
-|---|---|
-| ←/→ | Move selected cell left/right on same string |
-| ↑/↓ | Move to same column on adjacent string |
-| Tab | Next column, same string |
-| Escape | Deselect annotation / close input |
-| Backspace | Clear selected cell |
+| Key       | Action                                       |
+| --------- | -------------------------------------------- |
+| ←/→       | Move selected cell left/right on same string |
+| ↑/↓       | Move to same column on adjacent string       |
+| Tab       | Next column, same string                     |
+| Escape    | Deselect annotation / close input            |
+| Backspace | Clear selected cell                          |
 
 ### Extending
 
@@ -162,13 +164,13 @@ Triggered by the `⤢` button in the part header. Opens a floating modal (`TabEx
 
 Grouped as displayed in the toolbar:
 
-| Group | Symbols |
-|---|---|
-| Articulation | `h` hammer-on, `p` pull-off, `b` bend, `r` release bend, `~` vibrato, `~~` wide vibrato |
-| Slides | `/` slide up, `\` slide down, `sl` legato slide |
-| Special | `x` dead note, `(n)` ghost note, `T` tapping, `P.H.` pinched harmonic, `◇` natural harmonic |
-| Effects | `P.M.` palm mute, `let ring`, `tr` trill, `P.S.` pick scrape |
-| Strokes | `⊓` down stroke, `V` up stroke |
+| Group        | Symbols                                                                                     |
+| ------------ | ------------------------------------------------------------------------------------------- |
+| Articulation | `h` hammer-on, `p` pull-off, `b` bend, `r` release bend, `~` vibrato, `~~` wide vibrato     |
+| Slides       | `/` slide up, `\` slide down, `sl` legato slide                                             |
+| Special      | `x` dead note, `(n)` ghost note, `T` tapping, `P.H.` pinched harmonic, `◇` natural harmonic |
+| Effects      | `P.M.` palm mute, `let ring`, `tr` trill, `P.S.` pick scrape                                |
+| Strokes      | `⊓` down stroke, `V` up stroke                                                              |
 
 ---
 
@@ -186,15 +188,15 @@ Serialises a `TabGrid` back to the classic ASCII tab format. Used to keep `TabPa
 
 ## Components
 
-| File | Purpose |
-|---|---|
-| `src/components/detail/tabs/TabTab.tsx` | Top-level tab screen — replaces textarea/pre with `TabGridEditor` + `AnnotationToolbar`; adds expand button |
-| `src/components/detail/tabs/TabGridEditor.tsx` | Renders string lines with floating numbers; handles click-to-place; accepts `colCount` |
-| `src/components/detail/tabs/AnnotationToolbar.tsx` | Grouped annotation buttons; tracks active annotation; emits selection |
-| `src/components/detail/tabs/TabExpandedModal.tsx` | Floating modal wrapper; renders `TabGridEditor` with `colCount=64` |
-| `src/hooks/useTabGrid.ts` | Grid state, selected cell, active annotation, place/clear/extend, `content` sync |
-| `src/lib/tab-grid.ts` | `parseTabToGrid`, `gridToText`, constants (`COL_WIDTH`, `COLS_PER_BAR`, etc.) |
-| `src/types/index.ts` | Add `TabGrid`, `CellValue`; add `grid?: TabGrid` to `TabPart` |
+| File                                               | Purpose                                                                                                     |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `src/components/detail/tabs/TabTab.tsx`            | Top-level tab screen — replaces textarea/pre with `TabGridEditor` + `AnnotationToolbar`; adds expand button |
+| `src/components/detail/tabs/TabGridEditor.tsx`     | Renders string lines with floating numbers; handles click-to-place; accepts `colCount`                      |
+| `src/components/detail/tabs/AnnotationToolbar.tsx` | Grouped annotation buttons; tracks active annotation; emits selection                                       |
+| `src/components/detail/tabs/TabExpandedModal.tsx`  | Floating modal wrapper; renders `TabGridEditor` with `colCount=64`                                          |
+| `src/hooks/useTabGrid.ts`                          | Grid state, selected cell, active annotation, place/clear/extend, `content` sync                            |
+| `src/lib/tab-grid.ts`                              | `parseTabToGrid`, `gridToText`, constants (`COL_WIDTH`, `COLS_PER_BAR`, etc.)                               |
+| `src/types/index.ts`                               | Add `TabGrid`, `CellValue`; add `grid?: TabGrid` to `TabPart`                                               |
 
 ---
 

@@ -1138,6 +1138,7 @@ git push
 ## Task 11: Versioning & Release-Please Setup
 
 **Files:**
+
 - Create: `.github/workflows/release-please.yml`
 - Create: `release-please-config.json`
 - Create: `.release-please-manifest.json`
@@ -1156,11 +1157,11 @@ Create `release-please-config.json` at project root:
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "changelog-sections": [
-        {"type": "feat", "section": "Features"},
-        {"type": "fix", "section": "Bug Fixes"},
-        {"type": "chore", "section": "Miscellaneous", "hidden": true},
-        {"type": "docs", "section": "Documentation", "hidden": true},
-        {"type": "ci", "section": "CI", "hidden": true}
+        { "type": "feat", "section": "Features" },
+        { "type": "fix", "section": "Bug Fixes" },
+        { "type": "chore", "section": "Miscellaneous", "hidden": true },
+        { "type": "docs", "section": "Documentation", "hidden": true },
+        { "type": "ci", "section": "CI", "hidden": true }
       ]
     }
   }
@@ -1224,6 +1225,7 @@ Expected: `Release Please` appears in the list.
 ## Task 12: Release Build Workflow (macOS .dmg)
 
 **Files:**
+
 - Create: `.github/workflows/release-build.yml`
 
 - [ ] **Step 1: Write release-build.yml**
@@ -1301,6 +1303,7 @@ Expected: `Release Build` appears in the list.
 ## Task 13: Install Instructions in README
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Add Install section to README.md**
@@ -1313,7 +1316,7 @@ Open `README.md` and insert the following section between the `## Screenshot` se
 Download the latest `.dmg` from the [Releases page](https://github.com/tomerlaor/sessions-vault/releases).
 
 1. Open the `.dmg` and drag **SessionsVault** to your Applications folder
-2. On first launch, macOS may show *"SessionsVault can't be opened because it is from an unidentified developer"*
+2. On first launch, macOS may show _"SessionsVault can't be opened because it is from an unidentified developer"_
 3. To bypass: right-click the app icon → **Open** → **Open** again in the dialog
 4. You only need to do this once — subsequent launches work normally
 
