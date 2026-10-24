@@ -141,6 +141,11 @@ export default function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       if (isEditableTarget(e.target as HTMLElement | null)) return;
+      // Buttons inside the lyrics/tab editors (RTL toggle, chord chips, AI overlay chips).
+      if (
+        (e.target as Element | null)?.closest?.(".lyrics-editor, .tab-editor")
+      )
+        return;
       if (showSettings || showAbout) return;
       setShowDetail(false);
     };
@@ -324,7 +329,10 @@ export default function App() {
           <input
             placeholder="Search projects, tags…"
             value={filter.search}
-            onChange={(e) => setFilter({ ...filter, search: e.target.value })}
+            onChange={(e) => {
+              setFilter({ ...filter, search: e.target.value });
+              setShowDetail(false);
+            }}
           />
           <span className="kbd">⌘K</span>
         </div>
@@ -343,7 +351,10 @@ export default function App() {
       {/* Sidebar */}
       <Sidebar
         filter={filter}
-        setFilter={setFilter}
+        setFilter={(f) => {
+          setFilter(f);
+          setShowDetail(false);
+        }}
         counts={counts}
         allTags={allTags}
         onOpenSettings={() => setShowSettings(true)}
