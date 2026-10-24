@@ -74,6 +74,10 @@ export default function InfoRail({
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!compact) setFlyout(null);
+  }, [compact]);
+
+  useEffect(() => {
     if (!flyout) return;
     const onDown = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setFlyout(null);
