@@ -5,6 +5,7 @@
 import { parseArgs } from "node:util";
 import {
   chatWithTabAgent,
+  generateNextWordOptions,
   generatePopupSuggestions,
   generateTabStructure,
   streamLyricsSuggestion,
@@ -13,6 +14,8 @@ import {
 import {
   buildLyricsPopupPrompt,
   buildLyricsSuggestionPrompt,
+  buildNextWordOptionsPrompt,
+  normalizeNextWordOptions,
 } from "../src/lib/lyrics-ai";
 import type {
   AIConfig,
@@ -55,9 +58,11 @@ tab options
 
 lyrics / lyrics-popup options
   --lyrics <text>          lyrics so far ("\\n" for line breaks)
-  --line <text>            the line being written (default: last line of --lyrics)
-  --mode <m>               completion | alternative | next_line (lyrics only; default completion)
-  --title / --bpm / --key / --time   song context
+  --line <text>            the line being written (default: last line of --lyrics;
+                           also what next_word/completion continue from)
+  --mode <m>               completion | next_word (3+ options, one a rhyme) | alternative | next_line
+  --context <text>         what the song is about: meaning, mood (the "Song context" field)
+  --title / --bpm / --key / --time   song metadata
 
 Examples
   OPENROUTER_API_KEY=sk-or-... npm run ai -- ping --model typesafe/jev-router
@@ -80,6 +85,7 @@ const { values, positionals } = parseArgs({
     lyrics: { type: "string", default: "" },
     line: { type: "string" },
     mode: { type: "string", default: "completion" },
+    context: { type: "string" },
     title: { type: "string", default: "Untitled" },
     bpm: { type: "string" },
     key: { type: "string" },
@@ -123,6 +129,7 @@ function lyricsInput() {
     globalProfile: null,
     projectProfile: null,
     recentAccepted: [],
+    songContext: values.context ?? null,
   };
 }
 
@@ -183,9 +190,32 @@ async function main() {
       break;
     }
     case "lyrics": {
+      const mode = values.mode as LyricSuggestionMode;
+      if (mode === "next_word") {
+        // Several options, one rhyming — same flow and cleanup as the app.
+        const input = lyricsInput();
+        const { system, prompt } = buildNextWordOptionsPrompt(input);
+        const result = await timed("lyrics next_word", () =>
+          generateNextWordOptions(cfg, system, prompt),
+        );
+        const options = normalizeNextWordOptions(
+          result.options,
+          input.textBeforeCursor,
+        );
+        if (options.length < 3) {
+          console.error(`warning: only ${options.length} option(s) returned`);
+        }
+        for (const o of options) {
+          const tag = o.kind === "rhyme" ? "[rhyme]" : "       ";
+          console.log(
+            `${tag} ${JSON.stringify(o.text)}  →  ${input.textBeforeCursor}${o.text}`,
+          );
+        }
+        break;
+      }
       const { system, prompt } = buildLyricsSuggestionPrompt({
         ...lyricsInput(),
-        mode: values.mode as LyricSuggestionMode,
+        mode,
       });
       await timed("lyrics", async () => {
         let received = 0;

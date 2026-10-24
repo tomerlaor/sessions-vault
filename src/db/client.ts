@@ -96,6 +96,12 @@ async function runMigrations(raw: Database): Promise<void> {
   try {
     await raw.execute(`ALTER TABLE projects ADD COLUMN tabs TEXT`, []);
   } catch {}
+  try {
+    await raw.execute(
+      `ALTER TABLE projects ADD COLUMN lyrics_context TEXT`,
+      [],
+    );
+  } catch {}
 
   await raw.execute(
     `CREATE TABLE IF NOT EXISTS backups (
