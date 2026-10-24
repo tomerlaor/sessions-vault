@@ -1590,7 +1590,7 @@ body.density-comfortable .table td {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
-/* Fit the legacy tab bodies into 280px: single column, no horizontal scroll */
+/* Fit the legacy tab bodies into 280px: two-column meta grid, no horizontal scroll */
 .info-rail .meta-grid,
 .rail-flyout .meta-grid {
   grid-template-columns: 1fr 1fr;

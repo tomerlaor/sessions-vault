@@ -48,10 +48,12 @@
 ### Task 1: Pure helpers
 
 **Files:**
+
 - Create: `src/lib/project-view.ts`
 - Test: `tests/project-view.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `export const MIN_PANE_PX = 320`
   - `export const DEFAULT_SPLIT = 0.5`
@@ -77,10 +79,12 @@
 ### Task 2: Hooks and SplitPane
 
 **Files:**
+
 - Create: `src/hooks/useMediaQuery.ts`, `src/hooks/useSplitRatio.ts`, `src/components/detail/SplitPane.tsx`
 - Modify: `src/styles/app.css` (append `.split-pane`, `.split-divider` rules)
 
 **Interfaces:**
+
 - Consumes: `clampSplit`, `parseStoredSplit`, `DEFAULT_SPLIT` from Task 1.
 - Produces:
   - `useMediaQuery(query: string): boolean` — live `matchMedia` subscription.
@@ -98,10 +102,12 @@
 ### Task 3: InfoRail
 
 **Files:**
+
 - Create: `src/components/detail/InfoRail.tsx`
 - Modify: `src/styles/app.css` (`.info-rail`, `.rail-section`, `.rail-icons`, `.rail-flyout`)
 
 **Interfaces:**
+
 - Consumes: `useMediaQuery` (Task 2); `OverviewTab`, `FilesTab`, `TodoTab`, `HistoryTab` with their current props (see `DetailPanel.tsx` for the exact props each one gets today).
 - Produces: `InfoRail` default export, props `{ project: Project; allTags: Tag[]; onUpdate: (field: string, value: unknown) => void; onTagChange: () => void }`.
 
@@ -116,10 +122,12 @@
 ### Task 4: ProjectView
 
 **Files:**
+
 - Rename: `src/components/detail/DetailPanel.tsx` → `src/components/detail/ProjectView.tsx` (`git mv`)
 - Modify: `src/components/detail/ProjectView.tsx`, `src/components/detail/tabs/LyricsTab.tsx`, `src/styles/app.css`
 
 **Interfaces:**
+
 - Consumes: `SplitPane` (Task 2), `InfoRail` (Task 3), `shouldFlushLyrics` (Task 1).
 - Produces: `ProjectView` default export, props:
   `{ project: Project; allTags: Tag[]; prevId: string | null; nextId: string | null; onNavigate: (id: string) => void; onBack: () => void; onOpen: (p: Project) => void; onReveal: (p: Project) => void; onProjectUpdated: () => void; onTagChange: () => void }`
@@ -137,9 +145,11 @@
 ### Task 5: App wiring, Esc, list state
 
 **Files:**
+
 - Modify: `src/App.tsx`, `src/components/library/ProjectList.tsx`, `src/styles/app.css`; Esc handlers in `src/components/detail/tabs/TabExpandedModal.tsx`, `src/components/detail/tabs/LyricsAiOverlay.tsx`, `src/components/detail/TabAgentModal.tsx`, `src/components/settings/SettingsModal.tsx` as needed
 
 **Interfaces:**
+
 - Consumes: `ProjectView` (Task 4), `adjacentProjectIds`, `isEditableTarget` (Task 1).
 - Produces: `ProjectList` gets an optional prop `scrollRef?: RefObject<HTMLDivElement | null>` attached to its `.table-wrap` element.
 
@@ -157,7 +167,7 @@
   6. Previous/next move through the filtered, sorted list; disabled at either end; Lyrics and Tab show the new project's data.
   7. Type lyrics, press Back without Done: reopen the project and the lyrics are saved. Do the same via next arrow; the new project's lyrics are untouched.
   8. Esc inside notes, tags, the rename box, the lyrics text, the Lyrics AI overlay and the expanded tab modal does not leave the project (it closes the overlay or modal where it did before).
-  9. Archive the open project under the default view: the view returns to the list without an error.
+  9. Archive the open project under the default view: the view stays open and the button flips to Unarchive. The view returns to the list only if the project disappears from the loaded list, or when the user changes filter, search or sidebar.
   10. Rename, Open, Reveal, Archive, tags, key, rating, to-do and file actions work as before.
 - [ ] **Step 7: Commit** `feat: show the project as a full-screen view`.
 
@@ -166,6 +176,7 @@
 ### Task 6: Close out
 
 **Files:**
+
 - Modify: `docs/REQUIREMENTS.md` (US-014 `Status: Implemented`, tick the acceptance boxes that were verified in Task 5)
 
 - [ ] **Step 1:** Update the story. Only tick boxes that were actually verified.
