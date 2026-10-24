@@ -262,6 +262,7 @@ As a music producer who uses more than one DAW, I want missing and external samp
 As a music producer, I want a project to open in a full-screen view instead of a narrow side panel so that I have room to work on its lyrics, tabs, files, and notes.
 
 **Acceptance Criteria:**
+
 - [ ] Opening a project shows it across the whole main area, replacing the project list
 - [ ] A clear back control (and the Esc key) returns me to the list with my search, filters, sort, and scroll position kept
 - [ ] The title, path, and Open / Reveal / Archive actions stay visible at the top
