@@ -208,3 +208,31 @@ pub async fn backup_gdrive(
         checksum,
     })
 }
+
+#[tauri::command]
+pub async fn inspect_audio(path: String) -> Result<crate::audio::AudioInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::audio::inspect_audio(&path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn inspect_project_media(
+    path: String,
+) -> Result<Option<crate::parser::ableton::MediaReport>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::parser::ableton::inspect_media(Path::new(&path))
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn file_exists_many(paths: Vec<String>) -> Vec<bool> {
+    crate::fsutil::exists_many(&paths)
+}
+
+#[tauri::command]
+pub fn file_stat(path: String) -> Result<crate::fsutil::FileStat, String> {
+    crate::fsutil::stat(&path)
+}
