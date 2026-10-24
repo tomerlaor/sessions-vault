@@ -337,11 +337,13 @@ pub fn inspect_media(path: &Path) -> Option<MediaReport> {
     Some(report)
 }
 
-/// UNC and device paths (`\\host\share`, `//host/share`, `\\?\...`). Probing one
-/// makes Windows authenticate to that host, so paths read from an untrusted
-/// `.als` are never touched on disk.
+/// UNC, device and NT-namespace paths. Windows treats `/` and `\` alike, so
+/// separators are normalised first. Probing one of these makes Windows
+/// authenticate to that host, so paths read from an untrusted `.als` that match
+/// are never touched on disk.
 fn is_network_path(p: &str) -> bool {
-    p.starts_with("\\\\") || p.starts_with("//")
+    let n = p.replace('/', "\\");
+    n.starts_with("\\\\") || n.starts_with("\\??\\")
 }
 
 #[cfg(test)]
@@ -529,5 +531,21 @@ mod tests {
                 external: 2
             })
         );
+    }
+
+    #[test]
+    fn mixed_separator_and_nt_prefix_paths_count_as_network_paths() {
+        for p in [
+            r"\/server/share/a.wav",
+            r"/\server\share\a.wav",
+            r"\??\UNC\server\share\a.wav",
+            "//?/UNC/server/share/a.wav",
+            r"\\.\pipe\x",
+        ] {
+            assert!(is_network_path(p), "{p} should be rejected");
+        }
+        assert!(!is_network_path("/Users/me/a.wav"));
+        assert!(!is_network_path(r"C:\Users\me\a.wav"));
+        assert!(!is_network_path("Samples/Imported/a.wav"));
     }
 }
