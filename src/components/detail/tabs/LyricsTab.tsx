@@ -336,7 +336,15 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
               }}
             />
           </div>
-          <div style={{ position: "relative" }}>
+          <div
+            style={{
+              position: "relative",
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+            }}
+          >
             <LyricsAiOverlay
               ref={overlayRef}
               draft={draft}
@@ -354,6 +362,7 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
                 border: "none",
                 borderRadius: 0,
                 minHeight: 240,
+                flex: 1,
                 background: "transparent",
                 textAlign: rtl ? "right" : "left",
                 position: "relative",
