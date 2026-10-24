@@ -1,3 +1,4 @@
+import type { RefObject } from "react";
 import ProjectRow from "./ProjectRow";
 import { deterministicWave } from "../shared/WaveArt";
 import type { Project } from "../../types";
@@ -44,6 +45,7 @@ interface ProjectListProps {
   onStar: (p: Project) => void;
   onArchive: (p: Project) => void;
   label: string;
+  scrollRef?: RefObject<HTMLDivElement | null>;
 }
 
 export default function ProjectList({
@@ -57,6 +59,7 @@ export default function ProjectList({
   onStar,
   onArchive,
   label,
+  scrollRef,
 }: ProjectListProps) {
   const sortIcon = (key: string) =>
     sort.key === key ? (sort.dir === "asc" ? "↑" : "↓") : "";
@@ -74,7 +77,7 @@ export default function ProjectList({
         <h1>{label}</h1>
         <span className="count">{projects.length}</span>
       </div>
-      <div className="table-wrap">
+      <div className="table-wrap" ref={scrollRef}>
         <table className="table">
           <thead>
             <tr>

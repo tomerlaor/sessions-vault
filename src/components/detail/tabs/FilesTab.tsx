@@ -245,7 +245,10 @@ export default function FilesTab({ project: p }: Props) {
               onBlur={() => saveLabel(f)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") saveLabel(f);
-                if (e.key === "Escape") setEditingId(null);
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setEditingId(null);
+                }
               }}
               style={{ width: 90, fontSize: 11 }}
             />

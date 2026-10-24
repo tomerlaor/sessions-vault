@@ -39,10 +39,15 @@ export default function TabExpandedModal({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        // Consumed here; the app-level Esc (leave project view) must skip it.
+        // Capture phase so this runs before App's bubble-phase window listener.
+        e.preventDefault();
+        onClose();
+      }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
   }, [onClose]);
 
   return createPortal(

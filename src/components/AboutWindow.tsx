@@ -18,7 +18,10 @@ export function AboutWindow({ onClose }: Props) {
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
     },
     [onClose],
   );

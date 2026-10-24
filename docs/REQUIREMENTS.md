@@ -253,3 +253,24 @@ As a music producer who uses more than one DAW, I want missing and external samp
 **Priority:** Low
 **Status:** Draft
 **Depends on:** US-007
+
+---
+
+### US-014: Full-Screen Project View
+
+**User Story:**
+As a music producer, I want a project to open in a full-screen view instead of a narrow side panel so that I have room to work on its lyrics, tabs, files, and notes.
+
+**Acceptance Criteria:**
+
+- [ ] Opening a project shows it across the whole main area, replacing the project list
+- [ ] A clear back control (and the Esc key) returns me to the list with my search, filters, sort, and scroll position kept
+- [ ] The title, path, and Open / Reveal / Archive actions stay visible at the top
+- [ ] Every existing tab (Overview, Lyrics, Tab, Files, Sync, To-do) works in the wider layout and uses the extra space
+- [ ] I can move to the previous or next project in the list without going back
+- [ ] The layout still works when the window is made narrow
+
+**Note:** archiving the open project keeps the project view open (the button flips to Unarchive); the view returns to the list only if the project disappears from the loaded list.
+
+**Priority:** Medium
+**Status:** Implemented (pending manual check in the running app)
