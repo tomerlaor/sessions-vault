@@ -307,6 +307,11 @@ pub fn inspect_media(path: &Path) -> Option<MediaReport> {
                     };
                     if !key.is_empty() && seen.insert(key) {
                         report.total += 1;
+                        if is_network_path(&abs_path) || is_network_path(&rel_path) {
+                            report.external += 1;
+                            stack.pop();
+                            continue;
+                        }
                         let candidates = [
                             (!abs_path.is_empty()).then(|| std::path::PathBuf::from(&abs_path)),
                             (!rel_path.is_empty()).then(|| project_dir.join(&rel_path)),
@@ -330,6 +335,13 @@ pub fn inspect_media(path: &Path) -> Option<MediaReport> {
         }
     }
     Some(report)
+}
+
+/// UNC and device paths (`\\host\share`, `//host/share`, `\\?\...`). Probing one
+/// makes Windows authenticate to that host, so paths read from an untrusted
+/// `.als` are never touched on disk.
+fn is_network_path(p: &str) -> bool {
+    p.starts_with("\\\\") || p.starts_with("//")
 }
 
 #[cfg(test)]
@@ -494,5 +506,28 @@ mod tests {
         let path = dir.path().join("bad.als");
         std::fs::write(&path, b"not gzip").unwrap();
         assert_eq!(inspect_media(&path), None);
+    }
+
+    #[test]
+    fn network_paths_are_never_probed_and_count_as_external() {
+        assert!(is_network_path(r"\\server\share\a.wav"));
+        assert!(is_network_path("//server/share/a.wav"));
+        assert!(is_network_path(r"\\?\UNC\server\share\a.wav"));
+        assert!(!is_network_path("/Users/me/a.wav"));
+        assert!(!is_network_path(r"C:\Users\me\a.wav"));
+
+        let (dir, path) = make_als_file(&als_with(&[
+            sample_ref(r"\\attacker\share\a.wav", ""),
+            sample_ref("//attacker/share/b.wav", ""),
+        ]));
+        let _keep = dir;
+        assert_eq!(
+            inspect_media(&path),
+            Some(MediaReport {
+                total: 2,
+                missing: 0,
+                external: 2
+            })
+        );
     }
 }
