@@ -2,6 +2,7 @@ mod audio;
 mod backup;
 mod commands;
 mod fsutil;
+mod launch;
 mod parser;
 mod scanner;
 mod secrets;

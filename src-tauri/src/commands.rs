@@ -61,25 +61,13 @@ pub fn rename_project(old_path: String, new_name: String) -> Result<String, Stri
 }
 
 #[tauri::command]
-#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 pub fn reveal_in_finder(path: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    std::process::Command::new("open")
-        .args(["-R", &path])
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    crate::launch::reveal(&path)
 }
 
 #[tauri::command]
-#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 pub fn open_in_daw(path: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    std::process::Command::new("open")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    crate::launch::open(&path)
 }
 
 // ── Secrets ───────────────────────────────────────────────────────────────────
