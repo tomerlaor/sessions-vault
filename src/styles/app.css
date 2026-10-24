@@ -1662,3 +1662,27 @@ body.density-comfortable .table td {
 .rail-flyout .rail-section-body select {
   min-width: 0;
 }
+/* Let long text wrap and inline-styled flex rows wrap instead of clipping */
+.info-rail .rail-section-body,
+.rail-flyout .rail-section-body {
+  overflow-wrap: anywhere;
+}
+.info-rail .rail-section-body [style*="display: flex"],
+.rail-flyout .rail-section-body [style*="display: flex"] {
+  flex-wrap: wrap;
+}
+.info-rail .rail-section-body [style*="display: flex"] > *,
+.rail-flyout .rail-section-body [style*="display: flex"] > * {
+  min-width: 0;
+}
+.info-rail .meta-grid > div,
+.rail-flyout .meta-grid > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.info-rail .meta-grid select,
+.rail-flyout .meta-grid select {
+  min-width: 0;
+  width: 100%;
+  text-overflow: ellipsis;
+}
