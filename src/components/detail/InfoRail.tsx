@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type ComponentProps,
+} from "react";
 import Icon from "../shared/Icon";
 import OverviewTab from "./tabs/OverviewTab";
 import FilesTab from "./tabs/FilesTab";
@@ -14,9 +20,10 @@ interface Props {
   onTagChange: () => void;
 }
 
+type IconName = ComponentProps<typeof Icon>["name"];
 type SectionId = "info" | "files" | "todo" | "sync";
 
-const SECTIONS: { id: SectionId; label: string; icon: string }[] = [
+const SECTIONS: { id: SectionId; label: string; icon: IconName }[] = [
   { id: "info", label: "Info", icon: "music" },
   { id: "files", label: "Files", icon: "paperclip" },
   { id: "todo", label: "To-do", icon: "check" },
@@ -118,7 +125,7 @@ export default function InfoRail({
             aria-expanded={flyout === s.id}
             onClick={() => setFlyout(flyout === s.id ? null : s.id)}
           >
-            <Icon name={s.icon as any} size={14} />
+            <Icon name={s.icon} size={14} />
           </button>
         ))}
         {active && (
