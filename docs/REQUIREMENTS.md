@@ -269,5 +269,7 @@ As a music producer, I want a project to open in a full-screen view instead of a
 - [ ] I can move to the previous or next project in the list without going back
 - [ ] The layout still works when the window is made narrow
 
+**Note:** archiving the open project keeps the project view open (the button flips to Unarchive); the view returns to the list only if the project disappears from the loaded list.
+
 **Priority:** Medium
-**Status:** Draft
+**Status:** Implemented (pending manual check in the running app)
