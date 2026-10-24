@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent, ReactNode } from "react";
-import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useSplitRatio } from "../../hooks/useSplitRatio";
-import { clampSplit, DEFAULT_SPLIT } from "../../lib/project-view";
-
-/** Thickness of the draggable divider, in pixels. */
-const DIVIDER_PX = 6;
+import {
+  clampSplit,
+  DEFAULT_SPLIT,
+  DIVIDER_PX,
+  MIN_PANE_PX,
+  MIN_STACKED_PANE_PX,
+  shouldStack,
+} from "../../lib/project-view";
 
 interface Props {
   first: ReactNode;
@@ -13,7 +16,6 @@ interface Props {
 }
 
 export default function SplitPane({ first, second }: Props) {
-  const stacked = useMediaQuery("(max-width: 900px)");
   const [ratio, setRatio] = useSplitRatio();
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -30,8 +32,10 @@ export default function SplitPane({ first, second }: Props) {
     return () => ro.disconnect();
   }, []);
 
+  const stacked = shouldStack(size.w);
+  const minPanePx = stacked ? MIN_STACKED_PANE_PX : MIN_PANE_PX;
   const containerPx = stacked ? size.h : size.w;
-  const effective = clampSplit(ratio, containerPx - DIVIDER_PX);
+  const effective = clampSplit(ratio, containerPx - DIVIDER_PX, minPanePx);
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -47,7 +51,7 @@ export default function SplitPane({ first, second }: Props) {
     if (usable <= 0) return;
     const pos =
       (stacked ? e.clientY - rect.top : e.clientX - rect.left) - DIVIDER_PX / 2;
-    setRatio(clampSplit(pos / usable, usable));
+    setRatio(clampSplit(pos / usable, usable, minPanePx));
   };
 
   const endDrag = (e: PointerEvent<HTMLDivElement>) => {

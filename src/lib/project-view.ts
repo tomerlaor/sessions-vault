@@ -1,5 +1,9 @@
 /** Minimum width (or height) of either pane in the split view, in pixels. */
 export const MIN_PANE_PX = 320;
+/** Minimum height of either pane when the panes are stacked vertically. */
+export const MIN_STACKED_PANE_PX = 160;
+/** Thickness of the draggable divider, in pixels. */
+export const DIVIDER_PX = 6;
 /** Default share of the container given to the left (or top) pane. */
 export const DEFAULT_SPLIT = 0.5;
 
@@ -11,6 +15,11 @@ export function adjacentProjectIds(
   const i = ids.indexOf(currentId);
   if (i === -1) return { prev: null, next: null };
   return { prev: ids[i - 1] ?? null, next: ids[i + 1] ?? null };
+}
+
+/** Whether the panes should stack, given the measured container width (0 = not measured yet). */
+export function shouldStack(widthPx: number): boolean {
+  return widthPx > 0 && widthPx < 2 * MIN_PANE_PX + DIVIDER_PX;
 }
 
 /** Clamp the left/top pane share so both panes keep at least `minPanePx`. */

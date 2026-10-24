@@ -2,6 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   adjacentProjectIds,
   clampSplit,
+  MIN_PANE_PX,
+  MIN_STACKED_PANE_PX,
+  DIVIDER_PX,
+  shouldStack,
   parseStoredSplit,
   isEditableTarget,
   shouldFlushLyrics,
@@ -54,6 +58,36 @@ describe("clampSplit", () => {
 
   it("returns 0.5 for NaN", () => {
     expect(clampSplit(NaN, 1000)).toBe(0.5);
+  });
+
+  it("honours a smaller minimum for stacked panes", () => {
+    expect(MIN_STACKED_PANE_PX).toBe(160);
+    expect(clampSplit(0.1, 400, MIN_STACKED_PANE_PX)).toBeCloseTo(0.4);
+    expect(clampSplit(0.9, 400, MIN_STACKED_PANE_PX)).toBeCloseTo(0.6);
+    expect(clampSplit(0.2, 300, MIN_STACKED_PANE_PX)).toBe(0.5);
+  });
+
+  it("never returns NaN or out-of-range values", () => {
+    for (const c of [0, 1, 319, 320, 640, 641, 5000]) {
+      for (const r of [-1, 0, 0.3, 1, 2]) {
+        const v = clampSplit(r, c);
+        expect(Number.isFinite(v)).toBe(true);
+        expect(v).toBeGreaterThan(0);
+        expect(v).toBeLessThan(1);
+      }
+    }
+  });
+});
+
+describe("shouldStack", () => {
+  it("stacks only when two minimum panes and the divider do not fit", () => {
+    const limit = 2 * MIN_PANE_PX + DIVIDER_PX;
+    expect(shouldStack(limit - 1)).toBe(true);
+    expect(shouldStack(limit)).toBe(false);
+  });
+
+  it("does not stack before the container has been measured", () => {
+    expect(shouldStack(0)).toBe(false);
   });
 });
 
