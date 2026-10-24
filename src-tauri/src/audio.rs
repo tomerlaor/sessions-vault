@@ -18,11 +18,14 @@ pub struct AudioInfo {
 const LOSSY_EXTENSIONS: [&str; 5] = ["mp3", "m4a", "aac", "ogg", "opus"];
 const CLIP_THRESHOLD: f64 = 0.9999;
 const CLIP_RUN_LENGTH: u32 = 3;
+const MAX_CHANNELS: u16 = 32;
+const READ_BUFFER_BYTES: usize = 64 * 1024;
 
 struct WavFormat {
     tag: u16,
     channels: u16,
     sample_rate: u32,
+    block_align: u16,
     bits: u16,
 }
 
@@ -94,6 +97,7 @@ fn inspect_wav(path: &str) -> Result<AudioInfo, String> {
                 tag,
                 channels: read_u16(&buf, 2),
                 sample_rate: read_u32(&buf, 4),
+                block_align: read_u16(&buf, 12),
                 bits: read_u16(&buf, 14),
             });
             let rest = size - buf.len() as u64 + (size & 1);
@@ -148,14 +152,23 @@ fn analyse_samples(file: &mut File, fmt: &WavFormat, data_len: u64) -> Result<Au
             fmt.tag, fmt.bits
         ));
     }
+    if fmt.channels > MAX_CHANNELS {
+        return Err(format!(
+            "Unsupported WAV: {} channels (max {MAX_CHANNELS})",
+            fmt.channels
+        ));
+    }
     let frame_bytes = bytes_per_sample * fmt.channels as usize;
+    if fmt.block_align as usize != frame_bytes {
+        return Err("WAV fmt chunk has an inconsistent block alignment".into());
+    }
 
     let mut peak: f64 = 0.0;
     let mut runs = vec![0u32; fmt.channels as usize];
     let mut clipped = false;
     let mut total_frames: u64 = 0;
     let mut remaining = data_len;
-    let mut buf = vec![0u8; frame_bytes * 4096];
+    let mut buf = vec![0u8; READ_BUFFER_BYTES / frame_bytes * frame_bytes];
     let mut filled = 0usize;
 
     while remaining > 0 {
@@ -372,5 +385,26 @@ mod tests {
         let path = dir.path().join("j.xyz");
         std::fs::write(&path, b"data").unwrap();
         assert!(inspect_audio(path.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn absurd_channel_count_is_rejected_before_allocating() {
+        let dir = TempDir::new().unwrap();
+        let path = write_wav(&dir, "k.wav", 44100, 16, 1, false, &sine(0.5, 100));
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[22..24].copy_from_slice(&u16::MAX.to_le_bytes());
+        std::fs::write(&path, &bytes).unwrap();
+        let err = inspect_audio(&path).unwrap_err();
+        assert!(err.contains("channel"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn mismatched_block_align_is_rejected() {
+        let dir = TempDir::new().unwrap();
+        let path = write_wav(&dir, "l.wav", 44100, 16, 1, false, &sine(0.5, 100));
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[32..34].copy_from_slice(&7u16.to_le_bytes());
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(inspect_audio(&path).is_err());
     }
 }
