@@ -1549,3 +1549,116 @@ body.density-comfortable .table td {
 .split-pane.dragging .split-divider {
   background: var(--accent);
 }
+
+/* ---------- Info rail (full-screen project view) ---------- */
+.info-rail {
+  position: relative;
+  flex: none;
+  width: 280px;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg-1);
+  border-right: 1px solid var(--line);
+}
+.info-rail.rail-icons {
+  width: 48px;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+}
+.rail-section {
+  border-bottom: 1px solid var(--line);
+}
+.rail-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+}
+.rail-section-title:hover {
+  color: var(--text-1);
+}
+.rail-chevron {
+  display: inline-block;
+  font-size: 9px;
+  transition: transform 0.12s;
+}
+.rail-chevron.open {
+  transform: rotate(90deg);
+}
+.rail-section-body {
+  padding: 4px 12px 14px;
+  min-width: 0;
+  overflow-x: hidden;
+}
+.rail-icon-btn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-3);
+}
+.rail-icon-btn:hover,
+.rail-icon-btn.active {
+  background: var(--bg-3);
+  color: var(--text-1);
+}
+.rail-flyout {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  width: 280px;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 30;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-left: none;
+  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.35);
+}
+.rail-flyout-title {
+  padding: 10px 12px 0;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+/* Fit the legacy tab bodies into 280px: single column, no horizontal scroll */
+.info-rail .meta-grid,
+.rail-flyout .meta-grid {
+  grid-template-columns: 1fr 1fr;
+}
+.info-rail .rail-section-body *,
+.rail-flyout .rail-section-body * {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.info-rail .rail-section-body input,
+.info-rail .rail-section-body textarea,
+.info-rail .rail-section-body select,
+.rail-flyout .rail-section-body input,
+.rail-flyout .rail-section-body textarea,
+.rail-flyout .rail-section-body select {
+  min-width: 0;
+}
