@@ -142,6 +142,39 @@ async function runMigrations(raw: Database): Promise<void> {
     [],
   );
 
+  await raw.execute(
+    `CREATE TABLE IF NOT EXISTS project_files (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    export_type TEXT,
+    file_path TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    version_label TEXT NOT NULL,
+    file_date INTEGER NOT NULL,
+    is_final INTEGER NOT NULL DEFAULT 0,
+    linked_project_id TEXT,
+    sample_rate INTEGER,
+    bit_depth INTEGER,
+    channels INTEGER,
+    duration_secs REAL,
+    peak_db REAL,
+    clipped INTEGER NOT NULL DEFAULT 0,
+    lossy INTEGER NOT NULL DEFAULT 0,
+    media_missing_count INTEGER,
+    media_external_count INTEGER,
+    note TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+    [],
+  );
+
+  await raw.execute(
+    `CREATE INDEX IF NOT EXISTS idx_project_files_project ON project_files(project_id)`,
+    [],
+  );
+
   // Remove projects that live inside an Ableton Backup folder (case-insensitive, any depth)
   await raw.execute(
     `DELETE FROM projects WHERE file_path LIKE '%/Backup/%' OR file_path LIKE '%\\Backup\\%'`,

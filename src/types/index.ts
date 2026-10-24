@@ -118,3 +118,36 @@ export interface LyricsAIConfig {
   enabledModes: LyricSuggestionMode[];
   feedbackMode: LyricFeedbackMode;
 }
+
+export type ProjectFileKind = "mix_project" | "master_project" | "export";
+export type ExportType =
+  | "mix"
+  | "master"
+  | "stems"
+  | "instrumental"
+  | "alternate";
+
+export interface ProjectFile {
+  id: string;
+  projectId: string;
+  kind: ProjectFileKind;
+  exportType: ExportType | null;
+  filePath: string;
+  fileName: string;
+  sizeBytes: number;
+  versionLabel: string;
+  fileDate: number;
+  isFinal: boolean;
+  linkedProjectId: string | null;
+  sampleRate: number | null;
+  bitDepth: number | null;
+  channels: number | null;
+  durationSecs: number | null;
+  peakDb: number | null;
+  clipped: boolean;
+  lossy: boolean;
+  mediaMissingCount: number | null;
+  mediaExternalCount: number | null;
+  note: string | null;
+  createdAt: number;
+}

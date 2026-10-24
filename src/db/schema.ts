@@ -89,3 +89,30 @@ export const lyricStyleProfile = sqliteTable("lyric_style_profile", {
   summaryText: text("summary_text").notNull(),
   lastUpdatedAt: integer("last_updated_at").notNull(),
 });
+
+export const projectFiles = sqliteTable("project_files", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(), // 'mix_project' | 'master_project' | 'export'
+  exportType: text("export_type"),
+  filePath: text("file_path").notNull(),
+  fileName: text("file_name").notNull(),
+  sizeBytes: integer("size_bytes").notNull().default(0),
+  versionLabel: text("version_label").notNull(),
+  fileDate: integer("file_date").notNull(),
+  isFinal: integer("is_final", { mode: "boolean" }).notNull().default(false),
+  linkedProjectId: text("linked_project_id"),
+  sampleRate: integer("sample_rate"),
+  bitDepth: integer("bit_depth"),
+  channels: integer("channels"),
+  durationSecs: real("duration_secs"),
+  peakDb: real("peak_db"),
+  clipped: integer("clipped", { mode: "boolean" }).notNull().default(false),
+  lossy: integer("lossy", { mode: "boolean" }).notNull().default(false),
+  mediaMissingCount: integer("media_missing_count"),
+  mediaExternalCount: integer("media_external_count"),
+  note: text("note"),
+  createdAt: integer("created_at").notNull(),
+});
