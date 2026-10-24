@@ -3,7 +3,7 @@ import type { LyricSuggestionMode } from "../types";
 export interface LyricsSuggestionInput {
   lyrics: string;
   currentLine: string;
-  textBeforeCursor: string;  // text on the current line up to the cursor
+  textBeforeCursor: string; // text on the current line up to the cursor
   selectionStart: number;
   selectionEnd: number;
   title: string;
@@ -37,7 +37,10 @@ function lastWord(line: string): string {
 
 // Extract rhyme context: find non-empty lines before the current one and
 // return the word that a new line is most likely expected to rhyme with.
-function extractRhymeContext(lyrics: string, currentLine: string): string | null {
+function extractRhymeContext(
+  lyrics: string,
+  currentLine: string,
+): string | null {
   const lines = lyrics
     .split("\n")
     .map((l) => l.trim())
@@ -56,7 +59,11 @@ function extractRhymeContext(lyrics: string, currentLine: string): string | null
     const last = lastWord(recent[recent.length - 1]);
     const twoBack = lastWord(recent[recent.length - 3]);
     // Very rough phonetic similarity for Hebrew: compare last 2 chars
-    if (last.length >= 2 && twoBack.length >= 2 && last.slice(-2) === twoBack.slice(-2)) {
+    if (
+      last.length >= 2 &&
+      twoBack.length >= 2 &&
+      last.slice(-2) === twoBack.slice(-2)
+    ) {
       // Alternating scheme detected — rhyme with the line immediately above current
       return lastWord(recent[recent.length - 1]);
     }
@@ -135,7 +142,10 @@ function buildSongContext(
 
 // Role + task rules per mode, so e.g. next_line isn't told to "complete what
 // the writer has started" (it's asked to write a brand-new line instead).
-function inlineTaskEn(mode: LyricsSuggestionInput["mode"]): { role: string; rules: string[] } {
+function inlineTaskEn(mode: LyricsSuggestionInput["mode"]): {
+  role: string;
+  rules: string[];
+} {
   switch (mode) {
     case "next_line":
       return {
@@ -166,7 +176,10 @@ function inlineTaskEn(mode: LyricsSuggestionInput["mode"]): { role: string; rule
   }
 }
 
-function inlineTaskHe(mode: LyricsSuggestionInput["mode"]): { role: string; rules: string[] } {
+function inlineTaskHe(mode: LyricsSuggestionInput["mode"]): {
+  role: string;
+  rules: string[];
+} {
   switch (mode) {
     case "next_line":
       return {
@@ -231,7 +244,10 @@ function buildInlineSystemHe(input: LyricsSuggestionInput): string {
   ].join("\n");
 }
 
-function buildInlineUserPrompt(input: LyricsSuggestionInput, hebrew: boolean): string {
+function buildInlineUserPrompt(
+  input: LyricsSuggestionInput,
+  hebrew: boolean,
+): string {
   const lines = [
     `${input.mode === "next_line" ? "Entire lyrics" : "Lyrics so far"}:\n${input.lyrics || "(empty)"}`,
   ];
@@ -382,7 +398,10 @@ export function buildLyricsPopupPrompt(input: LyricsPopupInput): {
 
   // The next_line group always gets one extra option whose last word rhymes
   // with the last line written (the one the cursor is on).
-  const lastLineEnd = lastWord(input.currentLine).replace(/[^\p{L}\p{N}'’-]+$/u, "");
+  const lastLineEnd = lastWord(input.currentLine).replace(
+    /[^\p{L}\p{N}'’-]+$/u,
+    "",
+  );
   const rhymingAlternative =
     input.enabledModes.includes("next_line") && lastLineEnd
       ? hebrew
@@ -398,10 +417,14 @@ export function buildLyricsPopupPrompt(input: LyricsPopupInput): {
     buildRecentExamples(input.recentAccepted),
     buildSongContext(input.title, input.bpm, input.key, input.timeSignature),
     "",
-    hebrew ? "הפק הצעה אחת לכל אחד מהסוגים הבאים:" : "Generate one suggestion for each of the following types:",
+    hebrew
+      ? "הפק הצעה אחת לכל אחד מהסוגים הבאים:"
+      : "Generate one suggestion for each of the following types:",
     modeInstructions,
     rhyme
-      ? (hebrew ? `בשורה הבאה, המילה האחרונה צריכה להתחרז עם "${rhyme}" — אבל זו חייבת להיות שורה שלמה, לא רק חרוז.` : `For next_line, the last word should rhyme with "${rhyme}" — but it must still be a complete line, not just a rhyme.`)
+      ? hebrew
+        ? `בשורה הבאה, המילה האחרונה צריכה להתחרז עם "${rhyme}" — אבל זו חייבת להיות שורה שלמה, לא רק חרוז.`
+        : `For next_line, the last word should rhyme with "${rhyme}" — but it must still be a complete line, not just a rhyme.`
       : "",
     rhymingAlternative,
     hebrew

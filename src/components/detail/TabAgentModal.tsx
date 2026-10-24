@@ -339,9 +339,7 @@ If the user asks a question rather than requesting generation, answer concisely.
                   style={{ flex: 1, justifyContent: "center" }}
                   onClick={() => {
                     addUser("Yes, proceed");
-                    addAgent(
-                      "Which section would you like to start with?",
-                    );
+                    addAgent("Which section would you like to start with?");
                     setStep("section");
                   }}
                 >
@@ -360,91 +358,94 @@ If the user asks a question rather than requesting generation, answer concisely.
                   Customize
                 </button>
               </div>
-          )}
+            )}
 
-          {step === "section" && (
-            <SectionStep
-              hints={lyricsHint}
-              onConfirm={(name, chords) => goToInstruments(name, chords)}
-            />
-          )}
+            {step === "section" && (
+              <SectionStep
+                hints={lyricsHint}
+                onConfirm={(name, chords) => goToInstruments(name, chords)}
+              />
+            )}
 
-          {step === "instruments" && (
-            <InstrumentsStep
-              selected={wizard.instruments}
-              onChange={(insts) =>
-                setWizard((w) => ({ ...w, instruments: insts }))
-              }
-              onConfirm={goToChords}
-            />
-          )}
+            {step === "instruments" && (
+              <InstrumentsStep
+                selected={wizard.instruments}
+                onChange={(insts) =>
+                  setWizard((w) => ({ ...w, instruments: insts }))
+                }
+                onConfirm={goToChords}
+              />
+            )}
 
-          {step === "chords" && (
-            <ChordsStep initial={wizard.chords} onConfirm={goToBars} />
-          )}
+            {step === "chords" && (
+              <ChordsStep initial={wizard.chords} onConfirm={goToBars} />
+            )}
 
-          {step === "bars" && (
-            <BarsStep initial={wizard.bars} onConfirm={goToTimeSig} />
-          )}
+            {step === "bars" && (
+              <BarsStep initial={wizard.bars} onConfirm={goToTimeSig} />
+            )}
 
-          {step === "timesig" && (
-            <TimeSigStep initial={wizard.timeSignature} onConfirm={goToStyle} />
-          )}
+            {step === "timesig" && (
+              <TimeSigStep
+                initial={wizard.timeSignature}
+                onConfirm={goToStyle}
+              />
+            )}
 
-          {step === "style" && <StyleStep onConfirm={goToPreview} />}
+            {step === "style" && <StyleStep onConfirm={goToPreview} />}
 
-          {step === "preview" && preview.length === 0 && (
-            <button
-              className="tb-btn primary"
-              style={{ width: "100%", justifyContent: "center" }}
-              onClick={handleGenerate}
-            >
-              ✦ Generate structure
-            </button>
-          )}
-
-          {step === "preview" && preview.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {preview.map((pt, i) => (
-                <div key={i} className="agent-preview-part">
-                  <div className="agent-preview-label">{pt.name}</div>
-                  <pre className="agent-preview-content">{pt.content}</pre>
-                </div>
-              ))}
+            {step === "preview" && preview.length === 0 && (
               <button
                 className="tb-btn primary"
-                style={{
-                  width: "100%",
-                  justifyContent: "center",
-                  marginTop: 4,
-                }}
-                onClick={handleInsert}
+                style={{ width: "100%", justifyContent: "center" }}
+                onClick={handleGenerate}
               >
-                Insert into Tab
+                ✦ Generate structure
               </button>
-            </div>
-          )}
+            )}
 
-          {step === "error" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "var(--red)",
-                  background: "rgba(255,90,90,0.08)",
-                  border: "1px solid rgba(255,90,90,0.3)",
-                  borderRadius: 6,
-                  padding: "8px 10px",
-                }}
-              >
-                {errorMsg}
+            {step === "preview" && preview.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {preview.map((pt, i) => (
+                  <div key={i} className="agent-preview-part">
+                    <div className="agent-preview-label">{pt.name}</div>
+                    <pre className="agent-preview-content">{pt.content}</pre>
+                  </div>
+                ))}
+                <button
+                  className="tb-btn primary"
+                  style={{
+                    width: "100%",
+                    justifyContent: "center",
+                    marginTop: 4,
+                  }}
+                  onClick={handleInsert}
+                >
+                  Insert into Tab
+                </button>
               </div>
-              <button className="tb-btn" onClick={() => setStep("preview")}>
-                ← Try again
-              </button>
-            </div>
-          )}
-        </div>
+            )}
+
+            {step === "error" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--red)",
+                    background: "rgba(255,90,90,0.08)",
+                    border: "1px solid rgba(255,90,90,0.3)",
+                    borderRadius: 6,
+                    padding: "8px 10px",
+                  }}
+                >
+                  {errorMsg}
+                </div>
+                <button className="tb-btn" onClick={() => setStep("preview")}>
+                  ← Try again
+                </button>
+              </div>
+            )}
+          </div>
         )}
 
         {/* Compose bar — always visible */}

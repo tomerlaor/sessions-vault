@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { parseOpenRouterModels, filterOpenRouterModels } from "../src/lib/openrouter";
+import {
+  parseOpenRouterModels,
+  filterOpenRouterModels,
+} from "../src/lib/openrouter";
 
 describe("parseOpenRouterModels", () => {
   it("extracts id/name, sorts by id, and skips malformed entries", () => {

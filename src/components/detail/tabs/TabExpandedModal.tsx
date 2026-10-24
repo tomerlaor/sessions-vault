@@ -32,7 +32,10 @@ export default function TabExpandedModal({
   onClose,
 }: Props) {
   // 64-col expanded grid (4 bars)
-  const expandedGrid: TabGrid = { ...grid, colCount: Math.max(grid.colCount, 64) };
+  const expandedGrid: TabGrid = {
+    ...grid,
+    colCount: Math.max(grid.colCount, 64),
+  };
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -44,12 +47,15 @@ export default function TabExpandedModal({
 
   return createPortal(
     <div className="tab-expanded-overlay" onClick={onClose}>
-      <div
-        className="tab-expanded-modal"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="tab-expanded-modal" onClick={(e) => e.stopPropagation()}>
         <div className="tab-expanded-header">
-          <span style={{ fontSize: 12, color: "var(--text-2)", fontFamily: "sans-serif" }}>
+          <span
+            style={{
+              fontSize: 12,
+              color: "var(--text-2)",
+              fontFamily: "sans-serif",
+            }}
+          >
             Expanded View — 4 bars
           </span>
           <button
@@ -59,7 +65,10 @@ export default function TabExpandedModal({
             ✕ Close
           </button>
         </div>
-        <AnnotationToolbar active={activeAnnotation} onChange={onAnnotationChange} />
+        <AnnotationToolbar
+          active={activeAnnotation}
+          onChange={onAnnotationChange}
+        />
         <TabGridEditor
           grid={expandedGrid}
           selectedCell={selectedCell}

@@ -291,11 +291,9 @@ pub fn inspect_media(path: &Path) -> Option<MediaReport> {
                 }
                 stack.push(name);
             }
-            Ok(Event::Empty(ref e)) => {
-                if capture_depth == Some(stack.len()) {
-                    let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                    note_value(&name, e, &mut abs_path, &mut rel_path);
-                }
+            Ok(Event::Empty(ref e)) if capture_depth == Some(stack.len()) => {
+                let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                note_value(&name, e, &mut abs_path, &mut rel_path);
             }
             Ok(Event::End(_)) => {
                 if capture_depth == Some(stack.len()) {

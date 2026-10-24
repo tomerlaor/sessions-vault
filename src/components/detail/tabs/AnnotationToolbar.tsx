@@ -68,7 +68,9 @@ export default function AnnotationToolbar({ active, onChange }: Props) {
               key={item.value}
               title={item.title}
               className={`tab-annotation-btn${active === item.value ? " active" : ""}`}
-              onClick={() => onChange(active === item.value ? null : item.value)}
+              onClick={() =>
+                onChange(active === item.value ? null : item.value)
+              }
             >
               {item.value}
             </button>

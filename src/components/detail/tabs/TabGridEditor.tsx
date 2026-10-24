@@ -1,6 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { TabGrid } from "../../../types";
-import { COL_WIDTH, STRING_HEIGHT, COLS_PER_BAR, COLS_PER_BEAT } from "../../../lib/tab-grid";
+import {
+  COL_WIDTH,
+  STRING_HEIGHT,
+  COLS_PER_BAR,
+  COLS_PER_BEAT,
+} from "../../../lib/tab-grid";
 
 interface Props {
   grid: TabGrid;
@@ -25,7 +30,10 @@ export default function TabGridEditor({
   onAddString,
   onMoveSelection,
 }: Props) {
-  const [editingCell, setEditingCell] = useState<{ stringIdx: number; colIdx: number } | null>(null);
+  const [editingCell, setEditingCell] = useState<{
+    stringIdx: number;
+    colIdx: number;
+  } | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [addingString, setAddingString] = useState(false);
   const [newStringLabel, setNewStringLabel] = useState("");
@@ -59,7 +67,10 @@ export default function TabGridEditor({
 
   const totalWidth = grid.colCount * COL_WIDTH;
 
-  function handleLineClick(e: React.MouseEvent<HTMLDivElement>, stringIdx: number) {
+  function handleLineClick(
+    e: React.MouseEvent<HTMLDivElement>,
+    stringIdx: number,
+  ) {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const colIdx = Math.min(Math.floor(x / COL_WIDTH), grid.colCount - 1);
@@ -115,7 +126,11 @@ export default function TabGridEditor({
     setEditingCell(null);
   }
 
-  function handleContextMenu(e: React.MouseEvent, stringIdx: number, colIdx: number) {
+  function handleContextMenu(
+    e: React.MouseEvent,
+    stringIdx: number,
+    colIdx: number,
+  ) {
     e.preventDefault();
     onClearCell(stringIdx, colIdx);
   }
@@ -149,7 +164,11 @@ export default function TabGridEditor({
 
           {grid.strings.map((label, si) => {
             return (
-              <div key={label} className="tab-grid-row" style={{ height: STRING_HEIGHT }}>
+              <div
+                key={label}
+                className="tab-grid-row"
+                style={{ height: STRING_HEIGHT }}
+              >
                 {/* String label */}
                 <span className="tab-grid-label">{label}</span>
                 {/* Opening bar */}
@@ -164,7 +183,9 @@ export default function TabGridEditor({
                   <div className="tab-grid-bg-line" />
 
                   {/* Beat ticks */}
-                  {Array.from({ length: Math.floor(grid.colCount / COLS_PER_BEAT) }).map((_, i) => (
+                  {Array.from({
+                    length: Math.floor(grid.colCount / COLS_PER_BEAT),
+                  }).map((_, i) => (
                     <div
                       key={i}
                       className={`tab-grid-tick${i % (COLS_PER_BAR / COLS_PER_BEAT) === 0 ? " bar" : ""}`}
@@ -178,14 +199,17 @@ export default function TabGridEditor({
                     .map(([k, cell]) => {
                       const colIdx = parseInt(k.split(":")[1], 10);
                       const isEditing =
-                        editingCell?.stringIdx === si && editingCell?.colIdx === colIdx;
+                        editingCell?.stringIdx === si &&
+                        editingCell?.colIdx === colIdx;
                       if (isEditing) return null;
                       return (
                         <div
                           key={k}
                           className={`tab-grid-token ${cell.kind}`}
                           style={{ left: colIdx * COL_WIDTH }}
-                          onContextMenu={(e) => handleContextMenu(e, si, colIdx)}
+                          onContextMenu={(e) =>
+                            handleContextMenu(e, si, colIdx)
+                          }
                         >
                           {cell.value}
                         </div>
@@ -223,8 +247,8 @@ export default function TabGridEditor({
         <button className="tb-btn" onClick={onExtend} style={{ fontSize: 11 }}>
           + Extend
         </button>
-        {onAddString && (
-          addingString ? (
+        {onAddString &&
+          (addingString ? (
             <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
               <input
                 ref={newStringInputRef}
@@ -235,26 +259,43 @@ export default function TabGridEditor({
                 onChange={(e) => setNewStringLabel(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") commitNewString();
-                  if (e.key === "Escape") { setAddingString(false); setNewStringLabel(""); }
+                  if (e.key === "Escape") {
+                    setAddingString(false);
+                    setNewStringLabel("");
+                  }
                 }}
                 style={{ width: 44, fontSize: 11 }}
               />
-              <button className="tb-btn" onClick={commitNewString} style={{ fontSize: 11 }}>
+              <button
+                className="tb-btn"
+                onClick={commitNewString}
+                style={{ fontSize: 11 }}
+              >
                 Add
               </button>
               <button
-                style={{ fontSize: 11, color: "var(--text-3)", padding: "2px 4px" }}
-                onClick={() => { setAddingString(false); setNewStringLabel(""); }}
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-3)",
+                  padding: "2px 4px",
+                }}
+                onClick={() => {
+                  setAddingString(false);
+                  setNewStringLabel("");
+                }}
               >
                 ✕
               </button>
             </div>
           ) : (
-            <button className="tb-btn" onClick={() => setAddingString(true)} style={{ fontSize: 11 }}>
+            <button
+              className="tb-btn"
+              onClick={() => setAddingString(true)}
+              style={{ fontSize: 11 }}
+            >
               + Line
             </button>
-          )
-        )}
+          ))}
       </div>
     </div>
   );

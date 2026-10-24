@@ -97,10 +97,7 @@ export type LyricSuggestionMode = "completion" | "alternative" | "next_line";
 export type LyricFeedbackMode = "minimal" | "tagged";
 export type LyricDisplayMode = "inline" | "popup";
 export type LyricRejectionTag =
-  | "too_cheesy"
-  | "good_rhyme"
-  | "wrong_vibe"
-  | "other";
+  "too_cheesy" | "good_rhyme" | "wrong_vibe" | "other";
 
 export interface LyricsAIConfig {
   enabled: boolean;

@@ -16,8 +16,7 @@ export interface ProjectMetadata {
 export type Instrument = "guitar" | "bass" | "drums";
 
 export type CellValue =
-  | { kind: "fret"; value: string }
-  | { kind: "annotation"; value: string };
+  { kind: "fret"; value: string } | { kind: "annotation"; value: string };
 
 export interface TabGrid {
   strings: string[];
@@ -26,11 +25,7 @@ export interface TabGrid {
 }
 
 export type AIProvider =
-  | "openai"
-  | "anthropic"
-  | "openrouter"
-  | "ollama"
-  | "lmstudio";
+  "openai" | "anthropic" | "openrouter" | "ollama" | "lmstudio";
 
 export type AIFeature = "lyrics" | "tabAgent";
 
@@ -115,17 +110,11 @@ export interface WatchedFolder {
 }
 
 export type LyricSuggestionMode =
-  | "completion"
-  | "alternative"
-  | "next_line"
-  | "next_word";
+  "completion" | "alternative" | "next_line" | "next_word";
 export type LyricFeedbackMode = "minimal" | "tagged";
 export type LyricDisplayMode = "inline" | "popup";
 export type LyricRejectionTag =
-  | "too_cheesy"
-  | "good_rhyme"
-  | "wrong_vibe"
-  | "other";
+  "too_cheesy" | "good_rhyme" | "wrong_vibe" | "other";
 
 export interface LyricsAIConfig {
   enabled: boolean;

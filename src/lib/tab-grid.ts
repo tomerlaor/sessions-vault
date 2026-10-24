@@ -40,7 +40,19 @@ export function gridToText(grid: TabGrid): string {
   return lines.join("\n");
 }
 
-const ANNOTATION_CHARS = new Set(["h", "p", "b", "r", "~", "/", "\\", "x", "T", "V", "s"]);
+const ANNOTATION_CHARS = new Set([
+  "h",
+  "p",
+  "b",
+  "r",
+  "~",
+  "/",
+  "\\",
+  "x",
+  "T",
+  "V",
+  "s",
+]);
 
 export function parseTabToGrid(content: string): TabGrid | null {
   if (!content) return null;
@@ -56,12 +68,15 @@ export function parseTabToGrid(content: string): TabGrid | null {
     if (pipeIdx === -1) continue;
     const label = line.slice(0, pipeIdx).trim();
     const lastPipe = line.lastIndexOf("|");
-    const body = line.slice(pipeIdx + 1, lastPipe === pipeIdx ? undefined : lastPipe);
+    const body = line.slice(
+      pipeIdx + 1,
+      lastPipe === pipeIdx ? undefined : lastPipe,
+    );
 
     strings.push(label);
     const cells: Record<string, CellValue> = {};
     let ci = 0; // column index
-    let i = 0;  // char index in body
+    let i = 0; // char index in body
     while (i < body.length) {
       const ch = body[i];
       if (ch === "-") {

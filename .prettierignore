@@ -1,0 +1,7 @@
+node_modules
+dist
+package-lock.json
+CHANGELOG.md
+.release-please-manifest.json
+src-tauri/gen
+src-tauri/target
