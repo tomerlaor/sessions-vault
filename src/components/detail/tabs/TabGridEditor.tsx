@@ -96,6 +96,7 @@ export default function TabGridEditor({
     if (e.key === "Enter") {
       commitInput();
     } else if (e.key === "Escape") {
+      e.preventDefault();
       setEditingCell(null);
     } else if (e.key === "Backspace" && inputValue === "") {
       onClearCell(editingCell.stringIdx, editingCell.colIdx);
@@ -260,6 +261,7 @@ export default function TabGridEditor({
                 onKeyDown={(e) => {
                   if (e.key === "Enter") commitNewString();
                   if (e.key === "Escape") {
+                    e.preventDefault();
                     setAddingString(false);
                     setNewStringLabel("");
                   }

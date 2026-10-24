@@ -79,7 +79,10 @@ export default function InfoRail({
       if (!rootRef.current?.contains(e.target as Node)) setFlyout(null);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFlyout(null);
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setFlyout(null);
+      }
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);

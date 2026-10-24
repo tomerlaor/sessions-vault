@@ -130,7 +130,10 @@ export default function ProjectView({
                     onChange={(e) => setTitleDraft(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") commitRename();
-                      if (e.key === "Escape") cancelEdit();
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        cancelEdit();
+                      }
                     }}
                     onBlur={commitRename}
                     autoFocus

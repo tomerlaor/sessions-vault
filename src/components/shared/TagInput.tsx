@@ -83,6 +83,7 @@ export default function TagInput({
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Escape") {
+      e.preventDefault();
       setOpen(false);
       return;
     }

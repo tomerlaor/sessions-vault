@@ -1,4 +1,11 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import {
+  useState,
+  useCallback,
+  useMemo,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -12,7 +19,7 @@ import SettingsModal from "./components/settings/SettingsModal";
 import { useProjects, useFilteredProjects } from "./hooks/useProjects";
 import { useScanner } from "./hooks/useScanner";
 import { useWatcher } from "./hooks/useWatcher";
-import { adjacentProjectIds } from "./lib/project-view";
+import { adjacentProjectIds, isEditableTarget } from "./lib/project-view";
 import { getTags } from "./db/queries/tags";
 import { updateProjectField } from "./db/queries/projects";
 import type { Project, Tag } from "./types";
@@ -101,6 +108,45 @@ export default function App() {
 
   const filtered = useFilteredProjects(projects, filter, sort);
   const selected = projects.find((p) => p.id === selectedId) ?? null;
+  const projectViewOpen = showDetail && selected !== null;
+  const { prev: prevId, next: nextId } = adjacentProjectIds(
+    filtered.map((p) => p.id),
+    selectedId ?? "",
+  );
+
+  // The selected project vanished (archived out of view, removed, reloaded away).
+  useEffect(() => {
+    if (showDetail && !selected) setShowDetail(false);
+  }, [showDetail, selected]);
+
+  // Keep the list's scroll position across a trip into a project.
+  const listScrollRef = useRef<HTMLDivElement>(null);
+  const savedScrollTop = useRef(0);
+  const wasProjectViewOpen = useRef(false);
+  useLayoutEffect(() => {
+    if (
+      wasProjectViewOpen.current &&
+      !projectViewOpen &&
+      listScrollRef.current
+    ) {
+      listScrollRef.current.scrollTop = savedScrollTop.current;
+    }
+    wasProjectViewOpen.current = projectViewOpen;
+  }, [projectViewOpen]);
+
+  // Esc leaves the project view unless something inside already consumed it.
+  // Handlers that consume Esc call preventDefault(); see the audit notes.
+  useEffect(() => {
+    if (!projectViewOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (isEditableTarget(e.target as HTMLElement | null)) return;
+      if (showSettings || showAbout) return;
+      setShowDetail(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [projectViewOpen, showSettings, showAbout]);
 
   const counts = useMemo(() => {
     const active = projects.filter((p) => p.status !== "archived");
@@ -304,39 +350,34 @@ export default function App() {
       />
 
       {/* Main */}
-      <main className={`main ${showDetail && selected ? "" : "no-detail"}`}>
-        <ProjectList
-          projects={filtered}
-          selectedId={selectedId}
-          sort={sort}
-          setSort={setSort}
-          label={viewLabel[filter.view] ?? "All projects"}
-          onSelect={(id) => {
-            setSelectedId(id);
-            setShowDetail(true);
-          }}
-          onReveal={onReveal}
-          onOpen={onOpen}
-          onStar={onStar}
-          onArchive={onArchive}
-        />
+      <main className="main">
+        <div className={projectViewOpen ? "list-hidden" : "list-wrap"}>
+          <ProjectList
+            projects={filtered}
+            selectedId={selectedId}
+            sort={sort}
+            setSort={setSort}
+            label={viewLabel[filter.view] ?? "All projects"}
+            scrollRef={listScrollRef}
+            onSelect={(id) => {
+              savedScrollTop.current = listScrollRef.current?.scrollTop ?? 0;
+              setSelectedId(id);
+              setShowDetail(true);
+            }}
+            onReveal={onReveal}
+            onOpen={onOpen}
+            onStar={onStar}
+            onArchive={onArchive}
+          />
+        </div>
 
-        {showDetail && selected && (
+        {projectViewOpen && selected && (
           <ProjectView
+            key={selected.id}
             project={selected}
             allTags={allTags}
-            prevId={
-              adjacentProjectIds(
-                filtered.map((p) => p.id),
-                selected.id,
-              ).prev
-            }
-            nextId={
-              adjacentProjectIds(
-                filtered.map((p) => p.id),
-                selected.id,
-              ).next
-            }
+            prevId={prevId}
+            nextId={nextId}
             onNavigate={setSelectedId}
             onBack={() => setShowDetail(false)}
             onOpen={onOpen}
