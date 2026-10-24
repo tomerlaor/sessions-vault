@@ -223,6 +223,115 @@ fn build_key_string(root: Option<i32>, scale: Option<&str>) -> Option<String> {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaReport {
+    pub total: u32,
+    pub missing: u32,
+    pub external: u32,
+}
+
+/// Counts the distinct samples a Live Set references, how many can't be found
+/// on disk, and how many live outside the Set's own project folder.
+pub fn inspect_media(path: &Path) -> Option<MediaReport> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut xml_bytes = Vec::new();
+    GzDecoder::new(file)
+        .take(MAX_XML_BYTES)
+        .read_to_end(&mut xml_bytes)
+        .ok()?;
+    let xml = String::from_utf8_lossy(&xml_bytes);
+
+    let project_dir = path.parent()?;
+    let project_root = project_dir
+        .canonicalize()
+        .unwrap_or_else(|_| project_dir.to_path_buf());
+
+    let mut reader = Reader::from_str(&xml);
+    reader.config_mut().trim_text(true);
+
+    // Element names from the root down to the current position.
+    let mut stack: Vec<String> = Vec::new();
+    // Stack depth of the FileRef directly under a SampleRef, while inside one.
+    let mut capture_depth: Option<usize> = None;
+    let mut abs_path = String::new();
+    let mut rel_path = String::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut report = MediaReport::default();
+
+    let note_value =
+        |name: &str, e: &quick_xml::events::BytesStart, abs: &mut String, rel: &mut String| {
+            let target = match name {
+                "Path" => abs,
+                "RelativePath" => rel,
+                _ => return,
+            };
+            if let Some(v) = e
+                .attributes()
+                .flatten()
+                .find(|a| a.key.as_ref() == b"Value")
+            {
+                *target = String::from_utf8_lossy(&v.value).into_owned();
+            }
+        };
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(ref e)) => {
+                let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                if name == "FileRef"
+                    && capture_depth.is_none()
+                    && stack.last().map(String::as_str) == Some("SampleRef")
+                {
+                    capture_depth = Some(stack.len() + 1);
+                    abs_path.clear();
+                    rel_path.clear();
+                } else if capture_depth == Some(stack.len()) {
+                    note_value(&name, e, &mut abs_path, &mut rel_path);
+                }
+                stack.push(name);
+            }
+            Ok(Event::Empty(ref e)) => {
+                if capture_depth == Some(stack.len()) {
+                    let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    note_value(&name, e, &mut abs_path, &mut rel_path);
+                }
+            }
+            Ok(Event::End(_)) => {
+                if capture_depth == Some(stack.len()) {
+                    capture_depth = None;
+                    let key = if abs_path.is_empty() {
+                        rel_path.clone()
+                    } else {
+                        abs_path.clone()
+                    };
+                    if !key.is_empty() && seen.insert(key) {
+                        report.total += 1;
+                        let candidates = [
+                            (!abs_path.is_empty()).then(|| std::path::PathBuf::from(&abs_path)),
+                            (!rel_path.is_empty()).then(|| project_dir.join(&rel_path)),
+                        ];
+                        match candidates.into_iter().flatten().find(|c| c.exists()) {
+                            None => report.missing += 1,
+                            Some(found) => {
+                                let found = found.canonicalize().unwrap_or(found);
+                                if !found.starts_with(&project_root) {
+                                    report.external += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                stack.pop();
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => return None,
+            _ => {}
+        }
+    }
+    Some(report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,5 +420,79 @@ mod tests {
         let path = dir.path().join("bad.als");
         std::fs::write(&path, b"not gzip").unwrap();
         assert!(parse(&path).is_none());
+    }
+
+    fn sample_ref(abs: &str, rel: &str) -> String {
+        format!(
+            r#"<AudioClip><SampleRef><FileRef><RelativePathType Value="3" /><RelativePath Value="{rel}" /><Name Value="x.wav" /><Path Value="{abs}" /><SourceContext><SourceContext><OriginalFileRef><FileRef><Path Value="/original/never/counted.wav" /></FileRef></OriginalFileRef></SourceContext></SourceContext></FileRef></SampleRef></AudioClip>"#
+        )
+    }
+
+    fn als_with(refs: &[String]) -> String {
+        format!(
+            r#"<?xml version="1.0"?><Ableton MajorVersion="11"><LiveSet>{}</LiveSet></Ableton>"#,
+            refs.join("")
+        )
+    }
+
+    #[test]
+    fn media_counts_internal_missing_and_external_samples() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join("Samples/Imported")).unwrap();
+        std::fs::write(project.path().join("Samples/Imported/in.wav"), b"x").unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_file = outside.path().join("out.wav");
+        std::fs::write(&outside_file, b"x").unwrap();
+
+        let xml = als_with(&[
+            sample_ref("/gone/elsewhere.wav", "Samples/Imported/in.wav"),
+            sample_ref(outside_file.to_str().unwrap(), ""),
+            sample_ref("/definitely/missing.wav", ""),
+        ]);
+        let als = project.path().join("song.als");
+        let mut enc = GzEncoder::new(std::fs::File::create(&als).unwrap(), Compression::default());
+        enc.write_all(xml.as_bytes()).unwrap();
+        enc.finish().unwrap();
+
+        assert_eq!(
+            inspect_media(&als),
+            Some(MediaReport {
+                total: 3,
+                missing: 1,
+                external: 1
+            })
+        );
+    }
+
+    #[test]
+    fn media_counts_a_repeated_sample_once() {
+        let (dir, path) = make_als_file(&als_with(&[
+            sample_ref("/missing/a.wav", ""),
+            sample_ref("/missing/a.wav", ""),
+        ]));
+        let _keep = dir;
+        assert_eq!(
+            inspect_media(&path),
+            Some(MediaReport {
+                total: 1,
+                missing: 1,
+                external: 0
+            })
+        );
+    }
+
+    #[test]
+    fn media_is_zero_for_a_set_without_samples() {
+        let (dir, path) = make_als_file(&als_with(&[]));
+        let _keep = dir;
+        assert_eq!(inspect_media(&path), Some(MediaReport::default()));
+    }
+
+    #[test]
+    fn media_is_none_for_non_gzip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.als");
+        std::fs::write(&path, b"not gzip").unwrap();
+        assert_eq!(inspect_media(&path), None);
     }
 }
