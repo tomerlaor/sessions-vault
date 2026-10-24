@@ -202,6 +202,16 @@ export default function FilesTab({ project: p }: Props) {
     await reload();
   };
 
+  const launch = (
+    command: "reveal_in_finder" | "open_in_daw",
+    path: string,
+  ) => {
+    setError(null);
+    invoke(command, { path }).catch((e) =>
+      setError(e instanceof Error ? e.message : String(e)),
+    );
+  };
+
   const finalFile = files.find((f) => f.isFinal);
 
   const renderRow = (f: ProjectFile) => {
@@ -323,14 +333,14 @@ export default function FilesTab({ project: p }: Props) {
         <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
           <button
             className="tb-btn"
-            onClick={() => invoke("reveal_in_finder", { path: f.filePath })}
+            onClick={() => launch("reveal_in_finder", f.filePath)}
           >
             Reveal
           </button>
           {f.kind !== "export" && !missing && (
             <button
               className="tb-btn"
-              onClick={() => invoke("open_in_daw", { path: f.filePath })}
+              onClick={() => launch("open_in_daw", f.filePath)}
             >
               Open
             </button>
