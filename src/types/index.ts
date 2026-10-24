@@ -121,11 +121,7 @@ export interface LyricsAIConfig {
 
 export type ProjectFileKind = "mix_project" | "master_project" | "export";
 export type ExportType =
-  | "mix"
-  | "master"
-  | "stems"
-  | "instrumental"
-  | "alternate";
+  "mix" | "master" | "stems" | "instrumental" | "alternate";
 
 export interface ProjectFile {
   id: string;
