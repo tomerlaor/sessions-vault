@@ -755,6 +755,7 @@ textarea {
   -webkit-appearance: none;
 }
 .lyrics-editor {
+  position: relative;
   background: var(--bg-0);
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
@@ -1685,4 +1686,59 @@ body.density-comfortable .table td {
   min-width: 0;
   width: 100%;
   text-overflow: ellipsis;
+}
+
+/* Full-screen project view */
+.project-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-1);
+}
+.pv-topbar {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.pv-header {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border-bottom: none;
+}
+.pv-back {
+  flex: 0 0 auto;
+}
+.pv-nav {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.pv-nav .tb-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pv-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.pv-body > .split-pane {
+  flex: 1;
+  min-width: 0;
+}
+.pv-pane {
+  height: 100%;
+  overflow: auto;
+  padding: 14px 16px;
+  box-sizing: border-box;
+}
+.pv-pane > .lyrics-editor,
+.pv-pane > .tab-editor {
+  min-height: 100%;
+  box-sizing: border-box;
 }

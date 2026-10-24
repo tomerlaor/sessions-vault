@@ -6,12 +6,13 @@ import { checkpointDb } from "./db/client";
 import { AboutWindow } from "./components/AboutWindow";
 import Sidebar from "./components/layout/Sidebar";
 import ProjectList from "./components/library/ProjectList";
-import DetailPanel from "./components/detail/DetailPanel";
+import ProjectView from "./components/detail/ProjectView";
 import Icon from "./components/shared/Icon";
 import SettingsModal from "./components/settings/SettingsModal";
 import { useProjects, useFilteredProjects } from "./hooks/useProjects";
 import { useScanner } from "./hooks/useScanner";
 import { useWatcher } from "./hooks/useWatcher";
+import { adjacentProjectIds } from "./lib/project-view";
 import { getTags } from "./db/queries/tags";
 import { updateProjectField } from "./db/queries/projects";
 import type { Project, Tag } from "./types";
@@ -321,10 +322,23 @@ export default function App() {
         />
 
         {showDetail && selected && (
-          <DetailPanel
+          <ProjectView
             project={selected}
             allTags={allTags}
-            onClose={() => setShowDetail(false)}
+            prevId={
+              adjacentProjectIds(
+                filtered.map((p) => p.id),
+                selected.id,
+              ).prev
+            }
+            nextId={
+              adjacentProjectIds(
+                filtered.map((p) => p.id),
+                selected.id,
+              ).next
+            }
+            onNavigate={setSelectedId}
+            onBack={() => setShowDetail(false)}
             onOpen={onOpen}
             onReveal={onReveal}
             onProjectUpdated={reload}

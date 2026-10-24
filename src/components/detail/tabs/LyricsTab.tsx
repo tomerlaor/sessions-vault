@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from "react";
+import { shouldFlushLyrics } from "../../../lib/project-view";
 import type { Project, LyricSuggestionMode } from "../../../types";
 import LyricsAiOverlay, { type LyricsAiOverlayHandle } from "./LyricsAiOverlay";
 
@@ -167,6 +168,19 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
   const text = p.lyrics ?? "";
   const autoRtl = useMemo(() => detectRtl(text || draft), [text, draft]);
   const rtl = rtlOverride !== null ? rtlOverride : autoRtl;
+
+  // Save unsaved edits when this instance unmounts (e.g. navigating to another
+  // project). Keyed by project id, so onUpdate here belongs to the old project.
+  const latest = useRef({ editing, draft, text, onUpdate });
+  latest.current = { editing, draft, text, onUpdate };
+  useEffect(
+    () => () => {
+      const l = latest.current;
+      if (shouldFlushLyrics(l.editing, l.draft, l.text))
+        l.onUpdate("lyrics", l.draft);
+    },
+    [],
+  );
 
   const knownChords = useMemo(() => extractUniqueChords(draft), [draft]);
 
