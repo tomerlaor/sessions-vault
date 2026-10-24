@@ -27,6 +27,13 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install Tauri system dependencies
+        if: steps.cargo_check.outputs.exists == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libssl-dev libxdo-dev \
+            libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev pkg-config
+
       - name: cargo fmt --check
         if: steps.cargo_check.outputs.exists == 'true'
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
