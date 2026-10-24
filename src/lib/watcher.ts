@@ -20,7 +20,7 @@ export async function startWatcher(
     "project:updated",
     async (e) => {
       const meta = e.payload;
-      let existing = await getProjectByPath(meta.filePath);
+      const existing = await getProjectByPath(meta.filePath);
 
       if (!existing && meta.fileHash) {
         // File may have been renamed (e.g. case change on macOS): same hash, different path
