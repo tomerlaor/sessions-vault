@@ -1,6 +1,7 @@
 const SERVICE: &str = "com.sessions.app";
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 // macOS asks for the login password once per keychain item, so every secret
@@ -8,6 +9,10 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 // per launch, however many features use secrets. Other platforms don't prompt
 // and keep one item per key.
 const USE_VAULT: bool = cfg!(target_os = "macos");
+// Debug builds skip the OS keychain entirely: an unsigned dev binary looks like
+// a new app after every rebuild, so macOS would ask for the password again each
+// time. Dev secrets go to a private file instead; release builds never use it.
+const USE_DEV_FILE: bool = cfg!(debug_assertions);
 const VAULT_ACCOUNT: &str = "vault";
 // Empty items named "has:<key>" record which keys exist. A keychain item's
 // existence can be checked without reading it (no prompt), whereas the vault's
@@ -43,6 +48,55 @@ fn env_override(key: &str) -> Option<String> {
 #[cfg(not(debug_assertions))]
 fn env_override(_key: &str) -> Option<String> {
     None
+}
+
+static DEV_FILE: OnceLock<PathBuf> = OnceLock::new();
+
+// Called once at startup with the app data dir. Only used in debug builds.
+pub fn init_dev_store(dir: PathBuf) {
+    if USE_DEV_FILE {
+        let _ = DEV_FILE.set(dir.join("dev-secrets.json"));
+    }
+}
+
+fn dev_path() -> Result<&'static PathBuf, String> {
+    DEV_FILE
+        .get()
+        .ok_or_else(|| "dev secret store not initialised".to_string())
+}
+
+fn dev_read() -> Result<HashMap<String, String>, String> {
+    let path = dev_path()?;
+    match std::fs::read_to_string(path) {
+        Ok(json) => serde_json::from_str(&json)
+            .map_err(|e| format!("{} is unreadable: {e}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+// Writes to a temp file and renames it, so a crash can't leave a half-written
+// file. The file is created owner-only on Unix.
+fn dev_write(map: &HashMap<String, String>) -> Result<(), String> {
+    let path = dev_path()?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    let json = serde_json::to_string_pretty(map).map_err(|e| e.to_string())?;
+    {
+        use std::io::Write;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&tmp).map_err(|e| e.to_string())?;
+        f.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
+    }
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
 fn marker(key: &str) -> String {
@@ -94,6 +148,12 @@ fn migrate_legacy(st: &mut State, key: &str) -> Result<Option<String>, String> {
 }
 
 pub fn store(key: &str, value: &str) -> Result<(), String> {
+    if USE_DEV_FILE {
+        let _guard = state();
+        let mut map = dev_read()?;
+        map.insert(key.to_owned(), value.to_owned());
+        return dev_write(&map);
+    }
     let mut st = state();
     if !USE_VAULT {
         platform::store(SERVICE, key, value)?;
@@ -117,6 +177,10 @@ pub fn get(key: &str) -> Result<Option<String>, String> {
     if let Some(v) = env_override(key) {
         return Ok(Some(v));
     }
+    if USE_DEV_FILE {
+        let _guard = state();
+        return Ok(dev_read()?.get(key).cloned());
+    }
     let mut st = state();
     if !USE_VAULT {
         if let Some(cached) = st.cache.get(key) {
@@ -138,6 +202,10 @@ pub fn exists(key: &str) -> Result<bool, String> {
     if env_override(key).is_some() {
         return Ok(true);
     }
+    if USE_DEV_FILE {
+        let _guard = state();
+        return Ok(dev_read()?.contains_key(key));
+    }
     let st = state();
     if !USE_VAULT {
         if let Some(cached) = st.cache.get(key) {
@@ -153,6 +221,12 @@ pub fn exists(key: &str) -> Result<bool, String> {
 }
 
 pub fn delete(key: &str) -> Result<(), String> {
+    if USE_DEV_FILE {
+        let _guard = state();
+        let mut map = dev_read()?;
+        map.remove(key);
+        return dev_write(&map);
+    }
     let mut st = state();
     if !USE_VAULT {
         platform::delete(SERVICE, key)?;
