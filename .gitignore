@@ -29,3 +29,7 @@ Desktop.ini
 
 # Superpowers brainstorm sessions
 .superpowers/
+
+# Local dev secrets (normally lives outside the repo, in the app data dir)
+dev-secrets.json
+dev-secrets.json.tmp
