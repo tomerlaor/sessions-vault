@@ -208,3 +208,10 @@ pub async fn backup_gdrive(
         checksum,
     })
 }
+
+#[tauri::command]
+pub async fn inspect_audio(path: String) -> Result<crate::audio::AudioInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::audio::inspect_audio(&path))
+        .await
+        .map_err(|e| e.to_string())?
+}

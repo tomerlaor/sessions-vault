@@ -1,3 +1,4 @@
+mod audio;
 mod backup;
 mod commands;
 mod parser;
@@ -46,6 +47,7 @@ pub fn run() {
             commands::store_secret,
             commands::get_secret,
             commands::delete_secret,
+            commands::inspect_audio,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
