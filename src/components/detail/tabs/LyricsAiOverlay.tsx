@@ -121,23 +121,30 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
       undefined,
     );
 
-    useEffect(() => {
-      Promise.all([getAIConfigFor("lyrics"), getLyricsAIConfig()]).then(
-        ([ai, lyricsAI]) => {
-          setAiConfig(ai);
-          setCfg(lyricsAI);
-        },
-      );
+    // The AI config includes the API key, which is read from the OS keychain
+    // (and may prompt for the password), so only load it when the helper is on.
+    const loadAiConfig = useCallback(() => {
+      getAIConfigFor("lyrics").then(setAiConfig);
+    }, []);
 
-      const onCfgChange = (e: Event) =>
-        setCfg((e as CustomEvent<LyricsAIConfig>).detail);
+    useEffect(() => {
+      getLyricsAIConfig().then((lyricsAI) => {
+        setCfg(lyricsAI);
+        if (lyricsAI.enabled) loadAiConfig();
+      });
+
+      const onCfgChange = (e: Event) => {
+        const next = (e as CustomEvent<LyricsAIConfig>).detail;
+        setCfg(next);
+        if (next.enabled) loadAiConfig();
+      };
       window.addEventListener("lyrics-ai-config-changed", onCfgChange);
 
       return () => {
         clearTimeout(tagTimerRef.current);
         window.removeEventListener("lyrics-ai-config-changed", onCfgChange);
       };
-    }, []);
+    }, [loadAiConfig]);
 
     useEffect(() => {
       Promise.all([

@@ -9,7 +9,7 @@ mod secrets;
 mod watcher;
 
 use tauri::menu::{Menu, MenuItem, Submenu};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -18,6 +18,7 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            secrets::init_dev_store(app.path().app_data_dir()?);
             let about_item =
                 MenuItem::with_id(app, "about", "About SessionsVault", true, None::<&str>)?;
             let help_menu = Submenu::with_items(app, "Help", true, &[&about_item])?;

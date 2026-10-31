@@ -1,66 +1,245 @@
 const SERVICE: &str = "com.sessions.app";
 
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
-fn cache() -> &'static Mutex<HashMap<String, Option<String>>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+// macOS asks for the login password once per keychain item, so every secret
+// lives in ONE item (a JSON map stored under VAULT_ACCOUNT): at most one prompt
+// per launch, however many features use secrets. Other platforms don't prompt
+// and keep one item per key.
+const USE_VAULT: bool = cfg!(target_os = "macos");
+// Debug builds skip the OS keychain entirely: an unsigned dev binary looks like
+// a new app after every rebuild, so macOS would ask for the password again each
+// time. Dev secrets go to a private file instead; release builds never use it.
+const USE_DEV_FILE: bool = cfg!(debug_assertions);
+const VAULT_ACCOUNT: &str = "vault";
+// Empty items named "has:<key>" record which keys exist. A keychain item's
+// existence can be checked without reading it (no prompt), whereas the vault's
+// contents can't, so `exists` uses these markers.
+const MARKER_PREFIX: &str = "has:";
+
+#[derive(Default)]
+struct State {
+    // Vault mode: the decrypted map, loaded on first use.
+    vault: Option<HashMap<String, String>>,
+    // Vault mode: keys already looked up as legacy per-key items.
+    legacy_checked: HashSet<String>,
+    // Per-key mode: read cache.
+    cache: HashMap<String, Option<String>>,
+}
+
+// One lock for everything: held across the OS call so concurrent callers wait
+// for the first read instead of each triggering their own prompt.
+fn state() -> MutexGuard<'static, State> {
+    static STATE: OnceLock<Mutex<State>> = OnceLock::new();
+    STATE
+        .get_or_init(|| Mutex::new(State::default()))
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+}
+
+// In dev, env vars shadow the keychain so recompiles don't trigger prompts.
+// e.g. `export GDRIVE_CLIENT_ID=... in your shell before cargo tauri dev`.
+#[cfg(debug_assertions)]
+fn env_override(key: &str) -> Option<String> {
+    std::env::var(key.to_uppercase().replace('-', "_")).ok()
+}
+#[cfg(not(debug_assertions))]
+fn env_override(_key: &str) -> Option<String> {
+    None
+}
+
+static DEV_FILE: OnceLock<PathBuf> = OnceLock::new();
+
+// Called once at startup with the app data dir. Only used in debug builds.
+pub fn init_dev_store(dir: PathBuf) {
+    if USE_DEV_FILE {
+        let _ = DEV_FILE.set(dir.join("dev-secrets.json"));
+    }
+}
+
+fn dev_path() -> Result<&'static PathBuf, String> {
+    DEV_FILE
+        .get()
+        .ok_or_else(|| "dev secret store not initialised".to_string())
+}
+
+fn dev_read() -> Result<HashMap<String, String>, String> {
+    let path = dev_path()?;
+    match std::fs::read_to_string(path) {
+        Ok(json) => serde_json::from_str(&json)
+            .map_err(|e| format!("{} is unreadable: {e}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+// Writes to a temp file and renames it, so a crash can't leave a half-written
+// file. The file is created owner-only on Unix.
+fn dev_write(map: &HashMap<String, String>) -> Result<(), String> {
+    let path = dev_path()?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    let json = serde_json::to_string_pretty(map).map_err(|e| e.to_string())?;
+    {
+        use std::io::Write;
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&tmp).map_err(|e| e.to_string())?;
+        f.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
+    }
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+}
+
+fn marker(key: &str) -> String {
+    format!("{MARKER_PREFIX}{key}")
+}
+
+fn load_vault(st: &mut State) -> Result<(), String> {
+    if st.vault.is_some() {
+        return Ok(());
+    }
+    let map = match platform::get(SERVICE, VAULT_ACCOUNT)? {
+        // A corrupt vault is an error, not an empty map: treating it as empty
+        // would let the next write overwrite whatever is still recoverable.
+        Some(json) => {
+            serde_json::from_str(&json).map_err(|e| format!("keychain vault is unreadable: {e}"))?
+        }
+        None => HashMap::new(),
+    };
+    st.vault = Some(map);
+    Ok(())
+}
+
+fn persist_vault(st: &State) -> Result<(), String> {
+    let map = st.vault.as_ref().ok_or("vault not loaded")?;
+    if map.is_empty() {
+        return platform::delete(SERVICE, VAULT_ACCOUNT);
+    }
+    let json = serde_json::to_string(map).map_err(|e| e.to_string())?;
+    platform::store(SERVICE, VAULT_ACCOUNT, &json)
+}
+
+// Secrets saved before the vault existed are separate per-key items. Move one
+// into the vault the first time it is asked for; the old item is deleted only
+// after the vault has been written.
+fn migrate_legacy(st: &mut State, key: &str) -> Result<Option<String>, String> {
+    if !st.legacy_checked.insert(key.to_owned()) {
+        return Ok(None);
+    }
+    let Some(value) = platform::get(SERVICE, key)? else {
+        return Ok(None);
+    };
+    st.vault
+        .as_mut()
+        .ok_or("vault not loaded")?
+        .insert(key.to_owned(), value.clone());
+    persist_vault(st)?;
+    platform::store(SERVICE, &marker(key), "1")?;
+    platform::delete(SERVICE, key)?;
+    Ok(Some(value))
 }
 
 pub fn store(key: &str, value: &str) -> Result<(), String> {
-    platform::store(SERVICE, key, value)?;
-    if let Ok(mut c) = cache().lock() {
-        c.insert(key.to_owned(), Some(value.to_owned()));
+    if USE_DEV_FILE {
+        let _guard = state();
+        let mut map = dev_read()?;
+        map.insert(key.to_owned(), value.to_owned());
+        return dev_write(&map);
     }
+    let mut st = state();
+    if !USE_VAULT {
+        platform::store(SERVICE, key, value)?;
+        st.cache.insert(key.to_owned(), Some(value.to_owned()));
+        return Ok(());
+    }
+    load_vault(&mut st)?;
+    st.vault
+        .as_mut()
+        .ok_or("vault not loaded")?
+        .insert(key.to_owned(), value.to_owned());
+    persist_vault(&st)?;
+    platform::store(SERVICE, &marker(key), "1")?;
+    // Drop any pre-vault copy of this key.
+    platform::delete(SERVICE, key)?;
+    st.legacy_checked.insert(key.to_owned());
     Ok(())
 }
 
 pub fn get(key: &str) -> Result<Option<String>, String> {
-    // In dev, env vars shadow the keychain so recompiles don't trigger prompts.
-    // e.g. `export GDRIVE_CLIENT_ID=... in your shell before cargo tauri dev`.
-    #[cfg(debug_assertions)]
-    {
-        let env_key = key.to_uppercase().replace('-', "_");
-        if let Ok(v) = std::env::var(&env_key) {
-            return Ok(Some(v));
+    if let Some(v) = env_override(key) {
+        return Ok(Some(v));
+    }
+    if USE_DEV_FILE {
+        let _guard = state();
+        return Ok(dev_read()?.get(key).cloned());
+    }
+    let mut st = state();
+    if !USE_VAULT {
+        if let Some(cached) = st.cache.get(key) {
+            return Ok(cached.clone());
         }
+        let result = platform::get(SERVICE, key)?;
+        st.cache.insert(key.to_owned(), result.clone());
+        return Ok(result);
     }
-
-    // Hold the lock for the entire check+read so concurrent invocations of the
-    // same key block until the first read completes and populates the cache.
-    // This prevents multiple OS prompts when two callers race on the same key.
-    let mut c = cache().lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(cached) = c.get(key) {
-        return Ok(cached.clone());
+    load_vault(&mut st)?;
+    if let Some(v) = st.vault.as_ref().and_then(|m| m.get(key)) {
+        return Ok(Some(v.clone()));
     }
-    let result = platform::get(SERVICE, key)?;
-    c.insert(key.to_owned(), result.clone());
-    Ok(result)
+    migrate_legacy(&mut st, key)
 }
 
-// Existence check that never reads the secret, so it can't trigger an OS prompt.
+// Existence check that never reads a secret, so it can't trigger an OS prompt.
 pub fn exists(key: &str) -> Result<bool, String> {
-    #[cfg(debug_assertions)]
-    {
-        let env_key = key.to_uppercase().replace('-', "_");
-        if std::env::var(&env_key).is_ok() {
-            return Ok(true);
-        }
+    if env_override(key).is_some() {
+        return Ok(true);
     }
-    if let Ok(c) = cache().lock() {
-        if let Some(cached) = c.get(key) {
+    if USE_DEV_FILE {
+        let _guard = state();
+        return Ok(dev_read()?.contains_key(key));
+    }
+    let st = state();
+    if !USE_VAULT {
+        if let Some(cached) = st.cache.get(key) {
             return Ok(cached.is_some());
         }
+        return platform::exists(SERVICE, key);
     }
-    platform::exists(SERVICE, key)
+    if st.vault.as_ref().is_some_and(|m| m.contains_key(key)) {
+        return Ok(true);
+    }
+    // Marker for vault entries, or the key's own item for not-yet-migrated ones.
+    Ok(platform::exists(SERVICE, &marker(key))? || platform::exists(SERVICE, key)?)
 }
 
 pub fn delete(key: &str) -> Result<(), String> {
-    platform::delete(SERVICE, key)?;
-    if let Ok(mut c) = cache().lock() {
-        c.remove(key);
+    if USE_DEV_FILE {
+        let _guard = state();
+        let mut map = dev_read()?;
+        map.remove(key);
+        return dev_write(&map);
     }
+    let mut st = state();
+    if !USE_VAULT {
+        platform::delete(SERVICE, key)?;
+        st.cache.remove(key);
+        return Ok(());
+    }
+    load_vault(&mut st)?;
+    st.vault.as_mut().ok_or("vault not loaded")?.remove(key);
+    persist_vault(&st)?;
+    platform::delete(SERVICE, &marker(key))?;
+    platform::delete(SERVICE, key)?;
+    st.legacy_checked.insert(key.to_owned());
     Ok(())
 }
 
