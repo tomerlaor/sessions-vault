@@ -78,12 +78,16 @@ stages/<kind>/<file name>          (one per selected project_files row)
       "isFinal": true,
       "sizeBytes": 48213990,
       "sha256": "…",
-      "mtime": 1735400000
-    }
+      "mtime": 1735400000,
+    },
   ],
   "missing": [
-    { "originalPath": "/Users/.../stems/kick.wav", "stage": "export", "reason": "not found on disk" }
-  ]
+    {
+      "originalPath": "/Users/.../stems/kick.wav",
+      "stage": "export",
+      "reason": "not found on disk",
+    },
+  ],
 }
 ```
 
@@ -215,17 +219,17 @@ manifest already carries everything required to render this.
 
 ## Files to change
 
-| File | Change |
-| --- | --- |
-| `src-tauri/src/backup/manifest.rs` (new) | `Manifest`, `ManifestFile`, `ManifestMissing`, `ManifestProject` types + serde |
-| `src-tauri/src/backup/mod.rs` | `HashingReader`, `StageFileInput`, `zip_project` rewrite, `BackupResult` new fields |
-| `src-tauri/src/backup/local.rs` | `backup_to_local` takes `project_id` + `files`, passes through |
-| `src-tauri/src/commands.rs` | `backup_local` / `backup_gdrive` gain `project_id`, `files` |
-| `src/db/client.ts` | migration: `backups` columns, `backup_files`, `backup_restores` tables |
-| `src/db/schema.ts` | drizzle defs for the above |
-| `src/types/index.ts` | `BackupRecord.status` gains `"partial"`, new `manifestJson`/`stages`/`missingCount` fields, `BackupFile`/`BackupRestore` types, `StageGroup` type |
-| `src/lib/backup-stages.ts` (new) | `groupFilesByStage`, `defaultStageSelection`, `formatBackupResult` — pure, unit-tested |
-| `src/db/queries/backups.ts` | `getStageSelection` / `setStageSelection` helpers over `backup_configs` |
-| `src/components/detail/tabs/HistoryTab.tsx` | stage checklist before backup, partial-status + missing-files rendering |
-| `tests/backup-stages.test.ts` (new) | Vitest coverage for the pure lib |
-| `src-tauri/src/backup/manifest.rs`, `mod.rs` `#[cfg(test)]` | Rust unit tests (tempfile, no separate fixtures dir — follows the existing `audio.rs`/`ableton.rs` convention of synthesizing fixtures inline) |
+| File                                                        | Change                                                                                                                                            |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src-tauri/src/backup/manifest.rs` (new)                    | `Manifest`, `ManifestFile`, `ManifestMissing`, `ManifestProject` types + serde                                                                    |
+| `src-tauri/src/backup/mod.rs`                               | `HashingReader`, `StageFileInput`, `zip_project` rewrite, `BackupResult` new fields                                                               |
+| `src-tauri/src/backup/local.rs`                             | `backup_to_local` takes `project_id` + `files`, passes through                                                                                    |
+| `src-tauri/src/commands.rs`                                 | `backup_local` / `backup_gdrive` gain `project_id`, `files`                                                                                       |
+| `src/db/client.ts`                                          | migration: `backups` columns, `backup_files`, `backup_restores` tables                                                                            |
+| `src/db/schema.ts`                                          | drizzle defs for the above                                                                                                                        |
+| `src/types/index.ts`                                        | `BackupRecord.status` gains `"partial"`, new `manifestJson`/`stages`/`missingCount` fields, `BackupFile`/`BackupRestore` types, `StageGroup` type |
+| `src/lib/backup-stages.ts` (new)                            | `groupFilesByStage`, `defaultStageSelection`, `formatBackupResult` — pure, unit-tested                                                            |
+| `src/db/queries/backups.ts`                                 | `getStageSelection` / `setStageSelection` helpers over `backup_configs`                                                                           |
+| `src/components/detail/tabs/HistoryTab.tsx`                 | stage checklist before backup, partial-status + missing-files rendering                                                                           |
+| `tests/backup-stages.test.ts` (new)                         | Vitest coverage for the pure lib                                                                                                                  |
+| `src-tauri/src/backup/manifest.rs`, `mod.rs` `#[cfg(test)]` | Rust unit tests (tempfile, no separate fixtures dir — follows the existing `audio.rs`/`ableton.rs` convention of synthesizing fixtures inline)    |

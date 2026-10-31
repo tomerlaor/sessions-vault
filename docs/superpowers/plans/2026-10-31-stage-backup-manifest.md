@@ -19,7 +19,7 @@ Design: `docs/superpowers/specs/2026-10-31-stage-backup-manifest-design.md`
     tested directly: first use returns the name unchanged, second returns `_2` before
     the extension, etc.
   - Rewrite `zip_project(als_path, title, project_id, lyrics, tabs, todos, stage_files)
-    -> Result<(PathBuf, Manifest), String>`: writes `project/`, `text/`, `stages/<kind>/`
+-> Result<(PathBuf, Manifest), String>`: writes `project/`, `text/`, `stages/<kind>/`
     entries as in the design, hashes each via `HashingReader`, skips (and records into
     `manifest.missing`) any stage file that fails to open, writes `manifest.json` last,
     returns the zip path and the `Manifest`.
@@ -31,7 +31,7 @@ Design: `docs/superpowers/specs/2026-10-31-stage-backup-manifest-design.md`
   `stage_files: &[StageFileInput]`; builds status/missing_count/manifest_json onto
   `BackupResult` from what `zip_project` returns.
 - `src-tauri/src/commands.rs`: `backup_local` and `backup_gdrive` gain `project_id:
-  String`, `files: Vec<StageFileInput>` params; thread them to `zip_project` /
+String`, `files: Vec<StageFileInput>` params; thread them to `zip_project` /
   `backup_to_local`. No change to `lib.rs` registration (signatures only).
 
 ## 3. Rust tests (cargo test, tempfile, inline fixtures — matches `audio.rs` style)
@@ -52,9 +52,9 @@ In `src-tauri/src/backup/mod.rs` `#[cfg(test)] mod tests`:
 ## 4. DB migration + schema + types
 
 - `src/db/client.ts`: add to `runMigrations` — `ALTER TABLE backups ADD COLUMN
-  manifest_json TEXT` / `stages TEXT` / `missing_count INTEGER DEFAULT 0` (each in its
+manifest_json TEXT` / `stages TEXT` / `missing_count INTEGER DEFAULT 0` (each in its
   own try/catch like the existing `projects` column additions, since `ALTER TABLE ADD
-  COLUMN` has no `IF NOT EXISTS` in SQLite); `CREATE TABLE IF NOT EXISTS backup_files`;
+COLUMN` has no `IF NOT EXISTS` in SQLite); `CREATE TABLE IF NOT EXISTS backup_files`;
   `CREATE TABLE IF NOT EXISTS backup_restores`.
 - `src/db/schema.ts`: add `manifestJson`, `stages`, `missingCount` to the `backups`
   table def; add `backupFiles`, `backupRestores` table defs.
@@ -76,12 +76,12 @@ In `src-tauri/src/backup/mod.rs` `#[cfg(test)] mod tests`:
   present groups' keys, or `defaultStageSelection` if `remembered` is null/empty-after-
   intersection)
 - `parseMissing(manifestJson: string | null): { originalPath: string; reason: string
-  }[]` for rendering the partial-backup detail line.
+}[]` for rendering the partial-backup detail line.
 
 ## 6. Frontend: wire into `backups.ts` queries + `HistoryTab.tsx`
 
 - `src/db/queries/backups.ts`: `getStageSelection()` / `setStageSelection(keys:
-  string[])` over `backup_configs` id `"stage-selection"`, same pattern as
+string[])` over `backup_configs` id `"stage-selection"`, same pattern as
   `getLocalConfig`/`setLocalConfig`.
 - `HistoryTab.tsx`:
   - Load `listFiles(p.id)` alongside existing reload; compute `groupFilesByStage`.
@@ -92,10 +92,10 @@ In `src-tauri/src/backup/mod.rs` `#[cfg(test)] mod tests`:
     `resolveStageSelection` using the remembered selection. On confirm: persist the
     selection via `setStageSelection`, map selected `ProjectFile[]` to
     `StageFileInput[]`, pass `projectId: p.id, files` into `invoke("backup_local"/
-    "backup_gdrive", ...)`.
+"backup_gdrive", ...)`.
   - `insertBackup(...)` gains `status: result.status`, `manifestJson:
-    result.manifestJson`, `stages: JSON.stringify(selectedKeys)`, `missingCount:
-    result.missingCount`.
+result.manifestJson`, `stages: JSON.stringify(selectedKeys)`, `missingCount:
+result.missingCount`.
   - Render: status dot gets a third amber state for `"partial"`; under the existing
     destination block, if `missingCount > 0`, show "`N` files missing" with the list
     from `parseMissing(b.manifestJson)` (collapsed by default, expandable).
@@ -103,6 +103,7 @@ In `src-tauri/src/backup/mod.rs` `#[cfg(test)] mod tests`:
 ## 7. Vitest tests
 
 `tests/backup-stages.test.ts`:
+
 - `groupFilesByStage`: mix_project/master_project collapse to one group each; export
   rows split by `exportType`; totals sum `sizeBytes` correctly.
 - `defaultStageSelection`: excludes a group over 1 GiB, includes everything else.
@@ -114,6 +115,7 @@ In `src-tauri/src/backup/mod.rs` `#[cfg(test)] mod tests`:
 ## 8. Verification gate
 
 Run and fix until green, in this order:
+
 1. `cd src-tauri && cargo fmt && cargo clippy -- -D warnings && cargo test`
 2. `npx tsc --noEmit`
 3. `npx eslint .`
