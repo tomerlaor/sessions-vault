@@ -89,12 +89,11 @@ export interface LocalConfig {
   destination: string;
 }
 
+// Non-sensitive Drive settings. The client secret and OAuth tokens are held
+// by the Rust backend only and never reach the webview.
 export interface GDriveConfig {
   clientId: string;
-  clientSecret: string;
-  refreshToken: string | null;
-  accessToken: string | null;
-  tokenExpiry: number | null; // unix timestamp
+  connected: boolean;
 }
 
 export interface Tag {

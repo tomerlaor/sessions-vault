@@ -2,12 +2,8 @@ import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { getDb } from "../client";
 import { backups, backupConfigs } from "../schema";
-import { storeSecret, getSecret, deleteSecret } from "../../lib/keychain";
+import { invoke } from "@tauri-apps/api/core";
 import type { BackupRecord, LocalConfig, GDriveConfig } from "../../types";
-
-const K_GDRIVE_CLIENT_SECRET = "gdrive.client_secret";
-const K_GDRIVE_ACCESS_TOKEN = "gdrive.access_token";
-const K_GDRIVE_REFRESH_TOKEN = "gdrive.refresh_token";
 
 export async function getBackups(projectId: string): Promise<BackupRecord[]> {
   const db = await getDb();
@@ -51,69 +47,61 @@ export async function setLocalConfig(config: LocalConfig): Promise<void> {
     });
 }
 
-export async function getGDriveConfig(): Promise<GDriveConfig | null> {
+async function readGDriveRow(): Promise<{
+  clientId?: string;
+  connected?: boolean;
+} | null> {
   const db = await getDb();
   const rows = await db
     .select()
     .from(backupConfigs)
     .where(eq(backupConfigs.id, "gdrive"));
   if (!rows[0]) return null;
-  const safe = JSON.parse(rows[0].configJson) as Pick<
-    GDriveConfig,
-    "clientId" | "tokenExpiry"
-  >;
-  // Sequential reads prevent macOS from showing multiple keychain dialogs simultaneously.
-  const clientSecret = await getSecret(K_GDRIVE_CLIENT_SECRET);
-  const accessToken = await getSecret(K_GDRIVE_ACCESS_TOKEN);
-  const refreshToken = await getSecret(K_GDRIVE_REFRESH_TOKEN);
-  return {
-    ...safe,
-    clientSecret: clientSecret ?? "",
-    accessToken: accessToken ?? "",
-    refreshToken: refreshToken ?? "",
-  };
+  return JSON.parse(rows[0].configJson);
 }
 
-// Connection status for Settings. Reads a plain flag from SQLite so opening
-// Settings doesn't hit the keychain; configs saved before the flag existed
-// fall back to a single refresh-token read.
+// Drive settings without any credentials: those stay in the Rust backend.
+// Configs saved before the `connected` flag existed ask the backend, which
+// checks for a stored refresh token without reading it (no keychain prompt).
+export async function getGDriveConfig(): Promise<GDriveConfig | null> {
+  const row = await readGDriveRow();
+  if (!row) return null;
+  const connected =
+    typeof row.connected === "boolean"
+      ? row.connected
+      : await invoke<boolean>("gdrive_connected");
+  return { clientId: row.clientId ?? "", connected };
+}
+
 export async function isGDriveConnected(): Promise<boolean> {
-  const db = await getDb();
-  const rows = await db
-    .select()
-    .from(backupConfigs)
-    .where(eq(backupConfigs.id, "gdrive"));
-  if (!rows[0]) return false;
-  const safe = JSON.parse(rows[0].configJson) as { connected?: boolean };
-  if (typeof safe.connected === "boolean") return safe.connected;
-  return !!(await getSecret(K_GDRIVE_REFRESH_TOKEN));
+  return (await getGDriveConfig())?.connected ?? false;
 }
 
 export async function setGDriveConfig(config: GDriveConfig): Promise<void> {
   const db = await getDb();
-  // Secrets go to the OS keychain; null means disconnecting — delete stored entries
-  if (config.clientSecret)
-    await storeSecret(K_GDRIVE_CLIENT_SECRET, config.clientSecret);
-  else await deleteSecret(K_GDRIVE_CLIENT_SECRET);
-  if (config.accessToken)
-    await storeSecret(K_GDRIVE_ACCESS_TOKEN, config.accessToken);
-  else await deleteSecret(K_GDRIVE_ACCESS_TOKEN);
-  if (config.refreshToken)
-    await storeSecret(K_GDRIVE_REFRESH_TOKEN, config.refreshToken);
-  else await deleteSecret(K_GDRIVE_REFRESH_TOKEN);
-  // Only non-sensitive config lives in SQLite
-  const safe = {
-    clientId: config.clientId,
-    tokenExpiry: config.tokenExpiry,
-    connected: !!config.refreshToken,
-  };
+  const json = JSON.stringify(config);
   await db
     .insert(backupConfigs)
-    .values({ id: "gdrive", configJson: JSON.stringify(safe) })
+    .values({ id: "gdrive", configJson: json })
     .onConflictDoUpdate({
       target: backupConfigs.id,
-      set: { configJson: JSON.stringify(safe) },
+      set: { configJson: json },
     });
+}
+
+// Runs the OAuth flow in the backend, which keeps the client secret and
+// tokens; only the client ID and a connected flag are saved here.
+export async function connectGDrive(
+  clientId: string,
+  clientSecret: string,
+): Promise<void> {
+  await invoke("gdrive_connect", { clientId, clientSecret });
+  await setGDriveConfig({ clientId, connected: true });
+}
+
+export async function disconnectGDrive(): Promise<void> {
+  await invoke("gdrive_disconnect");
+  await setGDriveConfig({ clientId: "", connected: false });
 }
 
 export async function getGDriveFolderConfig(): Promise<LocalConfig | null> {

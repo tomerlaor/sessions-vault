@@ -2,6 +2,8 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::path::Path;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use url::Url;
 
 // ── PKCE helpers ─────────────────────────────────────────────────────────────
@@ -158,6 +160,91 @@ pub async fn refresh_token(
     })
 }
 
+// ── Session (tokens never leave Rust) ────────────────────────────────────────
+//
+// The client secret and refresh token live only in the secret store, and the
+// access token only in memory. The webview never sees any of them: it can only
+// connect, disconnect, ask whether Drive is connected, and request a backup.
+
+const K_CLIENT_SECRET: &str = "gdrive.client_secret";
+const K_REFRESH_TOKEN: &str = "gdrive.refresh_token";
+// Older builds stored the access token too; it is only ever deleted now.
+const K_LEGACY_ACCESS_TOKEN: &str = "gdrive.access_token";
+
+/// Refresh this long before Google's stated expiry.
+const EXPIRY_MARGIN: Duration = Duration::from_secs(60);
+
+struct CachedToken {
+    token: String,
+    expires_at: Instant,
+}
+
+static ACCESS_TOKEN: Mutex<Option<CachedToken>> = Mutex::new(None);
+
+fn cache_access_token(tokens: &super::GDriveTokens) {
+    let lifetime = Duration::from_secs(tokens.expires_in.max(0) as u64);
+    *ACCESS_TOKEN.lock().unwrap_or_else(|p| p.into_inner()) = Some(CachedToken {
+        token: tokens.access_token.clone(),
+        expires_at: Instant::now() + lifetime,
+    });
+}
+
+fn cached_access_token() -> Option<String> {
+    let guard = ACCESS_TOKEN.lock().unwrap_or_else(|p| p.into_inner());
+    guard
+        .as_ref()
+        .filter(|c| c.expires_at > Instant::now() + EXPIRY_MARGIN)
+        .map(|c| c.token.clone())
+}
+
+fn clear_access_token() {
+    *ACCESS_TOKEN.lock().unwrap_or_else(|p| p.into_inner()) = None;
+}
+
+/// Runs the OAuth flow and stores the resulting credentials. Blocking.
+pub fn connect(client_id: &str, client_secret: &str) -> Result<(), String> {
+    let tokens = start_auth_sync(client_id, client_secret)?;
+    crate::secrets::store(K_CLIENT_SECRET, client_secret)?;
+    crate::secrets::store(K_REFRESH_TOKEN, &tokens.refresh_token)?;
+    let _ = crate::secrets::delete(K_LEGACY_ACCESS_TOKEN);
+    cache_access_token(&tokens);
+    Ok(())
+}
+
+/// Forgets every stored Google credential. Blocking.
+pub fn disconnect() -> Result<(), String> {
+    clear_access_token();
+    crate::secrets::delete(K_CLIENT_SECRET)?;
+    crate::secrets::delete(K_REFRESH_TOKEN)?;
+    crate::secrets::delete(K_LEGACY_ACCESS_TOKEN)
+}
+
+/// Whether a refresh token is stored, without reading it (no keychain prompt).
+pub fn is_connected() -> Result<bool, String> {
+    crate::secrets::exists(K_REFRESH_TOKEN)
+}
+
+/// Returns a valid access token, refreshing it from the stored credentials
+/// when the cached one is missing or about to expire.
+pub async fn access_token(client_id: &str) -> Result<String, String> {
+    if let Some(token) = cached_access_token() {
+        return Ok(token);
+    }
+    // Keychain reads can block on an OS prompt, so keep them off the runtime.
+    let (secret, refresh) = tauri::async_runtime::spawn_blocking(|| {
+        let not_connected = || "Not connected to Google Drive".to_string();
+        let secret = crate::secrets::get(K_CLIENT_SECRET)?.ok_or_else(not_connected)?;
+        let refresh = crate::secrets::get(K_REFRESH_TOKEN)?.ok_or_else(not_connected)?;
+        Ok::<_, String>((secret, refresh))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let tokens = refresh_token(client_id, &secret, &refresh).await?;
+    cache_access_token(&tokens);
+    Ok(tokens.access_token)
+}
+
 // ── Upload ────────────────────────────────────────────────────────────────────
 
 /// Uploads the zip to Google Drive. Returns the Drive file ID.
@@ -271,3 +358,31 @@ trait Pipe: Sized {
     }
 }
 impl<T> Pipe for T {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tokens(expires_in: i64) -> crate::backup::GDriveTokens {
+        crate::backup::GDriveTokens {
+            access_token: "tok".into(),
+            refresh_token: "ref".into(),
+            expires_in,
+        }
+    }
+
+    // One test so the shared static isn't raced by parallel tests.
+    #[test]
+    fn access_token_cache() {
+        cache_access_token(&tokens(3600));
+        assert_eq!(cached_access_token().as_deref(), Some("tok"));
+
+        // Inside the expiry margin counts as expired.
+        cache_access_token(&tokens(30));
+        assert_eq!(cached_access_token(), None);
+
+        cache_access_token(&tokens(3600));
+        clear_access_token();
+        assert_eq!(cached_access_token(), None);
+    }
+}
