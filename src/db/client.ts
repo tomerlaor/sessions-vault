@@ -126,6 +126,53 @@ async function runMigrations(raw: Database): Promise<void> {
     [],
   );
 
+  // Manifest-based stage backups (US-008 PR1): per-file checksums, included
+  // stages and missing-file count live alongside the existing backup row.
+  try {
+    await raw.execute(`ALTER TABLE backups ADD COLUMN manifest_json TEXT`, []);
+  } catch {}
+  try {
+    await raw.execute(`ALTER TABLE backups ADD COLUMN stages TEXT`, []);
+  } catch {}
+  try {
+    await raw.execute(
+      `ALTER TABLE backups ADD COLUMN missing_count INTEGER DEFAULT 0`,
+      [],
+    );
+  } catch {}
+
+  // Unused until PR2 (restore/verify) — created now so that PR doesn't need
+  // another migration.
+  await raw.execute(
+    `CREATE TABLE IF NOT EXISTS backup_files (
+    id TEXT PRIMARY KEY,
+    backup_id TEXT NOT NULL REFERENCES backups(id) ON DELETE CASCADE,
+    project_file_id TEXT,
+    archive_path TEXT NOT NULL,
+    original_path TEXT NOT NULL,
+    stage TEXT,
+    version_label TEXT,
+    is_final INTEGER NOT NULL DEFAULT 0,
+    size_bytes INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    status TEXT NOT NULL
+  )`,
+    [],
+  );
+
+  await raw.execute(
+    `CREATE TABLE IF NOT EXISTS backup_restores (
+    id TEXT PRIMARY KEY,
+    backup_id TEXT NOT NULL REFERENCES backups(id) ON DELETE CASCADE,
+    restored_to TEXT NOT NULL,
+    restored_at INTEGER NOT NULL,
+    ok_count INTEGER NOT NULL,
+    mismatch_count INTEGER NOT NULL,
+    error_msg TEXT
+  )`,
+    [],
+  );
+
   await raw.execute(
     `CREATE TABLE IF NOT EXISTS lyric_style_events (
     id TEXT PRIMARY KEY,

@@ -79,10 +79,47 @@ export interface BackupRecord {
   provider: "local" | "gdrive";
   destination: string;
   snapshotAt: number;
-  status: "ok" | "failed";
+  status: "ok" | "partial" | "failed";
   sizeBytes: number | null;
   checksum: string | null;
   errorMsg: string | null;
+  manifestJson: string | null;
+  stages: string | null;
+  missingCount: number | null;
+}
+
+export interface ManifestFile {
+  archivePath: string;
+  originalPath: string;
+  stage: string | null;
+  exportType: string | null;
+  versionLabel: string | null;
+  isFinal: boolean;
+  sizeBytes: number;
+  sha256: string;
+  mtime: number;
+}
+
+export interface ManifestMissing {
+  originalPath: string;
+  stage: string | null;
+  reason: string;
+}
+
+export interface Manifest {
+  schema: number;
+  project: { id: string; title: string; alsPath: string };
+  createdAt: number;
+  appVersion: string;
+  files: ManifestFile[];
+  missing: ManifestMissing[];
+}
+
+export interface StageGroup {
+  key: string;
+  label: string;
+  count: number;
+  totalBytes: number;
 }
 
 export interface LocalConfig {
