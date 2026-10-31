@@ -116,6 +116,28 @@ export async function setGDriveConfig(config: GDriveConfig): Promise<void> {
     });
 }
 
+export async function getStageSelection(): Promise<string[] | null> {
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(backupConfigs)
+    .where(eq(backupConfigs.id, "stage-selection"));
+  if (!rows[0]) return null;
+  const parsed = JSON.parse(rows[0].configJson) as { keys?: string[] };
+  return parsed.keys ?? null;
+}
+
+export async function setStageSelection(keys: string[]): Promise<void> {
+  const db = await getDb();
+  await db
+    .insert(backupConfigs)
+    .values({ id: "stage-selection", configJson: JSON.stringify({ keys }) })
+    .onConflictDoUpdate({
+      target: backupConfigs.id,
+      set: { configJson: JSON.stringify({ keys }) },
+    });
+}
+
 export async function getGDriveFolderConfig(): Promise<LocalConfig | null> {
   const db = await getDb();
   const rows = await db
