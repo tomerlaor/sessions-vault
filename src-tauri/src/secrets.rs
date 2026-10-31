@@ -110,8 +110,9 @@ fn load_vault(st: &mut State) -> Result<(), String> {
     let map = match platform::get(SERVICE, VAULT_ACCOUNT)? {
         // A corrupt vault is an error, not an empty map: treating it as empty
         // would let the next write overwrite whatever is still recoverable.
-        Some(json) => serde_json::from_str(&json)
-            .map_err(|e| format!("keychain vault is unreadable: {e}"))?,
+        Some(json) => {
+            serde_json::from_str(&json).map_err(|e| format!("keychain vault is unreadable: {e}"))?
+        }
         None => HashMap::new(),
     };
     st.vault = Some(map);
