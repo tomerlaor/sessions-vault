@@ -33,3 +33,6 @@ Desktop.ini
 # Local dev secrets (normally lives outside the repo, in the app data dir)
 dev-secrets.json
 dev-secrets.json.tmp
+
+# Claude Code local, per-machine settings
+.claude/settings.local.json
