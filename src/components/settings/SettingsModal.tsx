@@ -5,7 +5,8 @@ import {
   getLocalConfig,
   setLocalConfig,
   isGDriveConnected,
-  setGDriveConfig,
+  connectGDrive,
+  disconnectGDrive,
   getGDriveFolderConfig,
   setGDriveFolderConfig,
 } from "../../db/queries/backups";
@@ -29,19 +30,12 @@ import {
 } from "../../lib/ai";
 import type {
   LocalConfig,
-  GDriveConfig,
   AIConfig,
   AIProvider,
   LyricsAIConfig,
 } from "../../types";
 import LyricsAiSettings from "./LyricsAiSettings";
 import Icon from "../shared/Icon";
-
-interface GDriveTokens {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
-}
 
 interface Props {
   onClose: () => void;
@@ -199,18 +193,7 @@ export default function SettingsModal({ onClose }: Props) {
     setConnectErr(null);
     setConnecting(true);
     try {
-      const tokens = await invoke<GDriveTokens>("gdrive_auth", {
-        clientId: clientId.trim(),
-        clientSecret: clientSecret.trim(),
-      });
-      const cfg: GDriveConfig = {
-        clientId: clientId.trim(),
-        clientSecret: clientSecret.trim(),
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        tokenExpiry: Math.floor(Date.now() / 1000) + tokens.expiresIn,
-      };
-      await setGDriveConfig(cfg);
+      await connectGDrive(clientId.trim(), clientSecret.trim());
       setGdriveConnected(true);
       setClientId("");
       setClientSecret("");
@@ -222,14 +205,7 @@ export default function SettingsModal({ onClose }: Props) {
   }, [clientId, clientSecret]);
 
   const handleDisconnect = useCallback(async () => {
-    const blank: GDriveConfig = {
-      clientId: "",
-      clientSecret: "",
-      accessToken: null,
-      refreshToken: null,
-      tokenExpiry: null,
-    };
-    await setGDriveConfig(blank);
+    await disconnectGDrive();
     setGdriveConnected(false);
   }, []);
 
