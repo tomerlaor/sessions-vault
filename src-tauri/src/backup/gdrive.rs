@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::Rng;
 use sha2::{Digest, Sha256};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use url::Url;
 
 // ── PKCE helpers ─────────────────────────────────────────────────────────────
@@ -261,6 +261,33 @@ async fn upload_file(
         .as_str()
         .ok_or("no file id in upload response")?
         .pipe(|s| Ok(s.to_string()))
+}
+
+// ── Download (for restore) ──────────────────────────────────────────────────
+
+/// Downloads a Drive file's raw bytes to a temp file and returns its path. Used
+/// by restore when a backup's `destination` is a bare Drive file ID rather than
+/// an already-local path (see `HistoryTab.tsx`'s `gdrive-folder` vs `gdrive-api`
+/// distinction).
+pub async fn download(file_id: &str, access_token: &str) -> Result<PathBuf, String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!(
+            "https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+        ))
+        .bearer_auth(access_token)
+        .send()
+        .await
+        .map_err(|e| format!("download: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("download failed: HTTP {}", resp.status()));
+    }
+
+    let bytes = resp.bytes().await.map_err(|e| format!("download: {e}"))?;
+    let dest = std::env::temp_dir().join(format!("{file_id}.zip"));
+    std::fs::write(&dest, &bytes).map_err(|e| format!("write temp file: {e}"))?;
+    Ok(dest)
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
