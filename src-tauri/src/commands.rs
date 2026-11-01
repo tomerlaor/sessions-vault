@@ -1,4 +1,4 @@
-use crate::backup::{self, BackupResult};
+use crate::backup::{self, BackupResult, StageFileInput};
 use crate::scanner::{self, ProjectMetadata};
 use std::path::Path;
 use tauri::{AppHandle, Emitter};
@@ -147,22 +147,27 @@ pub fn detect_gdrive_paths() -> Vec<String> {
 // ── Backup ────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn backup_local(
     file_path: String,
     title: String,
+    project_id: String,
     destination_dir: String,
     lyrics: Option<String>,
     tabs: Option<String>,
     todos: Option<String>,
+    files: Vec<StageFileInput>,
 ) -> Result<BackupResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         backup::local::backup_to_local(
             &file_path,
             &title,
+            &project_id,
             &destination_dir,
             lyrics.as_deref(),
             tabs.as_deref(),
             todos.as_deref(),
+            &files,
         )
     })
     .await
@@ -194,34 +199,43 @@ pub fn gdrive_connected() -> Result<bool, String> {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn backup_gdrive(
     file_path: String,
     title: String,
     client_id: String,
+    project_id: String,
     lyrics: Option<String>,
     tabs: Option<String>,
     todos: Option<String>,
+    files: Vec<StageFileInput>,
 ) -> Result<BackupResult, String> {
     // Create zip in blocking thread
-    let (zip_path, checksum, size_bytes) = tauri::async_runtime::spawn_blocking({
-        let file_path = file_path.clone();
-        let title = title.clone();
-        move || -> Result<_, String> {
-            let als = Path::new(&file_path);
-            let zip = backup::zip_project(
-                als,
-                &title,
-                lyrics.as_deref(),
-                tabs.as_deref(),
-                todos.as_deref(),
-            )?;
-            let checksum = backup::checksum_file(&zip)?;
-            let size = std::fs::metadata(&zip).map_err(|e| e.to_string())?.len();
-            Ok((zip, checksum, size))
-        }
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+    let (zip_path, checksum, size_bytes, status, missing_count, manifest_json) =
+        tauri::async_runtime::spawn_blocking({
+            let file_path = file_path.clone();
+            let title = title.clone();
+            move || -> Result<_, String> {
+                let als = Path::new(&file_path);
+                let (zip, manifest) = backup::zip_project(
+                    als,
+                    &title,
+                    &project_id,
+                    lyrics.as_deref(),
+                    tabs.as_deref(),
+                    todos.as_deref(),
+                    &files,
+                )?;
+                let checksum = backup::checksum_file(&zip)?;
+                let size = std::fs::metadata(&zip).map_err(|e| e.to_string())?.len();
+                let missing_count = manifest.missing.len() as u32;
+                let status = if missing_count > 0 { "partial" } else { "ok" }.to_string();
+                let manifest_json = serde_json::to_string(&manifest).map_err(|e| e.to_string())?;
+                Ok((zip, checksum, size, status, missing_count, manifest_json))
+            }
+        })
+        .await
+        .map_err(|e| e.to_string())??;
 
     let file_name = zip_path.file_name().unwrap().to_string_lossy().into_owned();
     let gdrive_id = match backup::gdrive::access_token(&client_id).await {
@@ -235,6 +249,9 @@ pub async fn backup_gdrive(
         destination: gdrive_id?,
         size_bytes,
         checksum,
+        status,
+        missing_count,
+        manifest_json,
     })
 }
 

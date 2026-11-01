@@ -64,15 +64,48 @@ export const backups = sqliteTable("backups", {
   provider: text("provider").notNull(), // 'local' | 'gdrive'
   destination: text("destination").notNull(), // local path or GDrive file ID
   snapshotAt: integer("snapshot_at").notNull(), // unix timestamp
-  status: text("status").notNull(), // 'ok' | 'failed'
+  status: text("status").notNull(), // 'ok' | 'partial' | 'failed'
   sizeBytes: integer("size_bytes"),
   checksum: text("checksum"),
   errorMsg: text("error_msg"),
+  manifestJson: text("manifest_json"), // full manifest.json contents
+  stages: text("stages"), // JSON array of included stage keys
+  missingCount: integer("missing_count").default(0),
 });
 
 export const backupConfigs = sqliteTable("backup_configs", {
-  id: text("id").primaryKey(), // 'local' | 'gdrive'
+  id: text("id").primaryKey(), // 'local' | 'gdrive' | 'stage-selection'
   configJson: text("config_json").notNull(),
+});
+
+// Unused until PR2 (restore/verify).
+export const backupFiles = sqliteTable("backup_files", {
+  id: text("id").primaryKey(),
+  backupId: text("backup_id")
+    .notNull()
+    .references(() => backups.id, { onDelete: "cascade" }),
+  projectFileId: text("project_file_id"),
+  archivePath: text("archive_path").notNull(),
+  originalPath: text("original_path").notNull(),
+  stage: text("stage"),
+  versionLabel: text("version_label"),
+  isFinal: integer("is_final", { mode: "boolean" }).notNull().default(false),
+  sizeBytes: integer("size_bytes").notNull(),
+  sha256: text("sha256").notNull(),
+  status: text("status").notNull(), // 'ok' | 'missing' | 'unreadable'
+});
+
+// Unused until PR2 (restore/verify).
+export const backupRestores = sqliteTable("backup_restores", {
+  id: text("id").primaryKey(),
+  backupId: text("backup_id")
+    .notNull()
+    .references(() => backups.id, { onDelete: "cascade" }),
+  restoredTo: text("restored_to").notNull(),
+  restoredAt: integer("restored_at").notNull(),
+  okCount: integer("ok_count").notNull(),
+  mismatchCount: integer("mismatch_count").notNull(),
+  errorMsg: text("error_msg"),
 });
 
 export const lyricStyleEvents = sqliteTable("lyric_style_events", {
