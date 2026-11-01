@@ -1,9 +1,14 @@
 import { eq, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { getDb } from "../client";
-import { backups, backupConfigs } from "../schema";
+import { backups, backupConfigs, backupRestores } from "../schema";
 import { storeSecret, getSecret, deleteSecret } from "../../lib/keychain";
-import type { BackupRecord, LocalConfig, GDriveConfig } from "../../types";
+import type {
+  BackupRecord,
+  BackupRestore,
+  LocalConfig,
+  GDriveConfig,
+} from "../../types";
 
 const K_GDRIVE_CLIENT_SECRET = "gdrive.client_secret";
 const K_GDRIVE_ACCESS_TOKEN = "gdrive.access_token";
@@ -136,6 +141,25 @@ export async function setStageSelection(keys: string[]): Promise<void> {
       target: backupConfigs.id,
       set: { configJson: JSON.stringify({ keys }) },
     });
+}
+
+export async function getBackupRestores(
+  backupId: string,
+): Promise<BackupRestore[]> {
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(backupRestores)
+    .where(eq(backupRestores.backupId, backupId))
+    .orderBy(desc(backupRestores.restoredAt));
+  return rows;
+}
+
+export async function insertBackupRestore(
+  record: Omit<BackupRestore, "id">,
+): Promise<void> {
+  const db = await getDb();
+  await db.insert(backupRestores).values({ ...record, id: nanoid() });
 }
 
 export async function getGDriveFolderConfig(): Promise<LocalConfig | null> {

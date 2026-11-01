@@ -7,7 +7,6 @@ import {
   getLocalConfig,
   setLocalConfig,
   getGDriveConfig,
-  setGDriveConfig,
   getGDriveFolderConfig,
   getStageSelection,
   setStageSelection,
@@ -21,11 +20,12 @@ import {
   toStageFileInput,
   type StageFileInput,
 } from "../../../lib/backup-stages";
+import { ensureFreshGDriveToken } from "../../../lib/gdrive";
+import RestoreWizard from "./RestoreWizard";
 import type {
   Project,
   ProjectFile,
   BackupRecord,
-  GDriveConfig,
   StageGroup,
 } from "../../../types";
 
@@ -41,12 +41,6 @@ interface BackupResult {
   status: "ok" | "partial";
   missingCount: number;
   manifestJson: string;
-}
-
-interface GDriveTokens {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
 }
 
 // What to run once the stage picker (if shown) is confirmed.
@@ -109,6 +103,7 @@ export default function HistoryTab({ project: p }: Props) {
   const [localErr, setLocalErr] = useState<string | null>(null);
   const [gdriveErr, setGdriveErr] = useState<string | null>(null);
   const [expandedMissing, setExpandedMissing] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState<BackupRecord | null>(null);
 
   const [pending, setPending] = useState<PendingBackup | null>(null);
   const [selectedStages, setSelectedStages] = useState<Set<string>>(new Set());
@@ -264,30 +259,6 @@ export default function HistoryTab({ project: p }: Props) {
 
   // ── Google Drive ─────────────────────────────────────────────────────────
 
-  const ensureFreshToken = useCallback(
-    async (cfg: GDriveConfig): Promise<string> => {
-      const now = Math.floor(Date.now() / 1000);
-      if (cfg.accessToken && cfg.tokenExpiry && cfg.tokenExpiry - now > 60) {
-        return cfg.accessToken;
-      }
-      if (!cfg.refreshToken) throw new Error("Not connected to Google Drive");
-      const tokens = await invoke<GDriveTokens>("gdrive_refresh", {
-        clientId: cfg.clientId,
-        clientSecret: cfg.clientSecret,
-        refreshToken: cfg.refreshToken,
-      });
-      const updated: GDriveConfig = {
-        ...cfg,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        tokenExpiry: Math.floor(Date.now() / 1000) + tokens.expiresIn,
-      };
-      await setGDriveConfig(updated);
-      return tokens.accessToken;
-    },
-    [],
-  );
-
   const handleGDriveBackup = useCallback(async () => {
     setGdriveErr(null);
     const [folderCfg, apiCfg] = await Promise.all([
@@ -307,13 +278,13 @@ export default function HistoryTab({ project: p }: Props) {
           destinationDir: folderCfg.destination,
         });
       } else {
-        const accessToken = await ensureFreshToken(apiCfg!);
+        const accessToken = await ensureFreshGDriveToken(apiCfg!);
         await startBackup({ kind: "gdrive-api", accessToken });
       }
     } catch (e) {
       setGdriveErr(e instanceof Error ? e.message : String(e));
     }
-  }, [ensureFreshToken, startBackup]);
+  }, [startBackup]);
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -501,6 +472,18 @@ export default function HistoryTab({ project: p }: Props) {
                       >
                         {destinationLabel(b)}
                       </div>
+                      <button
+                        className="tb-btn"
+                        style={{
+                          fontSize: 10,
+                          padding: "2px 6px",
+                          alignSelf: "flex-start",
+                          marginTop: 2,
+                        }}
+                        onClick={() => setRestoring(b)}
+                      >
+                        Restore…
+                      </button>
                     </div>
                   )}
 
@@ -546,6 +529,14 @@ export default function HistoryTab({ project: p }: Props) {
             })}
           </div>
         </>
+      )}
+
+      {restoring && (
+        <RestoreWizard
+          project={p}
+          backup={restoring}
+          onClose={() => setRestoring(null)}
+        />
       )}
     </div>
   );
