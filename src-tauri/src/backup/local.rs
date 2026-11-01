@@ -1,15 +1,27 @@
+use super::StageFileInput;
 use std::path::Path;
 
+#[allow(clippy::too_many_arguments)]
 pub fn backup_to_local(
     file_path: &str,
     title: &str,
+    project_id: &str,
     dest_dir: &str,
     lyrics: Option<&str>,
     tabs: Option<&str>,
     todos: Option<&str>,
+    stage_files: &[StageFileInput],
 ) -> Result<super::BackupResult, String> {
     let als_path = Path::new(file_path);
-    let zip_tmp = super::zip_project(als_path, title, lyrics, tabs, todos)?;
+    let (zip_tmp, manifest) = super::zip_project(
+        als_path,
+        title,
+        project_id,
+        lyrics,
+        tabs,
+        todos,
+        stage_files,
+    )?;
 
     let dest_dir = Path::new(dest_dir);
     if !dest_dir.exists() {
@@ -27,10 +39,17 @@ pub fn backup_to_local(
     std::fs::copy(&zip_tmp, &dest_path).map_err(|e| format!("copy to dest: {e}"))?;
     let _ = std::fs::remove_file(&zip_tmp);
 
+    let missing_count = manifest.missing.len() as u32;
+    let status = if missing_count > 0 { "partial" } else { "ok" };
+    let manifest_json = serde_json::to_string(&manifest).map_err(|e| e.to_string())?;
+
     Ok(super::BackupResult {
         provider: "local".to_string(),
         destination: dest_path.to_string_lossy().into_owned(),
         size_bytes,
         checksum,
+        status: status.to_string(),
+        missing_count,
+        manifest_json,
     })
 }
