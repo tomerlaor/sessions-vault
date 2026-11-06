@@ -9,6 +9,7 @@ This is **PR 2**: verify-only and one-click restore for the manifest-based backu
 archives written by PR 1 (`docs/superpowers/specs/2026-10-31-stage-backup-manifest-design.md`).
 
 In scope:
+
 - `verify_backup`: re-hash every file inside a backup archive against `manifest.json`,
   report per-file `ok` / `missing` / `corrupt` plus a summary.
 - `restore_backup`: extract an archive into a new destination folder with zip-slip and
@@ -21,6 +22,7 @@ In scope:
   no-overwrite behavior; Vitest tests for the wizard's pure helper logic.
 
 Out of scope (unchanged from the PR 1 doc, still not asked for here):
+
 - `project_files` re-insertion after restore (the issue's "restore brings back files
   with their stage/version/Final marker" criterion is about re-populating the Files
   tab; it is not part of this task's instructions and is left for a follow-up).
@@ -38,7 +40,7 @@ Out of scope (unchanged from the PR 1 doc, still not asked for here):
   for `provider = "gdrive"` backups made through a locally-mounted Drive folder (the
   existing `HistoryTab.tsx` "gdrive-folder" path reuses `backup_local` under the
   hood). It is a bare Google Drive file ID (no path separators) only for `provider =
-  "gdrive"` backups made through the Drive API. `HistoryTab.tsx`'s `destinationLabel()`
+"gdrive"` backups made through the Drive API. `HistoryTab.tsx`'s `destinationLabel()`
   already distinguishes these two cases by checking for `/`/`\\` in `destination` —
   the restore wizard reuses the same check to decide whether a download step is
   needed before a local zip path exists.
@@ -94,7 +96,7 @@ pub fn verify_archive(zip_path: &Path) -> Result<VerifyReport, String>
 2. For every `ManifestFile` entry, look up the same `archivePath` inside the zip:
    - Not found → `VerifyFileResult.status = "missing"` (the archive itself is missing
      the entry the manifest promises — distinct from PR 1's `manifest.missing`, which
-     is about files missing from the *original project* at backup time).
+     is about files missing from the _original project_ at backup time).
    - Found → stream it through a SHA-256 (not loaded into memory), compare to
      `manifest.sha256`. Match → `"ok"`; mismatch → `"corrupt"` (also set on a zip
      decompression/CRC error reading the entry, since a truncated/tampered archive
@@ -124,7 +126,7 @@ pub fn restore_archive(
    - `entry.is_symlink()` → `status: "rejected"`, reason `"symlink entries are not supported"`.
    - `create_dir_all` the parent, then open the target with
      `OpenOptions::new().write(true).create_new(true)` — `AlreadyExists` → `status:
-     "conflict"` (never overwrite); any other I/O error → `status: "error"`.
+"conflict"` (never overwrite); any other I/O error → `status: "error"`.
    - Stream the zip entry into the file through a hashing reader (reusing the same
      `HashingReader` pattern from PR 1's `zip_project`), compare the digest to
      `entry.sha256` → `"ok"` or `"mismatch"` (written either way; a mismatch is
@@ -159,9 +161,13 @@ after `backup_local`/`backup_gdrive`:
 
 ```ts
 insertBackupRestore({
-  backupId, restoredTo: outcome.restoredTo, restoredAt: now,
-  okCount: outcome.okCount, mismatchCount: outcome.mismatchCount, errorMsg,
-})
+  backupId,
+  restoredTo: outcome.restoredTo,
+  restoredAt: now,
+  okCount: outcome.okCount,
+  mismatchCount: outcome.mismatchCount,
+  errorMsg,
+});
 ```
 
 `mismatchCount` in the DB row folds together the Rust side's `mismatchCount` +
@@ -196,6 +202,7 @@ Steps, matching #68's wireframe-level flow:
    writes the `backup_restores` row.
 
 ### 7. Pure helpers (`src/lib/restore.ts`, unit-tested — matches `backup-stages.ts`'s
+
 convention; there's no DOM test environment in this repo, so component rendering isn't
 tested, only the logic the component calls)
 
@@ -219,6 +226,7 @@ to for the first time.
 ## Test plan
 
 **Rust (`src-tauri/src/backup/restore.rs`, `#[cfg(test)]`)**:
+
 - `safe_extract_path`: rejects `../evil`, `/etc/passwd`, `C:\evil`, `a/../../evil`
   (escapes root), accepts `a/../b` (stays inside), accepts a plain relative path.
 - `verify_archive`: a byte flipped in an archive member after writing it → that file
@@ -231,6 +239,7 @@ to for the first time.
   rejected and nothing is written outside the destination dir.
 
 **Vitest (`tests/restore.test.ts`)**:
+
 - `defaultRestoreTarget`: builds `<dir>/<title> restored <date> <time>` for posix and
   Windows-style original paths.
 - `isLocalDestination`: true for paths with `/` or `\`, false for a bare Drive file ID.
@@ -247,4 +256,5 @@ untouched, open a restored `.wav` in a player.
 This sandbox has no GTK/WebKit dev packages, so `cargo build`/`clippy`/`test` for the
 full crate (which pulls in `tauri`, and transitively `glib-sys`) cannot link, same
 constraint flagged for PR 1. `cargo fmt` (parse-only) still runs. CI (`dtolnay/rust-toolchain`
-+ apt-installed GTK/WebKit on the runner) is the actual gate for `cargo test`/`clippy`.
+
+- apt-installed GTK/WebKit on the runner) is the actual gate for `cargo test`/`clippy`.

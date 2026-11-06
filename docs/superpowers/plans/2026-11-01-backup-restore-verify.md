@@ -11,7 +11,7 @@ Design: `docs/superpowers/specs/2026-11-01-backup-restore-verify-design.md`
   verify and restore.
 - `VerifyFileResult`, `VerifyReport` (serde, camelCase) + `verify_archive(zip_path)`.
 - `RestoredFile`, `RestoreOutcome` (serde, camelCase) + `restore_archive(zip_path,
-  dest_dir, on_progress)`, using `OpenOptions::create_new` and the `HashingReader`
+dest_dir, on_progress)`, using `OpenOptions::create_new` and the `HashingReader`
   pattern from `backup/mod.rs` (export it or duplicate the ~15-line struct — check
   which reads cleaner once both call sites exist).
 - `pub mod restore;` in `backup/mod.rs`.
