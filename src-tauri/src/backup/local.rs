@@ -40,7 +40,11 @@ pub fn backup_to_local(
     let _ = std::fs::remove_file(&zip_tmp);
 
     let missing_count = manifest.missing.len() as u32;
-    let status = if missing_count > 0 { "partial" } else { "ok" };
+    let status = if manifest.is_partial() {
+        "partial"
+    } else {
+        "ok"
+    };
     let manifest_json = serde_json::to_string(&manifest).map_err(|e| e.to_string())?;
 
     Ok(super::BackupResult {

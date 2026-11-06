@@ -7,7 +7,6 @@ import {
   getLocalConfig,
   setLocalConfig,
   getGDriveConfig,
-  setGDriveConfig,
   getGDriveFolderConfig,
   getStageSelection,
   setStageSelection,
@@ -25,7 +24,6 @@ import type {
   Project,
   ProjectFile,
   BackupRecord,
-  GDriveConfig,
   StageGroup,
 } from "../../../types";
 
@@ -43,17 +41,11 @@ interface BackupResult {
   manifestJson: string;
 }
 
-interface GDriveTokens {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
-}
-
 // What to run once the stage picker (if shown) is confirmed.
 type PendingBackup =
   | { kind: "local"; destinationDir: string }
   | { kind: "gdrive-folder"; destinationDir: string }
-  | { kind: "gdrive-api"; accessToken: string };
+  | { kind: "gdrive-api"; clientId: string };
 
 function fmt(secs: number) {
   return new Date(secs * 1000).toLocaleString([], {
@@ -124,7 +116,7 @@ export default function HistoryTab({ project: p }: Props) {
       getStageSelection(),
     ]);
     setBackups(bs);
-    setGdriveReady(!!gc?.refreshToken || !!gf?.destination);
+    setGdriveReady(!!gc?.connected || !!gf?.destination);
     setFiles(fs);
     setRememberedStages(remembered);
   }, [p.id]);
@@ -151,7 +143,7 @@ export default function HistoryTab({ project: p }: Props) {
             filePath: p.filePath,
             title: p.title,
             projectId: p.id,
-            accessToken: target.accessToken,
+            clientId: target.clientId,
             lyrics: p.lyrics || null,
             tabs: p.tabs || null,
             todos: p.todos || null,
@@ -264,30 +256,6 @@ export default function HistoryTab({ project: p }: Props) {
 
   // ── Google Drive ─────────────────────────────────────────────────────────
 
-  const ensureFreshToken = useCallback(
-    async (cfg: GDriveConfig): Promise<string> => {
-      const now = Math.floor(Date.now() / 1000);
-      if (cfg.accessToken && cfg.tokenExpiry && cfg.tokenExpiry - now > 60) {
-        return cfg.accessToken;
-      }
-      if (!cfg.refreshToken) throw new Error("Not connected to Google Drive");
-      const tokens = await invoke<GDriveTokens>("gdrive_refresh", {
-        clientId: cfg.clientId,
-        clientSecret: cfg.clientSecret,
-        refreshToken: cfg.refreshToken,
-      });
-      const updated: GDriveConfig = {
-        ...cfg,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        tokenExpiry: Math.floor(Date.now() / 1000) + tokens.expiresIn,
-      };
-      await setGDriveConfig(updated);
-      return tokens.accessToken;
-    },
-    [],
-  );
-
   const handleGDriveBackup = useCallback(async () => {
     setGdriveErr(null);
     const [folderCfg, apiCfg] = await Promise.all([
@@ -295,7 +263,7 @@ export default function HistoryTab({ project: p }: Props) {
       getGDriveConfig(),
     ]);
 
-    if (!folderCfg?.destination && !apiCfg?.refreshToken) {
+    if (!folderCfg?.destination && !apiCfg?.connected) {
       setGdriveErr("Google Drive not configured — open Settings to set it up.");
       return;
     }
@@ -307,13 +275,13 @@ export default function HistoryTab({ project: p }: Props) {
           destinationDir: folderCfg.destination,
         });
       } else {
-        const accessToken = await ensureFreshToken(apiCfg!);
-        await startBackup({ kind: "gdrive-api", accessToken });
+        // The backend refreshes and holds the OAuth tokens itself.
+        await startBackup({ kind: "gdrive-api", clientId: apiCfg!.clientId });
       }
     } catch (e) {
       setGdriveErr(e instanceof Error ? e.message : String(e));
     }
-  }, [ensureFreshToken, startBackup]);
+  }, [startBackup]);
 
   // ── Render ───────────────────────────────────────────────────────────────
 
