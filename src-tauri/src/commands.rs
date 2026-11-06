@@ -229,7 +229,12 @@ pub async fn backup_gdrive(
                 let checksum = backup::checksum_file(&zip)?;
                 let size = std::fs::metadata(&zip).map_err(|e| e.to_string())?.len();
                 let missing_count = manifest.missing.len() as u32;
-                let status = if missing_count > 0 { "partial" } else { "ok" }.to_string();
+                let status = if manifest.is_partial() {
+                    "partial"
+                } else {
+                    "ok"
+                }
+                .to_string();
                 let manifest_json = serde_json::to_string(&manifest).map_err(|e| e.to_string())?;
                 Ok((zip, checksum, size, status, missing_count, manifest_json))
             }
