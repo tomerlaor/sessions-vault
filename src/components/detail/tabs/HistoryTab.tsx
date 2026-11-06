@@ -20,6 +20,7 @@ import {
   toStageFileInput,
   type StageFileInput,
 } from "../../../lib/backup-stages";
+import RestoreWizard from "./RestoreWizard";
 import type {
   Project,
   ProjectFile,
@@ -101,6 +102,7 @@ export default function HistoryTab({ project: p }: Props) {
   const [localErr, setLocalErr] = useState<string | null>(null);
   const [gdriveErr, setGdriveErr] = useState<string | null>(null);
   const [expandedMissing, setExpandedMissing] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState<BackupRecord | null>(null);
 
   const [pending, setPending] = useState<PendingBackup | null>(null);
   const [selectedStages, setSelectedStages] = useState<Set<string>>(new Set());
@@ -469,6 +471,18 @@ export default function HistoryTab({ project: p }: Props) {
                       >
                         {destinationLabel(b)}
                       </div>
+                      <button
+                        className="tb-btn"
+                        style={{
+                          fontSize: 10,
+                          padding: "2px 6px",
+                          alignSelf: "flex-start",
+                          marginTop: 2,
+                        }}
+                        onClick={() => setRestoring(b)}
+                      >
+                        Restore…
+                      </button>
                     </div>
                   )}
 
@@ -514,6 +528,14 @@ export default function HistoryTab({ project: p }: Props) {
             })}
           </div>
         </>
+      )}
+
+      {restoring && (
+        <RestoreWizard
+          project={p}
+          backup={restoring}
+          onClose={() => setRestoring(null)}
+        />
       )}
     </div>
   );

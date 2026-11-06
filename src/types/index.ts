@@ -122,6 +122,53 @@ export interface StageGroup {
   totalBytes: number;
 }
 
+export interface VerifyFileResult {
+  archivePath: string;
+  originalPath: string;
+  status: "ok" | "missing" | "corrupt";
+  expectedSha256: string;
+  actualSha256: string | null;
+}
+
+export interface VerifyReport {
+  okCount: number;
+  missingCount: number;
+  corruptCount: number;
+  files: VerifyFileResult[];
+}
+
+export type RestoredFileStatus =
+  "ok" | "mismatch" | "conflict" | "rejected" | "missing_in_archive" | "error";
+
+export interface RestoredFile {
+  archivePath: string;
+  restoredPath: string | null;
+  stage: string | null;
+  versionLabel: string | null;
+  isFinal: boolean;
+  status: RestoredFileStatus;
+  detail: string | null;
+}
+
+export interface RestoreOutcome {
+  restoredTo: string;
+  okCount: number;
+  mismatchCount: number;
+  conflictCount: number;
+  rejectedCount: number;
+  files: RestoredFile[];
+}
+
+export interface BackupRestore {
+  id: string;
+  backupId: string;
+  restoredTo: string;
+  restoredAt: number;
+  okCount: number;
+  mismatchCount: number;
+  errorMsg: string | null;
+}
+
 export interface LocalConfig {
   destination: string;
 }

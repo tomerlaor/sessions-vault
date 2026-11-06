@@ -1,3 +1,4 @@
+use crate::backup::restore::{RestoreOutcome, VerifyReport};
 use crate::backup::{self, BackupResult, StageFileInput};
 use crate::scanner::{self, ProjectMetadata};
 use std::path::Path;
@@ -258,6 +259,45 @@ pub async fn backup_gdrive(
         missing_count,
         manifest_json,
     })
+}
+
+#[tauri::command]
+pub async fn verify_backup(zip_path: String) -> Result<VerifyReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        backup::restore::verify_archive(Path::new(&zip_path))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn restore_backup(
+    zip_path: String,
+    dest_dir: String,
+    app: AppHandle,
+) -> Result<RestoreOutcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        backup::restore::restore_archive(
+            Path::new(&zip_path),
+            Path::new(&dest_dir),
+            |done, total, file| {
+                let _ = app.emit(
+                    "restore:progress",
+                    serde_json::json!({ "done": done, "total": total, "file": file }),
+                );
+            },
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn gdrive_download_backup(file_id: String, client_id: String) -> Result<String, String> {
+    // Tokens stay in Rust; the webview only passes the public client ID.
+    let access_token = backup::gdrive::access_token(&client_id).await?;
+    let path = backup::gdrive::download(&file_id, &access_token).await?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
