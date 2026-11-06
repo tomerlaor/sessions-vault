@@ -6,7 +6,6 @@ import {
   getGDriveConfig,
   insertBackupRestore,
 } from "../../../db/queries/backups";
-import { ensureFreshGDriveToken } from "../../../lib/gdrive";
 import {
   defaultRestoreTarget,
   groupRestoreFilesByStatus,
@@ -63,13 +62,13 @@ async function resolveZipPath(backup: BackupRecord): Promise<string> {
     return backup.destination;
   }
   const apiCfg = await getGDriveConfig();
-  if (!apiCfg?.refreshToken) {
+  if (!apiCfg?.connected || !apiCfg.clientId) {
     throw new Error("Google Drive not connected — open Settings to reconnect.");
   }
-  const accessToken = await ensureFreshGDriveToken(apiCfg);
+  // Rust holds and refreshes the OAuth tokens; the webview only passes clientId.
   return await invoke<string>("gdrive_download_backup", {
     fileId: backup.destination,
-    accessToken,
+    clientId: apiCfg.clientId,
   });
 }
 

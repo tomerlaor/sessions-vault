@@ -1,5 +1,5 @@
 use crate::backup::restore::{RestoreOutcome, VerifyReport};
-use crate::backup::{self, BackupResult, GDriveTokens, StageFileInput};
+use crate::backup::{self, BackupResult, StageFileInput};
 use crate::scanner::{self, ProjectMetadata};
 use std::path::Path;
 use tauri::{AppHandle, Emitter};
@@ -72,25 +72,49 @@ pub fn open_in_daw(path: String) -> Result<(), String> {
 }
 
 // ── Secrets ───────────────────────────────────────────────────────────────────
+//
+// The webview may only touch AI provider API keys: the AI SDK calls providers
+// from JS, so those keys have to reach it. Every other secret (Google Drive
+// credentials) is handled entirely in Rust and is rejected here.
+
+const WEBVIEW_SECRET_KEYS: &[&str] = &[
+    "ai.apikey.openai",
+    "ai.apikey.anthropic",
+    "ai.apikey.openrouter",
+    "ai.apikey.ollama",
+    "ai.apikey.lmstudio",
+];
+
+fn check_webview_secret_key(key: &str) -> Result<(), String> {
+    if WEBVIEW_SECRET_KEYS.contains(&key) {
+        Ok(())
+    } else {
+        Err(format!("secret '{key}' is not accessible from the app UI"))
+    }
+}
 
 #[tauri::command]
 pub fn store_secret(key: String, value: String) -> Result<(), String> {
+    check_webview_secret_key(&key)?;
     crate::secrets::store(&key, &value)
 }
 
 #[tauri::command]
 pub fn get_secret(key: String) -> Result<Option<String>, String> {
+    check_webview_secret_key(&key)?;
     crate::secrets::get(&key)
 }
 
 /// Whether a secret is stored, without reading it (so no keychain prompt).
 #[tauri::command]
 pub fn secret_exists(key: String) -> Result<bool, String> {
+    check_webview_secret_key(&key)?;
     crate::secrets::exists(&key)
 }
 
 #[tauri::command]
 pub fn delete_secret(key: String) -> Result<(), String> {
+    check_webview_secret_key(&key)?;
     crate::secrets::delete(&key)
 }
 
@@ -151,22 +175,28 @@ pub async fn backup_local(
     .map_err(|e| e.to_string())?
 }
 
+/// Runs the Google OAuth flow and stores the credentials in the secret store.
+/// The client secret goes in once, from the Settings form; nothing comes back.
 #[tauri::command]
-pub async fn gdrive_auth(client_id: String, client_secret: String) -> Result<GDriveTokens, String> {
+pub async fn gdrive_connect(client_id: String, client_secret: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        backup::gdrive::start_auth_sync(&client_id, &client_secret)
+        backup::gdrive::connect(&client_id, &client_secret)
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn gdrive_refresh(
-    client_id: String,
-    client_secret: String,
-    refresh_token: String,
-) -> Result<GDriveTokens, String> {
-    backup::gdrive::refresh_token(&client_id, &client_secret, &refresh_token).await
+pub async fn gdrive_disconnect() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(backup::gdrive::disconnect)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Whether Drive credentials are stored, without reading them (no prompt).
+#[tauri::command]
+pub fn gdrive_connected() -> Result<bool, String> {
+    backup::gdrive::is_connected()
 }
 
 #[tauri::command]
@@ -174,8 +204,8 @@ pub async fn gdrive_refresh(
 pub async fn backup_gdrive(
     file_path: String,
     title: String,
+    client_id: String,
     project_id: String,
-    access_token: String,
     lyrics: Option<String>,
     tabs: Option<String>,
     todos: Option<String>,
@@ -200,7 +230,12 @@ pub async fn backup_gdrive(
                 let checksum = backup::checksum_file(&zip)?;
                 let size = std::fs::metadata(&zip).map_err(|e| e.to_string())?.len();
                 let missing_count = manifest.missing.len() as u32;
-                let status = if missing_count > 0 { "partial" } else { "ok" }.to_string();
+                let status = if manifest.is_partial() {
+                    "partial"
+                } else {
+                    "ok"
+                }
+                .to_string();
                 let manifest_json = serde_json::to_string(&manifest).map_err(|e| e.to_string())?;
                 Ok((zip, checksum, size, status, missing_count, manifest_json))
             }
@@ -209,7 +244,10 @@ pub async fn backup_gdrive(
         .map_err(|e| e.to_string())??;
 
     let file_name = zip_path.file_name().unwrap().to_string_lossy().into_owned();
-    let gdrive_id = backup::gdrive::upload(&zip_path, &file_name, &access_token).await;
+    let gdrive_id = match backup::gdrive::access_token(&client_id).await {
+        Ok(token) => backup::gdrive::upload(&zip_path, &file_name, &token).await,
+        Err(e) => Err(e),
+    };
     let _ = std::fs::remove_file(&zip_path);
 
     Ok(BackupResult {
@@ -255,10 +293,9 @@ pub async fn restore_backup(
 }
 
 #[tauri::command]
-pub async fn gdrive_download_backup(
-    file_id: String,
-    access_token: String,
-) -> Result<String, String> {
+pub async fn gdrive_download_backup(file_id: String, client_id: String) -> Result<String, String> {
+    // Tokens stay in Rust; the webview only passes the public client ID.
+    let access_token = backup::gdrive::access_token(&client_id).await?;
     let path = backup::gdrive::download(&file_id, &access_token).await?;
     Ok(path.to_string_lossy().into_owned())
 }
@@ -289,4 +326,28 @@ pub fn file_exists_many(paths: Vec<String>) -> Vec<bool> {
 #[tauri::command]
 pub fn file_stat(path: String) -> Result<crate::fsutil::FileStat, String> {
     crate::fsutil::stat(&path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn webview_secret_allowlist() {
+        for key in WEBVIEW_SECRET_KEYS {
+            assert!(check_webview_secret_key(key).is_ok());
+        }
+        for key in [
+            "gdrive.client_secret",
+            "gdrive.refresh_token",
+            "gdrive.access_token",
+            "ai.apikey.",
+            "ai.apikey.openai ",
+            "has:ai.apikey.openai",
+            "vault",
+            "",
+        ] {
+            assert!(check_webview_secret_key(key).is_err(), "{key:?} allowed");
+        }
+    }
 }

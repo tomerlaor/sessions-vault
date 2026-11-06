@@ -20,7 +20,6 @@ import {
   toStageFileInput,
   type StageFileInput,
 } from "../../../lib/backup-stages";
-import { ensureFreshGDriveToken } from "../../../lib/gdrive";
 import RestoreWizard from "./RestoreWizard";
 import type {
   Project,
@@ -47,7 +46,7 @@ interface BackupResult {
 type PendingBackup =
   | { kind: "local"; destinationDir: string }
   | { kind: "gdrive-folder"; destinationDir: string }
-  | { kind: "gdrive-api"; accessToken: string };
+  | { kind: "gdrive-api"; clientId: string };
 
 function fmt(secs: number) {
   return new Date(secs * 1000).toLocaleString([], {
@@ -119,7 +118,7 @@ export default function HistoryTab({ project: p }: Props) {
       getStageSelection(),
     ]);
     setBackups(bs);
-    setGdriveReady(!!gc?.refreshToken || !!gf?.destination);
+    setGdriveReady(!!gc?.connected || !!gf?.destination);
     setFiles(fs);
     setRememberedStages(remembered);
   }, [p.id]);
@@ -146,7 +145,7 @@ export default function HistoryTab({ project: p }: Props) {
             filePath: p.filePath,
             title: p.title,
             projectId: p.id,
-            accessToken: target.accessToken,
+            clientId: target.clientId,
             lyrics: p.lyrics || null,
             tabs: p.tabs || null,
             todos: p.todos || null,
@@ -266,7 +265,7 @@ export default function HistoryTab({ project: p }: Props) {
       getGDriveConfig(),
     ]);
 
-    if (!folderCfg?.destination && !apiCfg?.refreshToken) {
+    if (!folderCfg?.destination && !apiCfg?.connected) {
       setGdriveErr("Google Drive not configured — open Settings to set it up.");
       return;
     }
@@ -278,8 +277,8 @@ export default function HistoryTab({ project: p }: Props) {
           destinationDir: folderCfg.destination,
         });
       } else {
-        const accessToken = await ensureFreshGDriveToken(apiCfg!);
-        await startBackup({ kind: "gdrive-api", accessToken });
+        // The backend refreshes and holds the OAuth tokens itself.
+        await startBackup({ kind: "gdrive-api", clientId: apiCfg!.clientId });
       }
     } catch (e) {
       setGdriveErr(e instanceof Error ? e.message : String(e));
