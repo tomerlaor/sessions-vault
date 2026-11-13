@@ -398,6 +398,8 @@ export default function App() {
               reload();
               reloadTags();
             }}
+            onStar={onStar}
+            onOpenSettings={() => setShowSettings(true)}
           />
         )}
       </main>
