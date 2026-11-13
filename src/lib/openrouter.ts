@@ -50,10 +50,13 @@ export function parseOpenRouterModels(json: unknown): OpenRouterModel[] {
 }
 
 // Every whitespace-separated term must appear in the id or display name.
-export function filterOpenRouterModels(
-  models: OpenRouterModel[],
+// Generic so callers that merge in extra fields (e.g. the decisions-model
+// `isDecisions` tag in OpenRouterModelPicker) don't lose them through the
+// filter.
+export function filterOpenRouterModels<T extends OpenRouterModel>(
+  models: T[],
   query: string,
-): OpenRouterModel[] {
+): T[] {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return models;
   return models.filter((m) => {

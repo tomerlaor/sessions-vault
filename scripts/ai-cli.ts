@@ -10,6 +10,7 @@ import {
   generateNextWordOptions,
   generatePopupSuggestions,
   generateTabStructure,
+  isLyricsModelDecisions,
   streamLyricsSuggestion,
   testAIConnection,
 } from "../src/lib/ai";
@@ -24,6 +25,7 @@ import type {
   AIProvider,
   Instrument,
   LyricSuggestionMode,
+  LyricsDecisionsMode,
 } from "../src/types";
 import { loadFixtures, summarizeFixtures } from "./lyrics-eval/fixtures";
 import { buildMarkdownReport } from "./lyrics-eval/report";
@@ -56,6 +58,14 @@ Connection (all commands)
   API key is read from OPENROUTER_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY.
   (Keys are taken from the environment only, so they don't end up in shell history.)
 
+Decisions models (OpenRouter only — e.g. typesafe/jev-1.14, see docs/ai-eval.md)
+  A decisions model answers typed questions instead of writing text, so every
+  command below generates candidates with a separate chat model and has the
+  decisions model rank them ("generate, then decide").
+  --generator <id>         chat model that generates candidates (default anthropic/claude-haiku-4.5)
+  --candidates <k>         candidates generated per suggestion, 2-8 (default 4)
+  --decisions <m>          auto (default) | on | off — force --model's classification
+
 tab options
   --section <name>         default "Verse"
   --chords "<chords>"      default "Am F C G"
@@ -84,6 +94,7 @@ Examples
   npm run ai -- tab --section Chorus --chords "C G Am F" --instruments guitar,bass --model <id>
   npm run ai -- lyrics --lyrics "I walk alone\\nthrough the empty street" --mode next_line --model <id>
   npm run ai -- eval --model anthropic/claude-haiku-4.5 --n 3 --rubric
+  OPENROUTER_API_KEY=sk-or-... npm run ai -- eval --model typesafe/jev-1.14 --generator anthropic/claude-haiku-4.5 --n 3 --rubric
 `;
 
 const { values, positionals } = parseArgs({
@@ -107,6 +118,9 @@ const { values, positionals } = parseArgs({
     key: { type: "string" },
     n: { type: "string", default: "3" },
     rubric: { type: "boolean", default: false },
+    generator: { type: "string", default: "anthropic/claude-haiku-4.5" },
+    candidates: { type: "string", default: "4" },
+    decisions: { type: "string", default: "auto" },
     help: { type: "boolean", short: "h" },
   },
 });
@@ -122,12 +136,27 @@ function buildConfig(): AIConfig {
   const keyVar = KEY_ENV[provider];
   const apiKey = keyVar ? (process.env[keyVar] ?? "") : "";
   if (!local && !apiKey) fail(`set ${keyVar} in your environment`);
+  const decisions = values.decisions as string;
+  if (!["auto", "on", "off"].includes(decisions)) {
+    fail('--decisions must be "auto", "on", or "off"');
+  }
+  const candidates = Number(values.candidates);
+  if (!Number.isInteger(candidates) || candidates < 2 || candidates > 8) {
+    fail("--candidates must be an integer between 2 and 8");
+  }
   return {
     provider,
     apiKey,
     baseUrl: values["base-url"] ?? "",
     model: values.model ?? process.env.AI_MODEL ?? "",
+    lyricsGeneratorModel: values.generator,
+    lyricsCandidateCount: candidates,
+    lyricsDecisionsMode: decisions as LyricsDecisionsMode,
   };
+}
+
+function slugify(id: string): string {
+  return id.replace(/[^A-Za-z0-9._-]+/g, "-");
 }
 
 function lyricsInput() {
@@ -264,10 +293,11 @@ async function main() {
       const n = Number(values.n);
       if (!Number.isInteger(n) || n < 1) fail("--n must be a positive integer");
 
+      const decisions = await isLyricsModelDecisions(cfg);
       const fixtures = loadFixtures();
       const summary = summarizeFixtures(fixtures);
       console.error(
-        `fixtures=${summary.total} (en=${summary.byLang.en} he=${summary.byLang.he}) model=${cfg.model} n=${n}`,
+        `fixtures=${summary.total} (en=${summary.byLang.en} he=${summary.byLang.he}) model=${cfg.model}${decisions ? ` (decisions, generator=${cfg.lyricsGeneratorModel})` : ""} n=${n}`,
       );
 
       const run = await timed("eval", () =>
@@ -278,7 +308,12 @@ async function main() {
 
       mkdirSync("eval-results", { recursive: true });
       const date = new Date().toISOString().slice(0, 10);
-      const slug = cfg.model.replace(/[^A-Za-z0-9._-]+/g, "-");
+      // The ranker is always first in the slug so results for the same
+      // decisions model sort together regardless of which generator ran.
+      const slug =
+        decisions && cfg.lyricsGeneratorModel
+          ? `${slugify(cfg.model)}+${slugify(cfg.lyricsGeneratorModel)}`
+          : slugify(cfg.model);
       const base = join("eval-results", `${date}-${slug}`);
 
       writeFileSync(`${base}.json`, JSON.stringify(run, null, 2));

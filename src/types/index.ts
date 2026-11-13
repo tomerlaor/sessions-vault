@@ -29,6 +29,10 @@ export type AIProvider =
 
 export type AIFeature = "lyrics" | "tabAgent";
 
+// "auto" detects an OpenRouter decisions model (e.g. typesafe/jev-1.14) from
+// the catalog/known patterns; "on"/"off" force the classification either way.
+export type LyricsDecisionsMode = "auto" | "on" | "off";
+
 export interface AIConfig {
   provider: AIProvider;
   apiKey: string;
@@ -39,6 +43,14 @@ export interface AIConfig {
   tabAgentModel?: string;
   // OpenRouter only. Missing/undefined means true (deny data collection/training).
   openRouterDenyDataCollection?: boolean;
+  // OpenRouter decisions models (see src/lib/openrouter-decisions.ts) can't
+  // generate text, so when the effective lyrics model is one, a separate
+  // chat model generates candidates for it to rank. Optional — defaults
+  // apply (see DEFAULT_MODELS.openrouter / DEFAULT_LYRICS_CANDIDATE_COUNT in
+  // src/lib/ai.ts, and "auto" here).
+  lyricsGeneratorModel?: string;
+  lyricsCandidateCount?: number;
+  lyricsDecisionsMode?: LyricsDecisionsMode;
 }
 
 export interface TabPart {

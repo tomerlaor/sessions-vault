@@ -1,4 +1,5 @@
 import type { AIConfig, AIProvider, LyricsAIConfig } from "../types";
+import { resolveIsDecisionsModel } from "./openrouter-decisions";
 
 export const CLOUD_AI_PROVIDERS: AIProvider[] = [
   "openai",
@@ -92,9 +93,20 @@ export function gateLyricsAi(
 }
 
 // Lyrics toolbar badge. Callers should resolve the lyrics model override
-// (see resolveFeatureConfig in lib/ai.ts) before passing cfg in.
+// (see resolveFeatureConfig in lib/ai.ts) before passing cfg in. This is a
+// best-effort, synchronous check (pattern-only, no catalog fetch) — it can
+// under-detect a decisions model that's only in the live catalog, in which
+// case the badge just shows the single model as usual.
 export function aiBadgeLabel(cfg: AIConfig | null): string | null {
   if (!cfg) return null;
   if (isLocalProvider(cfg.provider)) return "AI · Local";
-  return `AI · Cloud: ${cfg.provider}/${cfg.model || "default"}`;
+  const model = cfg.model || "default";
+  if (
+    cfg.provider === "openrouter" &&
+    resolveIsDecisionsModel(model, cfg.lyricsDecisionsMode)
+  ) {
+    const generator = cfg.lyricsGeneratorModel || "default generator";
+    return `AI · Cloud: ${cfg.provider}/${model} + ${generator}`;
+  }
+  return `AI · Cloud: ${cfg.provider}/${model}`;
 }

@@ -27,7 +27,12 @@ import {
   testAIConnection,
   OPENAI_MODELS,
   ANTHROPIC_MODELS,
+  DEFAULT_LYRICS_CANDIDATE_COUNT,
 } from "../../lib/ai";
+import {
+  resolveIsDecisionsModel,
+  fetchOpenRouterDecisionsModels,
+} from "../../lib/openrouter-decisions";
 import {
   needsCloudConsent,
   pickLocalProvider,
@@ -38,6 +43,7 @@ import type {
   AIConfig,
   AIProvider,
   LyricsAIConfig,
+  LyricsDecisionsMode,
 } from "../../types";
 import LyricsAiSettings from "./LyricsAiSettings";
 import LyricsCloudConsentModal from "../shared/LyricsCloudConsentModal";
@@ -144,6 +150,17 @@ export default function SettingsModal({ onClose }: Props) {
   const [keySaved, setKeySaved] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<"ok" | "error" | null>(null);
   const [aiTestErr, setAiTestErr] = useState<string | null>(null);
+  const [decisionsIds, setDecisionsIds] = useState<Set<string>>(new Set());
+
+  // Used only to decide whether to show the generator/candidates fields —
+  // a failed fetch just leaves pattern-only detection (still correct for
+  // the known typesafe/jev-* family).
+  useEffect(() => {
+    fetchOpenRouterDecisionsModels().then(
+      (models) => setDecisionsIds(new Set(models.map((m) => m.id))),
+      () => {},
+    );
+  }, []);
 
   // Existence check only: never reads the secret, so it can't prompt.
   useEffect(() => {
@@ -304,6 +321,14 @@ export default function SettingsModal({ onClose }: Props) {
     aiCfg.provider === "openrouter";
   const isOpenRouter = aiCfg.provider === "openrouter";
   const isLocal = aiCfg.provider === "ollama" || aiCfg.provider === "lmstudio";
+  const effectiveLyricsModel = aiCfg.lyricsModel || aiCfg.model;
+  const lyricsModelIsDecisions =
+    isOpenRouter &&
+    resolveIsDecisionsModel(
+      effectiveLyricsModel,
+      aiCfg.lyricsDecisionsMode,
+      decisionsIds,
+    );
   const modelOptions =
     aiCfg.provider === "openai"
       ? OPENAI_MODELS
@@ -808,6 +833,111 @@ export default function SettingsModal({ onClose }: Props) {
                     }
                     placeholder="Lyrics AI model (default if empty)"
                   />
+
+                  {lyricsModelIsDecisions && (
+                    <div
+                      style={{
+                        padding: 10,
+                        background: "var(--bg-2)",
+                        border: "1px solid var(--line-2)",
+                        borderRadius: 6,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "var(--text-2)",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        <b>{effectiveLyricsModel || "This model"}</b> is a
+                        decisions model — it ranks lyric suggestions but
+                        can&apos;t write them. A generator model writes the
+                        candidates it ranks.
+                      </div>
+                      <OpenRouterModelPicker
+                        value={aiCfg.lyricsGeneratorModel ?? ""}
+                        onChange={(lyricsGeneratorModel) =>
+                          handleSaveAI({ ...aiCfg, lyricsGeneratorModel })
+                        }
+                        placeholder="Candidate generator model (defaults to Claude Haiku)"
+                      />
+                      <label
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          fontSize: 11,
+                          color: "var(--text-2)",
+                        }}
+                      >
+                        Candidates to generate per suggestion
+                        <input
+                          type="number"
+                          min={2}
+                          max={8}
+                          className="notes-area"
+                          value={
+                            aiCfg.lyricsCandidateCount ??
+                            DEFAULT_LYRICS_CANDIDATE_COUNT
+                          }
+                          onChange={(e) =>
+                            handleSaveAI({
+                              ...aiCfg,
+                              lyricsCandidateCount: Math.min(
+                                8,
+                                Math.max(2, Number(e.target.value) || 2),
+                              ),
+                            })
+                          }
+                          style={{
+                            width: 48,
+                            fontSize: 11,
+                            padding: "4px 6px",
+                            height: "auto",
+                          }}
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      fontSize: 11,
+                      color: "var(--text-2)",
+                    }}
+                  >
+                    Decisions model detection
+                    <select
+                      value={aiCfg.lyricsDecisionsMode ?? "auto"}
+                      onChange={(e) =>
+                        handleSaveAI({
+                          ...aiCfg,
+                          lyricsDecisionsMode: e.target
+                            .value as LyricsDecisionsMode,
+                        })
+                      }
+                      style={{
+                        fontSize: 11,
+                        padding: "3px 6px",
+                        background: "var(--bg-2)",
+                        color: "var(--text-1)",
+                        border: "1px solid var(--line-2)",
+                        borderRadius: 4,
+                      }}
+                    >
+                      <option value="auto">Auto-detect</option>
+                      <option value="on">Force on</option>
+                      <option value="off">Force off</option>
+                    </select>
+                  </label>
+
                   <OpenRouterModelPicker
                     value={aiCfg.tabAgentModel ?? ""}
                     onChange={(tabAgentModel) =>

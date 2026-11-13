@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { generateObjectMock, generateTextMock, streamTextMock } = vi.hoisted(
   () => ({
@@ -43,6 +43,9 @@ import {
   generateNextWordOptions,
   generatePopupSuggestions,
   generateStyleSummary,
+  generateTabStructure,
+  chatWithTabAgent,
+  testAIConnection,
   shouldLogAI,
   logAI,
 } from "../src/lib/ai";
@@ -172,5 +175,256 @@ describe("logAI gating", () => {
     groupSpy.mockRestore();
     groupEndSpy.mockRestore();
     logSpy.mockRestore();
+  });
+});
+
+// ── OpenRouter decisions: "generate, then decide" ───────────────────────────
+// The generator stage goes through the same mocked `ai` package as above;
+// the ranker stage calls the real fetch-based callOpenRouterDecisions, so
+// global fetch is stubbed per test instead.
+
+const orCfg: AIConfig = {
+  provider: "openrouter",
+  apiKey: "or-key",
+  baseUrl: "",
+  model: "typesafe/jev-1.14",
+  lyricsGeneratorModel: "anthropic/claude-haiku-4.5",
+  lyricsCandidateCount: 3,
+};
+
+function mockTextResult(text: string) {
+  return {
+    text,
+    usage: {},
+    finishReason: "stop" as const,
+    response: { modelId: "mock" },
+  };
+}
+
+function stubDecisionsFetch(answer: Record<string, unknown>) {
+  const fetchMock = vi.fn(
+    async () =>
+      new Response(
+        JSON.stringify({
+          model: "typesafe/jev-1.14-20261014",
+          answers: { best: answer },
+          usage: { input_tokens: 20, output_tokens: 2, cost: 0.00001 },
+        }),
+        { status: 200 },
+      ),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+describe("OpenRouter decisions pipeline (generate, then decide)", () => {
+  beforeEach(() => {
+    generateObjectMock.mockClear();
+    generateTextMock.mockClear();
+    streamTextMock.mockClear();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("streamLyricsSuggestion: generates candidates, ranks them, and yields only the winner", async () => {
+    generateTextMock
+      .mockResolvedValueOnce(mockTextResult("cand A"))
+      .mockResolvedValueOnce(mockTextResult("cand B"))
+      .mockResolvedValueOnce(mockTextResult("cand C"));
+    const fetchMock = stubDecisionsFetch({
+      type: "choice",
+      choice: "c1",
+      probabilities: { c0: 0.1, c1: 0.8, c2: 0.1 },
+    });
+
+    const onMetrics = vi.fn();
+    const chunks: string[] = [];
+    for await (const chunk of streamLyricsSuggestion(
+      orCfg,
+      "sys",
+      "prompt",
+      undefined,
+      onMetrics,
+    )) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toEqual(["cand B"]);
+    expect(generateTextMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(onMetrics).toHaveBeenCalledTimes(1);
+    const metrics = onMetrics.mock.calls[0][0];
+    expect(metrics.generator?.count).toBe(3);
+    expect(metrics.ranker?.model).toBe("typesafe/jev-1.14-20261014");
+  });
+
+  it("streamLyricsSuggestion: falls back to the unranked generator output when ranking fails (non-abort)", async () => {
+    generateTextMock
+      .mockResolvedValueOnce(mockTextResult("first"))
+      .mockResolvedValueOnce(mockTextResult("second"))
+      .mockResolvedValueOnce(mockTextResult("third"));
+    const fetchMock = vi.fn(async () => new Response("", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const chunks: string[] = [];
+    for await (const chunk of streamLyricsSuggestion(orCfg, "sys", "prompt")) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toEqual(["first"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("streamLyricsSuggestion: propagates an abort instead of silently falling back", async () => {
+    generateTextMock
+      .mockResolvedValueOnce(mockTextResult("first"))
+      .mockResolvedValueOnce(mockTextResult("second"))
+      .mockResolvedValueOnce(mockTextResult("third"));
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => {
+      controller.abort();
+      throw new DOMException("Aborted", "AbortError");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(async () => {
+      for await (const chunk of streamLyricsSuggestion(
+        orCfg,
+        "sys",
+        "prompt",
+        controller.signal,
+      )) {
+        void chunk;
+      }
+    }).rejects.toThrow();
+  });
+
+  it("generateNextWordOptions: generates then ranks, reordering options best-first", async () => {
+    generateObjectMock.mockResolvedValueOnce({
+      object: {
+        options: [
+          { text: "opt1", kind: "continuation" },
+          { text: "opt2", kind: "continuation" },
+          { text: "opt3", kind: "rhyme" },
+        ],
+      },
+      usage: {},
+      finishReason: "stop",
+      response: { modelId: "mock" },
+    });
+    stubDecisionsFetch({
+      type: "choice",
+      choice: "c2",
+      probabilities: { c0: 0.1, c1: 0.1, c2: 0.8 },
+    });
+
+    const onMetrics = vi.fn();
+    const result = await generateNextWordOptions(
+      orCfg,
+      "sys",
+      "prompt",
+      undefined,
+      onMetrics,
+    );
+    expect(result.options.map((o) => o.text)).toEqual(["opt3", "opt1", "opt2"]);
+    expect(onMetrics.mock.calls[0][0].ranker).toBeDefined();
+    expect(onMetrics.mock.calls[0][0].generator).toBeDefined();
+  });
+
+  it("generatePopupSuggestions: ranks suggestions within the list", async () => {
+    generateObjectMock.mockResolvedValueOnce({
+      object: {
+        suggestions: [
+          { mode: "completion", text: "s1" },
+          { mode: "next_line", text: "s2" },
+        ],
+      },
+      usage: {},
+      finishReason: "stop",
+      response: { modelId: "mock" },
+    });
+    stubDecisionsFetch({
+      type: "choice",
+      choice: "c1",
+      probabilities: { c0: 0.2, c1: 0.8 },
+    });
+
+    const result = await generatePopupSuggestions(orCfg, "sys", "prompt");
+    expect(result.suggestions.map((s) => s.text)).toEqual(["s2", "s1"]);
+  });
+
+  it("generateStyleSummary uses the generator model and never calls the decisions endpoint", async () => {
+    generateTextMock.mockResolvedValueOnce(mockTextResult("a style"));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await generateStyleSummary(orCfg, ["line one"]);
+
+    expect(result).toBe("a style");
+    expect(fetchMock).not.toHaveBeenCalled();
+    const usedModel = generateTextMock.mock.calls[0][0].model;
+    expect(usedModel.modelId).toBe("anthropic/claude-haiku-4.5");
+  });
+
+  it("chatWithTabAgent uses the generator model and never calls the decisions endpoint", async () => {
+    generateTextMock.mockResolvedValueOnce(mockTextResult("a reply"));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await chatWithTabAgent(orCfg, "sys", [
+      { role: "user", content: "hi" },
+    ]);
+
+    expect(result).toBe("a reply");
+    expect(fetchMock).not.toHaveBeenCalled();
+    const usedModel = generateTextMock.mock.calls[0][0].model;
+    expect(usedModel.modelId).toBe("anthropic/claude-haiku-4.5");
+  });
+
+  it("generateTabStructure uses the generator model and never calls the decisions endpoint", async () => {
+    generateObjectMock.mockResolvedValueOnce({
+      object: { parts: [] },
+      usage: {},
+      finishReason: "stop",
+      response: { modelId: "mock" },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await generateTabStructure(orCfg, {
+      sectionName: "Verse",
+      instruments: ["guitar"],
+      chords: "C G",
+      bars: 4,
+      timeSignature: "4/4",
+      styleNote: "",
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    const usedModel = generateObjectMock.mock.calls[0][0].model;
+    expect(usedModel.modelId).toBe("anthropic/claude-haiku-4.5");
+  });
+
+  it("testAIConnection sends a decisions ping instead of a chat request", async () => {
+    const fetchMock = stubDecisionsFetch({ type: "noul", noul: 0.99 });
+
+    await testAIConnection(orCfg);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(generateTextMock).not.toHaveBeenCalled();
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.questions.ok.type).toBe("noul");
+  });
+
+  it('lyricsDecisionsMode "off" keeps a known decisions model on the plain chat path', async () => {
+    generateTextMock.mockResolvedValueOnce(mockTextResult("plain reply"));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await testAIConnection({ ...orCfg, lyricsDecisionsMode: "off" });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(generateTextMock).toHaveBeenCalledTimes(1);
   });
 });

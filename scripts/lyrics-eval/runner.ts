@@ -5,8 +5,11 @@
 import type { LanguageModelUsage } from "ai";
 import {
   generateNextWordOptions,
+  isLyricsModelDecisions,
   streamLyricsSuggestion,
   type LyricsCallMetrics,
+  type LyricsGeneratorStageMetrics,
+  type LyricsRankerStageMetrics,
 } from "../../src/lib/ai";
 import {
   buildLyricsSuggestionPrompt,
@@ -45,6 +48,10 @@ export interface TrialOutcome {
   usage?: LanguageModelUsage;
   error?: string;
   checks: Record<CheckName, CheckResult>;
+  // Present only when `model` is an OpenRouter decisions model — see
+  // src/lib/ai.ts's "generate, then decide" pipeline.
+  generator?: LyricsGeneratorStageMetrics;
+  ranker?: LyricsRankerStageMetrics;
 }
 
 export interface CaseResult {
@@ -62,6 +69,9 @@ export interface EvalRunResult {
     n: number;
     generatedAt: string;
     fixtureCount: number;
+    // Set only when `model` was run as a decisions model (ranker); the
+    // generator produced the actual candidate text it ranked.
+    generatorModel?: string;
   };
   cases: CaseResult[];
 }
@@ -207,6 +217,8 @@ export async function runTrial(
         ttftMs: metrics?.ttftMs ?? null,
         totalMs: metrics?.totalMs ?? 0,
         usage: metrics?.usage,
+        generator: metrics?.generator,
+        ranker: metrics?.ranker,
         checks: {
           format: aggregateOptionChecks(options, (t) =>
             checkFormat(t, ctx, fixture.expect),
@@ -250,6 +262,8 @@ export async function runTrial(
       ttftMs: metrics?.ttftMs ?? null,
       totalMs: metrics?.totalMs ?? 0,
       usage: metrics?.usage,
+      generator: metrics?.generator,
+      ranker: metrics?.ranker,
       checks: {
         format: checkFormat(output, ctx, fixture.expect),
         syllables: checkSyllables(output, fixture.expect, ctx),
@@ -290,6 +304,7 @@ export async function runEval(
     });
   }
 
+  const decisions = await isLyricsModelDecisions(cfg);
   return {
     meta: {
       model: cfg.model,
@@ -297,6 +312,7 @@ export async function runEval(
       n,
       generatedAt: new Date().toISOString(),
       fixtureCount: fixtures.length,
+      generatorModel: decisions ? cfg.lyricsGeneratorModel : undefined,
     },
     cases,
   };
