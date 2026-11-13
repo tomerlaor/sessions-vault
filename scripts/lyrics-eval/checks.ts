@@ -1,12 +1,19 @@
-// Pure, deterministic, offline checkers for the lyrics-AI eval harness (R3).
+// Pure, deterministic, offline checkers for the lyrics-AI eval harness.
 //
 // Every check takes a single model output string and returns a CheckResult —
 // no network, no I/O, no randomness — so they can run in `npx vitest run`
 // without API keys and be re-scored later from saved JSON.
 //
-// R4 TODO: swap the syllable/rhyme heuristics below for a real engine
-// (CMUdict-backed for English, a proper Hebrew phonetic model). Keep the
-// function signatures the same so the runner and tests don't need to change.
+// Syllable counting and rhyme detection are delegated to the local prosody
+// engine (src/lib/prosody) — see that module for the CMUdict-backed English
+// syllables/rhymes and the heuristic Hebrew niqud-aware syllable count.
+// English scoring is only dictionary-backed once loadEnglishDict() resolves
+// (the runner awaits it before scoring); callers that can't await it get the
+// engine's heuristic fallback instead.
+import {
+  countSyllables as engineCountSyllables,
+  rhymes as engineRhymeDetail,
+} from "../../src/lib/prosody";
 
 export type EvalLang = "en" | "he";
 export type EvalMode = "next_line" | "completion" | "next_word" | "alternative";
@@ -34,20 +41,22 @@ export interface CheckContext {
   // the "completed line" for completion mode (prefix + output) and to catch
   // the model echoing back what the writer already typed.
   linePrefix: string;
-  // Previous non-empty lyric line, used only as a fallback syllable check
-  // for next_line when no explicit expect.syllables range is given.
-  prevLine?: string;
+  // The lyric line a next_line candidate should match in length: the last
+  // *written* lyric line (cleaned, skipping headers/chords/remarks). Used
+  // only as a fallback syllable check when no explicit expect.syllables
+  // range is given. Not simply "the line before the cursor's line" (see
+  // buildReferenceLine() in runner.ts) -- that's one line too early
+  // whenever the cursor sits at the end of the last written line, which is
+  // the common case for next_line fixtures.
+  referenceLine?: string;
 }
 
-// ── shared helpers ────────────────────────────────────────────────────────
+// ── shared helpers ──────────────────────────────────────────────
 
 // eslint-disable-next-line no-misleading-character-class -- Hebrew presentation forms are intentional
 const HEBREW_RE = /[א-תיִ-פֿ]/;
 const HEBREW_LETTER_G = /[א-ת]/g;
 const LATIN_LETTER_G = /[A-Za-z]/g;
-// Hebrew niqud (vowel points) — used to strip diacritics and, when present,
-// as a rough proxy for syllable nuclei.
-const NIQUD_G = /[ְ-ׇּׁׂ]/g;
 
 export function isHebrewText(text: string): boolean {
   return HEBREW_RE.test(text);
@@ -61,55 +70,25 @@ export function lastWord(text: string): string {
   return words[words.length - 1] ?? "";
 }
 
-function stripToLetters(word: string, lang: EvalLang): string {
-  if (lang === "he") {
-    return word.replace(NIQUD_G, "").replace(/[^א-ת]/g, "");
-  }
-  return word.toLowerCase().replace(/[^a-z]/g, "");
-}
-
-function countSyllablesEnglishWord(word: string): number {
-  const w = word.toLowerCase().replace(/[^a-z]/g, "");
-  if (!w) return 0;
-  const groups = w.match(/[aeiouy]+/g);
-  let count = groups ? groups.length : 0;
-  // Silent trailing "e" (e.g. "name", "like") doesn't add its own syllable,
-  // unless the whole word is just that vowel group (e.g. "the").
-  if (w.endsWith("e") && !w.endsWith("le") && count > 1) count--;
-  return Math.max(1, count);
-}
-
-function countSyllablesHebrewWord(word: string): number {
-  const niqud = word.match(NIQUD_G);
-  if (niqud && niqud.length > 0) return niqud.length;
-  // No niqud: fall back to counting matres lectionis (א ה ו י), at least one
-  // syllable per word. This is a coarse heuristic — see R4 TODO above.
-  const vowelLetters = word.match(/[אהוי]/g);
-  return Math.max(1, vowelLetters ? vowelLetters.length : 1);
-}
-
 // Counts syllables across a whole string (line or output), word by word.
+// Dictionary-backed for English once loadEnglishDict() resolves (the
+// runner awaits it before scoring); falls back to the engine's heuristic
+// otherwise. See src/lib/prosody/en.ts and he.ts.
 export function countSyllables(text: string, lang: EvalLang): number {
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return 0;
-  const counter =
-    lang === "he" ? countSyllablesHebrewWord : countSyllablesEnglishWord;
-  return words.reduce((sum, w) => sum + counter(w), 0);
+  return engineCountSyllables(text, lang);
 }
 
-// Heuristic rhyme match (R3): perfect or slant suffix comparison on the
-// cleaned (letters-only) word. R4 TODO: replace with phoneme-based rhyme.
+// Boolean rhyme check for the eval harness: true iff the engine calls it
+// "perfect" or "slant" (false for "none"). Use rhymeDetail() for the full
+// three-way result.
 export function rhymes(a: string, b: string, lang: EvalLang): boolean {
-  const ca = stripToLetters(a, lang);
-  const cb = stripToLetters(b, lang);
-  if (!ca || !cb) return false;
-  if (ca === cb) return true;
-  if (ca.length >= 2 && cb.length >= 2 && ca.slice(-2) === cb.slice(-2)) {
-    return true; // perfect-ish: same last two letters
-  }
-  // Slant: same trailing letter plus close length, catches e.g. "street"/"feet".
-  return ca.slice(-1) === cb.slice(-1) && Math.abs(ca.length - cb.length) <= 2;
+  return engineRhymeDetail(a, b, lang) !== "none";
 }
+
+// The engine's ternary rhyme result, re-exported under a distinct name so
+// callers that want "perfect" vs "slant" (rather than the boolean above)
+// don't need to import src/lib/prosody directly.
+export const rhymeDetail = engineRhymeDetail;
 
 // A line made up only of chord tokens (e.g. "C G Am F", "Dm7 G7 Cmaj7") or a
 // bare [Section] header — not a real lyric line, so no-copy shouldn't flag it.
@@ -235,15 +214,15 @@ export function checkSyllables(
 
   if (
     ctx.mode === "next_line" &&
-    ctx.prevLine &&
-    ctx.prevLine.trim().length > 0
+    ctx.referenceLine &&
+    ctx.referenceLine.trim().length > 0
   ) {
     const count = countSyllables(target, ctx.lang);
-    const prevCount = countSyllables(ctx.prevLine, ctx.lang);
-    if (Math.abs(count - prevCount) > 2) {
+    const refCount = countSyllables(ctx.referenceLine, ctx.lang);
+    if (Math.abs(count - refCount) > 2) {
       return {
         status: "fail",
-        detail: `${count} syllables vs ${prevCount} in previous line`,
+        detail: `${count} syllables vs ${refCount} in the reference line`,
       };
     }
     return { status: "pass" };
