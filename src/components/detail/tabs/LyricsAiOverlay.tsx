@@ -16,12 +16,7 @@ import {
   getRecentAccepted,
   upsertStyleProfile,
 } from "../../../db/queries/lyrics-ai";
-import {
-  streamLyricsSuggestion,
-  generatePopupSuggestions,
-  generateNextWordOptions,
-  generateStyleSummary,
-} from "../../../lib/ai";
+import { generateStyleSummary } from "../../../lib/ai";
 import {
   buildLyricsSuggestionPrompt,
   buildLyricsPopupPrompt,
@@ -30,6 +25,18 @@ import {
   normalizeNextWord,
   normalizeNextWordOptions,
 } from "../../../lib/lyrics-ai";
+import {
+  LruCache,
+  createDebouncer,
+  shouldRunRequest,
+  isBlankContext,
+  requestStreamSuggestion,
+  requestNextWordOptions,
+  requestPopupSuggestions,
+  type RunSignature,
+  type NextWordOptionsResult,
+  type PopupSuggestionsResult,
+} from "../../../lib/lyrics-ai-request";
 import type {
   Project,
   AIConfig,
@@ -37,6 +44,12 @@ import type {
   LyricSuggestionMode,
   LyricRejectionTag,
 } from "../../../types";
+
+// Shared across overlay instances (e.g. switching lyrics tabs/projects) so
+// retyping or undoing to a previously-seen prompt never re-hits the AI.
+const streamCache = new LruCache<string, string>(50);
+const nextWordCache = new LruCache<string, NextWordOptionsResult>(50);
+const popupCache = new LruCache<string, PopupSuggestionsResult>(50);
 
 export interface LyricsAiOverlayHandle {
   hasSuggestion: () => boolean;
@@ -114,9 +127,9 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
       null,
     );
 
-    const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-      undefined,
-    );
+    const debouncer = useRef(createDebouncer(800)).current;
+    const abortControllerRef = useRef<AbortController | null>(null);
+    const lastSignatureRef = useRef<RunSignature | null>(null);
     const tagTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
       undefined,
     );
@@ -164,10 +177,12 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
         return;
       }
 
-      let aborted = false;
-      clearTimeout(debounceRef.current);
+      debouncer.schedule(() => {
+        void runRequest();
+      });
 
-      debounceRef.current = setTimeout(async () => {
+      async function runRequest() {
+        if (!aiConfig) return;
         const mode = determineSuggestionMode(
           draft,
           selectionStart,
@@ -175,8 +190,6 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
           cfg.enabledModes,
         );
         if (!mode) return;
-
-        setCurrentMode(mode);
 
         const textBeforeCursor = draft.slice(0, selectionStart);
         const lineStart = textBeforeCursor.lastIndexOf("\n") + 1;
@@ -187,7 +200,30 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
         );
         const lineTextBeforeCursor = draft.slice(lineStart, selectionStart);
 
+        if (isBlankContext(draft)) {
+          setGhostText("");
+          setCurrentSuggestion(null);
+          setPopupItems([]);
+          setStatus("idle");
+          return;
+        }
+
+        const signature: RunSignature = { mode, currentLine, draft };
+        if (!shouldRunRequest(lastSignatureRef.current, signature)) {
+          // Nothing meaningful changed since the last completed request
+          // (e.g. the cursor just moved) — leave whatever is showing as-is.
+          return;
+        }
+
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+        const { signal } = controller;
+        const isCurrent = () => abortControllerRef.current === controller;
+
+        setCurrentMode(mode);
+
         const recentAccepted = await getRecentAccepted(project.id, 5);
+        if (!isCurrent()) return;
 
         const baseInput = {
           lyrics: draft,
@@ -215,14 +251,20 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
           setStatus("loading");
           try {
             const { system, prompt } = buildNextWordOptionsPrompt(baseInput);
-            const result = await generateNextWordOptions(
+            const result = await requestNextWordOptions({
               aiConfig,
               system,
               prompt,
-            );
-            if (aborted) return;
+              signal,
+              cache: nextWordCache,
+            });
+            if (!isCurrent()) return;
+            if (result.status === "aborted") {
+              setStatus("idle");
+              return;
+            }
             const options = normalizeNextWordOptions(
-              result.options,
+              result.value.options,
               lineTextBeforeCursor,
             );
             if (options.length === 0) {
@@ -239,8 +281,9 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
             // Tab accepts the first (most natural) option.
             setCurrentSuggestion(options[0].text);
             setStatus("ready");
+            lastSignatureRef.current = signature;
           } catch (err) {
-            if (!aborted) {
+            if (isCurrent()) {
               setErrorMsg(
                 err instanceof Error ? err.message : "AI request failed",
               );
@@ -258,26 +301,32 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               ...baseInput,
               enabledModes: cfg.enabledModes,
             });
-            const result = await generatePopupSuggestions(
+            const result = await requestPopupSuggestions({
               aiConfig,
               system,
               prompt,
-            );
-            if (!aborted) {
-              setPopupItems(
-                result.suggestions.map((s) =>
-                  s.mode === "next_word"
-                    ? {
-                        ...s,
-                        text: normalizeNextWord(s.text, lineTextBeforeCursor),
-                      }
-                    : s,
-                ),
-              );
-              setStatus("ready");
+              signal,
+              cache: popupCache,
+            });
+            if (!isCurrent()) return;
+            if (result.status === "aborted") {
+              setStatus("idle");
+              return;
             }
+            setPopupItems(
+              result.value.suggestions.map((s) =>
+                s.mode === "next_word"
+                  ? {
+                      ...s,
+                      text: normalizeNextWord(s.text, lineTextBeforeCursor),
+                    }
+                  : s,
+              ),
+            );
+            setStatus("ready");
+            lastSignatureRef.current = signature;
           } catch (err) {
-            if (!aborted) {
+            if (isCurrent()) {
               setErrorMsg(
                 err instanceof Error ? err.message : "AI request failed",
               );
@@ -297,25 +346,34 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               ...baseInput,
               mode,
             });
-            let accumulated = "";
-            for await (const chunk of streamLyricsSuggestion(
+            const result = await requestStreamSuggestion({
               aiConfig,
+              cacheMode: mode,
               system,
               prompt,
-            )) {
-              if (aborted) break;
-              accumulated += chunk;
-              setGhostText(accumulated);
-              setStatus("streaming");
+              signal,
+              cache: streamCache,
+              onToken: (accumulated) => {
+                if (!isCurrent()) return;
+                setGhostText(accumulated);
+                setStatus("streaming");
+              },
+            });
+            if (!isCurrent()) return;
+            if (result.status === "aborted") {
+              setGhostText("");
+              setStatus("idle");
+              return;
             }
-            if (!aborted && accumulated) {
-              setCurrentSuggestion(accumulated);
+            if (result.value) {
+              setCurrentSuggestion(result.value);
               setStatus("ready");
-            } else if (!aborted) {
+              lastSignatureRef.current = signature;
+            } else {
               setStatus("idle");
             }
           } catch (err) {
-            if (!aborted) {
+            if (isCurrent()) {
               setGhostText("");
               setErrorMsg(
                 err instanceof Error ? err.message : "AI request failed",
@@ -328,11 +386,11 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
             }
           }
         }
-      }, 800);
+      }
 
       return () => {
-        clearTimeout(debounceRef.current);
-        aborted = true;
+        debouncer.cancel();
+        abortControllerRef.current?.abort();
       };
     }, [
       draft,
@@ -340,9 +398,15 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
       selectionEnd,
       cfg,
       aiConfig,
-      project,
+      project.id,
+      project.title,
+      project.bpm,
+      project.key,
+      project.timeSignature,
+      project.lyricsContext,
       globalProfile,
       projectProfile,
+      debouncer,
     ]);
 
     const triggerProfileRegenIfNeeded = useCallback(
