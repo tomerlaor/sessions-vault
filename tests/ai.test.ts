@@ -33,6 +33,8 @@ import {
   generateNextWordOptions,
   generatePopupSuggestions,
   generateStyleSummary,
+  shouldLogAI,
+  logAI,
 } from "../src/lib/ai";
 import type { AIConfig } from "../src/types";
 
@@ -89,5 +91,47 @@ describe("lyrics AI call sites in ai.ts", () => {
     expect(opts.maxOutputTokens).toBe(60);
     expect(opts.maxRetries).toBe(1);
     expect(opts.abortSignal).toBe(controller.signal);
+  });
+});
+
+describe("shouldLogAI", () => {
+  it("is true only when DEV is true", () => {
+    expect(shouldLogAI({ DEV: true })).toBe(true);
+    expect(shouldLogAI({ DEV: false })).toBe(false);
+    expect(shouldLogAI({})).toBe(false);
+  });
+});
+
+describe("logAI gating", () => {
+  it("is a no-op and never touches the console when DEV is false", () => {
+    const groupSpy = vi.spyOn(console, "group").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    logAI(
+      "testFn",
+      { model: "gpt-4.1-mini", prompt: "secret prompt", durationMs: 1 },
+      { DEV: false },
+    );
+    expect(groupSpy).not.toHaveBeenCalled();
+    expect(logSpy).not.toHaveBeenCalled();
+    groupSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
+  it("logs to the console when DEV is true", () => {
+    const groupSpy = vi.spyOn(console, "group").mockImplementation(() => {});
+    const groupEndSpy = vi
+      .spyOn(console, "groupEnd")
+      .mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    logAI(
+      "testFn",
+      { model: "gpt-4.1-mini", prompt: "hello", durationMs: 1 },
+      { DEV: true },
+    );
+    expect(groupSpy).toHaveBeenCalledTimes(1);
+    expect(logSpy).toHaveBeenCalled();
+    groupSpy.mockRestore();
+    groupEndSpy.mockRestore();
+    logSpy.mockRestore();
   });
 });

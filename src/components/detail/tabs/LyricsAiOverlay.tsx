@@ -6,9 +6,14 @@ import {
   useImperativeHandle,
   forwardRef,
 } from "react";
-import { getAIConfigFor } from "../../../db/queries/ai";
+import {
+  getAIConfigFor,
+  getAIConfigWithoutKey,
+  setAIConfig,
+} from "../../../db/queries/ai";
 import {
   getLyricsAIConfig,
+  setLyricsAIConfig,
   getStyleProfile,
   logStyleEvent,
   updateEventTag,
@@ -16,7 +21,7 @@ import {
   getRecentAccepted,
   upsertStyleProfile,
 } from "../../../db/queries/lyrics-ai";
-import { generateStyleSummary } from "../../../lib/ai";
+import { generateStyleSummary, resolveFeatureConfig } from "../../../lib/ai";
 import {
   buildLyricsSuggestionPrompt,
   buildLyricsPopupPrompt,
@@ -37,9 +42,17 @@ import {
   type NextWordOptionsResult,
   type PopupSuggestionsResult,
 } from "../../../lib/lyrics-ai-request";
+import {
+  gateLyricsAi,
+  isLocalProvider,
+  pickLocalProvider,
+  switchToLocalAIConfig,
+} from "../../../lib/lyrics-privacy";
+import LyricsCloudConsentModal from "../../shared/LyricsCloudConsentModal";
 import type {
   Project,
   AIConfig,
+  AIProvider,
   LyricsAIConfig,
   LyricSuggestionMode,
   LyricRejectionTag,
@@ -105,6 +118,9 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
     ref,
   ) => {
     const [aiConfig, setAiConfig] = useState<AIConfig | null>(null);
+    const [consentProvider, setConsentProvider] = useState<AIProvider | null>(
+      null,
+    );
     const [cfg, setCfg] = useState<LyricsAIConfig>(DEFAULT_CFG);
     const [globalProfile, setGlobalProfile] = useState<string | null>(null);
     const [projectProfile, setProjectProfile] = useState<string | null>(null);
@@ -135,21 +151,56 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
     );
 
     // The AI config includes the API key, which is read from the OS keychain
-    // (and may prompt for the password), so only load it when the helper is on.
+    // (and may prompt for the password), so only load it once consent (if
+    // needed) is in place.
     const loadAiConfig = useCallback(() => {
       getAIConfigFor("lyrics").then(setAiConfig);
     }, []);
 
+    // The single gate before any cloud request: never read the keychain or
+    // call the AI provider while opted out, disabled, or lacking consent.
+    const checkAndMaybeLoad = useCallback(
+      (lyricsCfg: LyricsAIConfig) => {
+        if (project.aiOptOut || !lyricsCfg.enabled) {
+          setConsentProvider(null);
+          setAiConfig(null);
+          return;
+        }
+        getAIConfigWithoutKey().then((cfgNoKey) => {
+          const gate = gateLyricsAi(
+            project.aiOptOut,
+            lyricsCfg,
+            cfgNoKey?.provider ?? null,
+          );
+          if (gate.status === "needs_consent") {
+            setConsentProvider(gate.provider);
+            setAiConfig(null);
+            return;
+          }
+          setConsentProvider(null);
+          if (!cfgNoKey) {
+            setAiConfig(null);
+          } else if (isLocalProvider(cfgNoKey.provider)) {
+            // Local providers need no API key — skip the keychain entirely.
+            setAiConfig(resolveFeatureConfig(cfgNoKey, "lyrics"));
+          } else {
+            loadAiConfig();
+          }
+        });
+      },
+      [project.aiOptOut, loadAiConfig],
+    );
+
     useEffect(() => {
       getLyricsAIConfig().then((lyricsAI) => {
         setCfg(lyricsAI);
-        if (lyricsAI.enabled) loadAiConfig();
+        checkAndMaybeLoad(lyricsAI);
       });
 
       const onCfgChange = (e: Event) => {
         const next = (e as CustomEvent<LyricsAIConfig>).detail;
         setCfg(next);
-        if (next.enabled) loadAiConfig();
+        checkAndMaybeLoad(next);
       };
       window.addEventListener("lyrics-ai-config-changed", onCfgChange);
 
@@ -157,7 +208,32 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
         clearTimeout(tagTimerRef.current);
         window.removeEventListener("lyrics-ai-config-changed", onCfgChange);
       };
-    }, [loadAiConfig]);
+    }, [checkAndMaybeLoad]);
+
+    const handleConsentUseCloud = useCallback(async () => {
+      const next = { ...cfg, cloudConsentAt: Date.now() };
+      await setLyricsAIConfig(next);
+      setCfg(next);
+      window.dispatchEvent(
+        new CustomEvent("lyrics-ai-config-changed", { detail: next }),
+      );
+    }, [cfg]);
+
+    const handleConsentSwitchToLocal = useCallback(async () => {
+      const current = (await getAIConfigWithoutKey()) ?? {
+        provider: "ollama" as AIProvider,
+        apiKey: "",
+        baseUrl: "",
+        model: "",
+      };
+      const nextAiCfg = switchToLocalAIConfig(current);
+      await setAIConfig(nextAiCfg);
+      setConsentProvider(null);
+      setAiConfig(nextAiCfg);
+      window.dispatchEvent(
+        new CustomEvent("lyrics-ai-config-changed", { detail: cfg }),
+      );
+    }, [cfg]);
 
     useEffect(() => {
       Promise.all([
@@ -169,8 +245,24 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
       });
     }, [project.id]);
 
+    // "Clear this song's memory" (Lyrics tab) clears the DB row directly —
+    // refresh the in-memory profile this overlay is holding so it stops
+    // being used in prompts without waiting for a project switch.
     useEffect(() => {
-      if (!cfg.enabled || !aiConfig) {
+      const onMemoryCleared = (e: Event) => {
+        const { projectId } = (e as CustomEvent<{ projectId: string }>).detail;
+        if (projectId === project.id) setProjectProfile(null);
+      };
+      window.addEventListener("lyrics-style-memory-cleared", onMemoryCleared);
+      return () =>
+        window.removeEventListener(
+          "lyrics-style-memory-cleared",
+          onMemoryCleared,
+        );
+    }, [project.id]);
+
+    useEffect(() => {
+      if (!cfg.enabled || !aiConfig || project.aiOptOut) {
         setGhostText("");
         setCurrentSuggestion(null);
         setStatus("idle");
@@ -404,6 +496,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
       project.key,
       project.timeSignature,
       project.lyricsContext,
+      project.aiOptOut,
       globalProfile,
       projectProfile,
       debouncer,
@@ -516,6 +609,35 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
     );
 
     if (!cfg.enabled) return null;
+
+    if (project.aiOptOut) {
+      return (
+        <div
+          style={{
+            position: "absolute",
+            right: 10,
+            top: 8,
+            fontSize: 11,
+            color: "var(--text-3)",
+            pointerEvents: "none",
+            zIndex: 5,
+          }}
+        >
+          AI off for this song
+        </div>
+      );
+    }
+
+    if (consentProvider) {
+      return (
+        <LyricsCloudConsentModal
+          provider={consentProvider}
+          localProvider={pickLocalProvider(consentProvider)}
+          onUseCloud={handleConsentUseCloud}
+          onSwitchToLocal={handleConsentSwitchToLocal}
+        />
+      );
+    }
 
     if (!aiConfig) {
       return (

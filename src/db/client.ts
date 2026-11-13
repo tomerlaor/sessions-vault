@@ -102,6 +102,12 @@ async function runMigrations(raw: Database): Promise<void> {
       [],
     );
   } catch {}
+  try {
+    await raw.execute(
+      `ALTER TABLE projects ADD COLUMN ai_opt_out INTEGER NOT NULL DEFAULT 0`,
+      [],
+    );
+  } catch {}
 
   await raw.execute(
     `CREATE TABLE IF NOT EXISTS backups (
