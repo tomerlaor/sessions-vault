@@ -50,6 +50,16 @@ The JSON/MD reports record generator and ranker timing, tokens, and cost
 (the ranker's `usage.cost`, in USD) alongside the usual pass-rate stats, and
 the results filename includes both models (`<ranker>+<generator>`).
 
+On a decisions-model run the JSON also stores every pre-ranking candidate
+for each trial, with the same automatic checks applied to each one. The
+markdown report adds a **Picker accuracy** section that compares the
+ranker's pick to the generator's first candidate, to a uniformly random
+candidate, and to an oracle that always chooses a passing candidate when
+one exists. "Picker accuracy" is the share of trials where the pick was a
+best-scoring candidate (fewest failed checks; ties count). This is the
+direct measure of whether the ranker adds value over just taking the
+generator's first suggestion.
+
 In the app, the same pipeline is configured in **Settings → AI Assistant**:
 pick a decisions model as the Lyrics AI model (the picker tags decisions
 models in its dropdown) to reveal the generator model and candidate-count

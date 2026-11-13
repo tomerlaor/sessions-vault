@@ -14,6 +14,7 @@ import {
 import {
   buildLyricsSuggestionPrompt,
   buildNextWordOptionsPrompt,
+  normalizeNextWord,
   normalizeNextWordOptions,
   type LyricsSuggestionInput,
   type NextWordOption,
@@ -42,6 +43,17 @@ export const CHECK_NAMES = [
 ] as const;
 export type CheckName = (typeof CHECK_NAMES)[number];
 
+// One pre-ranking candidate, scored with the same checkers as the trial
+// winner. Present on the decisions "generate, then decide" path so the
+// report can measure picker accuracy against first/random/best.
+export interface ScoredCandidate {
+  text: string;
+  index: number;
+  isPick: boolean;
+  isFirst: boolean;
+  checks: Record<CheckName, CheckResult>;
+}
+
 export interface TrialOutcome {
   rawOutput: string;
   ttftMs: number | null;
@@ -53,6 +65,8 @@ export interface TrialOutcome {
   // src/lib/ai.ts's "generate, then decide" pipeline.
   generator?: LyricsGeneratorStageMetrics;
   ranker?: LyricsRankerStageMetrics;
+  candidates?: ScoredCandidate[];
+  pickedIndex?: number;
 }
 
 export interface CaseResult {
@@ -165,6 +179,47 @@ function aggregateRhymeForNextWord(
     : { status: "fail", detail: "no option satisfies the rhyme" };
 }
 
+function scoreText(
+  text: string,
+  fixture: EvalFixture,
+  ctx: CheckContext,
+): Record<CheckName, CheckResult> {
+  return {
+    format: checkFormat(text, ctx, fixture.expect),
+    syllables: checkSyllables(text, fixture.expect, ctx),
+    rhyme: checkRhyme(text, fixture.expect, ctx),
+    noCopy: checkNoCopy(text, fixture.lyrics),
+    language: checkLanguage(text, fixture.lang),
+    cliche: checkCliche(text, fixture.expect.rhymeWith),
+  };
+}
+
+function scoreUnrankedCandidates(
+  texts: string[] | undefined,
+  pickedIndex: number | undefined,
+  fixture: EvalFixture,
+  ctx: CheckContext,
+): { candidates: ScoredCandidate[]; pickedIndex: number } | undefined {
+  if (!texts || texts.length === 0) return undefined;
+  const pick = pickedIndex ?? 0;
+  return {
+    pickedIndex: pick,
+    candidates: texts.map((raw, index) => {
+      const text =
+        fixture.mode === "next_word"
+          ? normalizeNextWord(raw, ctx.linePrefix)
+          : raw;
+      return {
+        text,
+        index,
+        isPick: index === pick,
+        isFirst: index === 0,
+        checks: scoreText(text, fixture, ctx),
+      };
+    }),
+  };
+}
+
 function errorTrial(message: string): TrialOutcome {
   const skip: CheckResult = { status: "skip" };
   return {
@@ -213,6 +268,14 @@ export async function runTrial(
         result.options,
         cursor.textBeforeCursor,
       );
+      // Score the generator-order texts (pre-ranking). Only present on
+      // the decisions path, where the ranker actually chose a winner.
+      const scored = scoreUnrankedCandidates(
+        metrics?.unrankedCandidates,
+        metrics?.pickedIndex,
+        fixture,
+        ctx,
+      );
       return {
         rawOutput: JSON.stringify(options),
         ttftMs: metrics?.ttftMs ?? null,
@@ -220,6 +283,8 @@ export async function runTrial(
         usage: metrics?.usage,
         generator: metrics?.generator,
         ranker: metrics?.ranker,
+        candidates: scored?.candidates,
+        pickedIndex: scored?.pickedIndex,
         checks: {
           format: aggregateOptionChecks(options, (t) =>
             checkFormat(t, ctx, fixture.expect),
@@ -258,6 +323,12 @@ export async function runTrial(
     )) {
       output += chunk;
     }
+    const scored = scoreUnrankedCandidates(
+      metrics?.unrankedCandidates,
+      metrics?.pickedIndex,
+      fixture,
+      ctx,
+    );
     return {
       rawOutput: output,
       ttftMs: metrics?.ttftMs ?? null,
@@ -265,6 +336,8 @@ export async function runTrial(
       usage: metrics?.usage,
       generator: metrics?.generator,
       ranker: metrics?.ranker,
+      candidates: scored?.candidates,
+      pickedIndex: scored?.pickedIndex,
       checks: {
         format: checkFormat(output, ctx, fixture.expect),
         syllables: checkSyllables(output, fixture.expect, ctx),
