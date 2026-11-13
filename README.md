@@ -69,6 +69,11 @@ npm install
 npm run tauri dev
 ```
 
+`npm run ai -- help` exercises the AI assistant (lyrics helper, tab agent)
+and its eval harness from the terminal — see [docs/ai-eval.md](./docs/ai-eval.md),
+including how OpenRouter decisions models (e.g. `typesafe/jev-1.14`) are
+supported.
+
 ---
 
 ## Roadmap (v1)

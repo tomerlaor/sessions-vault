@@ -60,6 +60,17 @@ export interface EvalStats {
     meanOutput: number | null;
     meanTotal: number | null;
   };
+  // Only populated for trials that went through the OpenRouter decisions
+  // "generate, then decide" pipeline (src/lib/ai.ts) — null fields mean no
+  // trial reported that stage.
+  decisionsPipeline: {
+    trialsWithRanker: number;
+    meanGeneratorMs: number | null;
+    meanRankerMs: number | null;
+    meanRankerInputTokens: number | null;
+    meanRankerOutputTokens: number | null;
+    totalRankerCost: number | null;
+  };
   failingCases: { caseId: string; trial: number; failedChecks: string[] }[];
 }
 
@@ -88,6 +99,11 @@ export function computeStats(run: EvalRunResult): EvalStats {
   const outputTokens: number[] = [];
   const totalTokens: number[] = [];
   const failingCases: EvalStats["failingCases"] = [];
+  const generatorMsValues: number[] = [];
+  const rankerMsValues: number[] = [];
+  const rankerInputTokens: number[] = [];
+  const rankerOutputTokens: number[] = [];
+  const rankerCosts: number[] = [];
 
   let totalTrials = 0;
   let errorCount = 0;
@@ -131,6 +147,15 @@ export function computeStats(run: EvalRunResult): EvalStats {
             (trial.usage.inputTokens ?? 0) + (trial.usage.outputTokens ?? 0);
           if (total > 0) totalTokens.push(total);
         }
+        if (trial.generator) generatorMsValues.push(trial.generator.durationMs);
+        if (trial.ranker) {
+          rankerMsValues.push(trial.ranker.durationMs);
+          rankerInputTokens.push(trial.ranker.usage.inputTokens);
+          rankerOutputTokens.push(trial.ranker.usage.outputTokens);
+          if (typeof trial.ranker.cost === "number") {
+            rankerCosts.push(trial.ranker.cost);
+          }
+        }
       }
     });
   }
@@ -155,6 +180,15 @@ export function computeStats(run: EvalRunResult): EvalStats {
       meanOutput: mean(outputTokens),
       meanTotal: mean(totalTokens),
     },
+    decisionsPipeline: {
+      trialsWithRanker: rankerMsValues.length,
+      meanGeneratorMs: mean(generatorMsValues),
+      meanRankerMs: mean(rankerMsValues),
+      meanRankerInputTokens: mean(rankerInputTokens),
+      meanRankerOutputTokens: mean(rankerOutputTokens),
+      totalRankerCost:
+        rankerCosts.length > 0 ? rankerCosts.reduce((a, b) => a + b, 0) : null,
+    },
     failingCases,
   };
 }
@@ -167,14 +201,21 @@ function fmtTokens(n: number | null): string {
   return n === null ? "n/a" : n.toFixed(1);
 }
 
+function fmtCost(n: number | null): string {
+  return n === null ? "n/a" : `$${n.toFixed(6)}`;
+}
+
 export function buildMarkdownReport(run: EvalRunResult): string {
   const stats = computeStats(run);
   const lines: string[] = [];
+  const isDecisions = !!run.meta.generatorModel;
 
-  lines.push(`# Lyrics AI eval — ${run.meta.model}`);
+  lines.push(
+    `# Lyrics AI eval — ${run.meta.model}${isDecisions ? ` (ranker) + ${run.meta.generatorModel} (generator)` : ""}`,
+  );
   lines.push("");
   lines.push(
-    `- Provider: \`${run.meta.provider}\` · Model: \`${run.meta.model}\``,
+    `- Provider: \`${run.meta.provider}\` · Model: \`${run.meta.model}\`${isDecisions ? ` (decisions) · Generator: \`${run.meta.generatorModel}\`` : ""}`,
   );
   lines.push(
     `- Generated: ${run.meta.generatedAt} · Fixtures: ${run.meta.fixtureCount} · n per case: ${run.meta.n}`,
@@ -225,6 +266,22 @@ export function buildMarkdownReport(run: EvalRunResult): string {
     `- Tokens — mean input: ${fmtTokens(stats.tokens.meanInput)}, mean output: ${fmtTokens(stats.tokens.meanOutput)}, mean total: ${fmtTokens(stats.tokens.meanTotal)}`,
   );
   lines.push("");
+
+  if (stats.decisionsPipeline.trialsWithRanker > 0) {
+    const dp = stats.decisionsPipeline;
+    lines.push("## Decisions pipeline (generator + ranker)");
+    lines.push("");
+    lines.push(
+      `- Trials ranked: ${dp.trialsWithRanker}/${stats.totalTrials} · Generator: \`${run.meta.generatorModel}\` · Ranker: \`${run.meta.model}\``,
+    );
+    lines.push(
+      `- Generator stage — mean duration: ${fmtMs(dp.meanGeneratorMs)}`,
+    );
+    lines.push(
+      `- Ranker stage — mean duration: ${fmtMs(dp.meanRankerMs)}, mean tokens: ${fmtTokens(dp.meanRankerInputTokens)} in / ${fmtTokens(dp.meanRankerOutputTokens)} out, total cost: ${fmtCost(dp.totalRankerCost)}`,
+    );
+    lines.push("");
+  }
 
   lines.push("## Failing cases");
   lines.push("");

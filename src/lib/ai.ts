@@ -10,6 +10,12 @@ import {
   createOpenRouterFetch,
 } from "./openrouter";
 import {
+  isDecisionsModelId,
+  fetchOpenRouterDecisionsModels,
+  rankLyricCandidates,
+  pingDecisionsModel,
+} from "./openrouter-decisions";
+import {
   extractJsonText,
   rawTextFromObjectError,
   repairAiJsonText,
@@ -158,6 +164,197 @@ function buildProvider(cfg: AIConfig) {
   }
 }
 
+// ── OpenRouter decisions: "generate, then decide" ───────────────────────────
+// A decisions model (e.g. typesafe/jev-1.14) can't write text, so wherever
+// one is configured as the (feature-resolved) model, a separate chat
+// "generator" model produces the actual text and the decisions model only
+// ranks/judges it. See src/lib/openrouter-decisions.ts for the API itself.
+
+export const DEFAULT_LYRICS_CANDIDATE_COUNT = 4;
+const MIN_LYRICS_CANDIDATE_COUNT = 2;
+const MAX_LYRICS_CANDIDATE_COUNT = 8;
+
+function clampCandidateCount(n: number | undefined): number {
+  const v = Math.round(n ?? DEFAULT_LYRICS_CANDIDATE_COUNT);
+  return Math.min(
+    MAX_LYRICS_CANDIDATE_COUNT,
+    Math.max(MIN_LYRICS_CANDIDATE_COUNT, v),
+  );
+}
+
+// The config the generator stage runs with: same connection, but the
+// user's chosen (or default) generator model instead of the decisions model.
+function buildGeneratorConfig(cfg: AIConfig): AIConfig {
+  return {
+    ...cfg,
+    model: cfg.lyricsGeneratorModel || DEFAULT_MODELS.openrouter,
+  };
+}
+
+// Resolves whether `cfg.model` (already feature-resolved by the caller) is
+// an OpenRouter decisions model: the user's lyricsDecisionsMode override
+// wins, then the built-in pattern list (no network needed), then the
+// catalog fetch as a last resort. A failed catalog fetch (offline) resolves
+// to false rather than throwing, since callers treat "not decisions" as the
+// safe default (same behavior as before this feature existed).
+export async function isLyricsModelDecisions(cfg: AIConfig): Promise<boolean> {
+  if (cfg.provider !== "openrouter") return false;
+  const model = cfg.model || DEFAULT_MODELS.openrouter;
+  if (cfg.lyricsDecisionsMode === "on") return true;
+  if (cfg.lyricsDecisionsMode === "off") return false;
+  if (isDecisionsModelId(model)) return true;
+  try {
+    const catalog = await fetchOpenRouterDecisionsModels();
+    return catalog.some((m) => m.id === model);
+  } catch {
+    return false;
+  }
+}
+
+// Swaps in the generator config when `cfg` is a decisions model, for the
+// call sites that only ever need plain text (style summary, tab agent) and
+// have no ranking step of their own.
+async function ensureTextCapableConfig(cfg: AIConfig): Promise<AIConfig> {
+  if (cfg.provider !== "openrouter") return cfg;
+  return (await isLyricsModelDecisions(cfg)) ? buildGeneratorConfig(cfg) : cfg;
+}
+
+function emptyUsage(): LanguageModelUsage {
+  return {
+    inputTokens: 0,
+    inputTokenDetails: {
+      noCacheTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+    outputTokens: 0,
+    outputTokenDetails: { textTokens: 0, reasoningTokens: 0 },
+    totalTokens: 0,
+  };
+}
+
+// Sums two usage objects. Defensive about missing nested fields because
+// test mocks (and possibly some providers) return a bare `{}`.
+function addUsage(
+  a: LanguageModelUsage | undefined,
+  b: LanguageModelUsage | undefined,
+): LanguageModelUsage {
+  const base = a ?? emptyUsage();
+  if (!b) return base;
+  return {
+    inputTokens: (base.inputTokens ?? 0) + (b.inputTokens ?? 0),
+    inputTokenDetails: {
+      noCacheTokens:
+        (base.inputTokenDetails?.noCacheTokens ?? 0) +
+        (b.inputTokenDetails?.noCacheTokens ?? 0),
+      cacheReadTokens:
+        (base.inputTokenDetails?.cacheReadTokens ?? 0) +
+        (b.inputTokenDetails?.cacheReadTokens ?? 0),
+      cacheWriteTokens:
+        (base.inputTokenDetails?.cacheWriteTokens ?? 0) +
+        (b.inputTokenDetails?.cacheWriteTokens ?? 0),
+    },
+    outputTokens: (base.outputTokens ?? 0) + (b.outputTokens ?? 0),
+    outputTokenDetails: {
+      textTokens:
+        (base.outputTokenDetails?.textTokens ?? 0) +
+        (b.outputTokenDetails?.textTokens ?? 0),
+      reasoningTokens:
+        (base.outputTokenDetails?.reasoningTokens ?? 0) +
+        (b.outputTokenDetails?.reasoningTokens ?? 0),
+    },
+    totalTokens: (base.totalTokens ?? 0) + (b.totalTokens ?? 0),
+  };
+}
+
+// Converts the Decisions API's plain {input_tokens, output_tokens} usage
+// into the shape the rest of this file (and LyricsCallMetrics) use.
+function decisionsUsageAsLanguageModelUsage(usage: {
+  inputTokens: number;
+  outputTokens: number;
+}): LanguageModelUsage {
+  return {
+    inputTokens: usage.inputTokens,
+    inputTokenDetails: {
+      noCacheTokens: usage.inputTokens,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
+    outputTokens: usage.outputTokens,
+    outputTokenDetails: { textTokens: usage.outputTokens, reasoningTokens: 0 },
+    totalTokens: usage.inputTokens + usage.outputTokens,
+  };
+}
+
+export interface LyricsRankerStageMetrics {
+  durationMs: number;
+  usage: { inputTokens: number; outputTokens: number };
+  cost?: number;
+  model: string;
+}
+
+export interface LyricsGeneratorStageMetrics {
+  durationMs: number;
+  usage?: LanguageModelUsage;
+  model: string;
+  count?: number;
+}
+
+// Ranks already-generated text items by the decisions model and reorders
+// `items` to match (best first). Falls back to the original order — and
+// logs in dev only — if the ranking call fails for any reason other than
+// an abort, so the lyrics helper/eval still works when ranking errors.
+async function rankByDecisions<T extends { text: string }>(
+  cfg: AIConfig,
+  system: string,
+  prompt: string,
+  items: T[],
+  signal: AbortSignal | undefined,
+): Promise<{ items: T[]; ranker?: LyricsRankerStageMetrics }> {
+  if (items.length < 2) return { items };
+  try {
+    const result = await rankLyricCandidates(
+      cfg,
+      { system, prompt, candidates: items.map((it) => it.text) },
+      { signal },
+    );
+    // Duplicate candidate texts are matched in order via per-text queues,
+    // so a repeated suggestion doesn't get assigned to the wrong item.
+    const queues = new Map<string, T[]>();
+    for (const item of items) {
+      const queue = queues.get(item.text) ?? [];
+      queue.push(item);
+      queues.set(item.text, queue);
+    }
+    const reordered: T[] = [];
+    for (const text of result.ranked) {
+      const queue = queues.get(text);
+      const next = queue?.shift();
+      if (next) reordered.push(next);
+    }
+    for (const queue of queues.values()) reordered.push(...queue);
+    return {
+      items: reordered,
+      ranker: {
+        durationMs: result.durationMs,
+        usage: result.usage,
+        cost: result.cost,
+        model: result.servedModel,
+      },
+    };
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    if (shouldLogAI()) {
+      logAI("rankByDecisions", {
+        model: cfg.model,
+        text: `ranking failed, using unranked order: ${err instanceof Error ? err.message : String(err)}`,
+        durationMs: 0,
+      });
+    }
+    return { items };
+  }
+}
+
 // R1 capped next_word answers at 60 tokens. Structured JSON for 4 short
 // options needs a small envelope on top of those words; this stays a tight
 // cap, not an open-ended completion.
@@ -256,6 +453,17 @@ async function generateObjectLenient<S extends z.ZodTypeAny>({
 }
 
 export async function testAIConnection(cfg: AIConfig): Promise<void> {
+  if (cfg.provider === "openrouter" && (await isLyricsModelDecisions(cfg))) {
+    const t0 = Date.now();
+    const response = await pingDecisionsModel(cfg);
+    logAI("testAIConnection", {
+      model: cfg.model || cfg.provider,
+      prompt: "decisions ping (noul question)",
+      servedBy: response.model,
+      durationMs: Date.now() - t0,
+    });
+    return;
+  }
   const provider = buildProvider(cfg);
   const t0 = Date.now();
   await generateText({
@@ -300,7 +508,9 @@ export async function generateTabStructure(
   cfg: AIConfig,
   input: TabGenerationInput,
 ): Promise<GeneratedParts> {
-  const provider = buildProvider(cfg);
+  // Decisions models can't write text — fall back to the generator model.
+  const effectiveCfg = await ensureTextCapableConfig(cfg);
+  const provider = buildProvider(effectiveCfg);
 
   const instList = input.instruments.join(", ");
   const styleClause = input.styleNote ? `\nStyle/feel: ${input.styleNote}` : "";
@@ -331,7 +541,7 @@ Return exactly ${input.instruments.length} part(s), one per requested instrument
     prompt,
   });
   logAI("generateTabStructure", {
-    model: cfg.model || cfg.provider,
+    model: effectiveCfg.model || effectiveCfg.provider,
     prompt,
     usage: result.usage,
     finishReason: result.finishReason,
@@ -348,7 +558,9 @@ export async function chatWithTabAgent(
   system: string,
   messages: { role: "user" | "assistant"; content: string }[],
 ): Promise<string> {
-  const provider = buildProvider(cfg);
+  // Decisions models can't write text — fall back to the generator model.
+  const effectiveCfg = await ensureTextCapableConfig(cfg);
+  const provider = buildProvider(effectiveCfg);
   const t0 = Date.now();
   const result = await generateText({
     model: provider,
@@ -357,7 +569,7 @@ export async function chatWithTabAgent(
     maxOutputTokens: 400,
     onFinish({ text, usage, finishReason, response }) {
       logAI("chatWithTabAgent", {
-        model: cfg.model || cfg.provider,
+        model: effectiveCfg.model || effectiveCfg.provider,
         system,
         messages,
         usage,
@@ -378,8 +590,121 @@ export async function chatWithTabAgent(
 // pass a callback see no behavior change.
 export interface LyricsCallMetrics {
   ttftMs: number | null; // time to first stream chunk; null if none arrived
-  totalMs: number;
+  totalMs: number; // end-to-end total, including the ranker stage if any
+  usage?: LanguageModelUsage; // end-to-end total, summed across stages
+  // Present only on the OpenRouter decisions "generate, then decide" path.
+  generator?: LyricsGeneratorStageMetrics;
+  ranker?: LyricsRankerStageMetrics;
+}
+
+interface CandidateResult {
+  text: string;
   usage?: LanguageModelUsage;
+}
+
+async function generateOneLyricCandidate(
+  generatorCfg: AIConfig,
+  system: string,
+  prompt: string,
+  signal: AbortSignal | undefined,
+): Promise<CandidateResult> {
+  const provider = buildProvider(generatorCfg);
+  const result = await generateText({
+    model: provider,
+    system,
+    prompt,
+    maxOutputTokens: 80,
+    maxRetries: 0,
+    abortSignal: signal,
+  });
+  return { text: result.text.trim(), usage: result.usage };
+}
+
+// Decisions variant of streamLyricsSuggestion: generates
+// `lyricsCandidateCount` candidates in parallel with the generator model,
+// has the decisions model rank them, and yields only the winner once (no
+// incremental tokens — the ranking step needs the full candidate text).
+async function* streamLyricsSuggestionViaDecisions(
+  cfg: AIConfig,
+  system: string,
+  prompt: string,
+  signal: AbortSignal | undefined,
+  onMetrics: ((metrics: LyricsCallMetrics) => void) | undefined,
+): AsyncGenerator<string> {
+  const generatorCfg = buildGeneratorConfig(cfg);
+  const count = clampCandidateCount(cfg.lyricsCandidateCount);
+  const t0 = Date.now();
+
+  const settled = await Promise.allSettled(
+    Array.from({ length: count }, () =>
+      generateOneLyricCandidate(generatorCfg, system, prompt, signal),
+    ),
+  );
+  const fulfilled = settled.filter(
+    (r): r is PromiseFulfilledResult<CandidateResult> =>
+      r.status === "fulfilled",
+  );
+  if (fulfilled.length === 0) {
+    const firstRejected = settled.find(
+      (r): r is PromiseRejectedResult => r.status === "rejected",
+    );
+    throw firstRejected
+      ? firstRejected.reason
+      : new Error("All candidate generations failed");
+  }
+
+  const generatorMs = Date.now() - t0;
+  const genUsage = fulfilled.reduce(
+    (acc, r) => addUsage(acc, r.value.usage),
+    emptyUsage(),
+  );
+  if (shouldLogAI()) {
+    logAI("streamLyricsSuggestion (generator stage)", {
+      model: generatorCfg.model,
+      system,
+      prompt,
+      usage: genUsage,
+      durationMs: generatorMs,
+    });
+  }
+
+  const candidates = fulfilled
+    .map((r) => r.value.text)
+    .filter((t) => t.length > 0);
+  if (candidates.length === 0) {
+    onMetrics?.({ ttftMs: null, totalMs: Date.now() - t0, usage: genUsage });
+    return;
+  }
+
+  const { items: ranked, ranker } = await rankByDecisions(
+    cfg,
+    system,
+    prompt,
+    candidates.map((text) => ({ text })),
+    signal,
+  );
+  yield ranked[0]?.text ?? candidates[0];
+
+  if (onMetrics) {
+    const totalMs = Date.now() - t0;
+    const usage = ranker
+      ? addUsage(genUsage, decisionsUsageAsLanguageModelUsage(ranker.usage))
+      : genUsage;
+    // One emission once ranking completes — no earlier partial token to
+    // time, so ttftMs and totalMs are the same here.
+    onMetrics({
+      ttftMs: totalMs,
+      totalMs,
+      usage,
+      generator: {
+        durationMs: generatorMs,
+        usage: genUsage,
+        model: generatorCfg.model,
+        count,
+      },
+      ranker,
+    });
+  }
 }
 
 export async function* streamLyricsSuggestion(
@@ -389,6 +714,16 @@ export async function* streamLyricsSuggestion(
   signal?: AbortSignal,
   onMetrics?: (metrics: LyricsCallMetrics) => void,
 ): AsyncGenerator<string> {
+  if (cfg.provider === "openrouter" && (await isLyricsModelDecisions(cfg))) {
+    yield* streamLyricsSuggestionViaDecisions(
+      cfg,
+      system,
+      prompt,
+      signal,
+      onMetrics,
+    );
+    return;
+  }
   const provider = buildProvider(cfg);
   const t0 = Date.now();
   let ttftMs: number | null = null;
@@ -434,6 +769,63 @@ export const nextWordOptionsSchema = z.object({
   ),
 });
 
+async function generateNextWordOptionsViaDecisions(
+  cfg: AIConfig,
+  system: string,
+  prompt: string,
+  signal: AbortSignal | undefined,
+  onMetrics: ((metrics: LyricsCallMetrics) => void) | undefined,
+): Promise<z.infer<typeof nextWordOptionsSchema>> {
+  const generatorCfg = buildGeneratorConfig(cfg);
+  const t0 = Date.now();
+  const provider = buildProvider(generatorCfg);
+  const result = await generateObjectLenient({
+    provider,
+    schema: nextWordOptionsSchema,
+    system,
+    prompt,
+    maxOutputTokens: 60,
+    maxRetries: 0,
+    signal,
+  });
+  const generatorMs = Date.now() - t0;
+  logAI("generateNextWordOptions (generator stage)", {
+    model: generatorCfg.model,
+    system,
+    prompt,
+    usage: result.usage,
+    finishReason: result.finishReason,
+    servedBy: result.response?.modelId,
+    text: JSON.stringify(result.object),
+    durationMs: generatorMs,
+  });
+
+  const { items: ranked, ranker } = await rankByDecisions(
+    cfg,
+    system,
+    prompt,
+    result.object.options,
+    signal,
+  );
+
+  const totalMs = Date.now() - t0;
+  const usage = ranker
+    ? addUsage(result.usage, decisionsUsageAsLanguageModelUsage(ranker.usage))
+    : result.usage;
+  onMetrics?.({
+    ttftMs: totalMs,
+    totalMs,
+    usage,
+    generator: {
+      durationMs: generatorMs,
+      usage: result.usage,
+      model: generatorCfg.model,
+    },
+    ranker,
+  });
+  return { options: ranked };
+}
+
 export async function generateNextWordOptions(
   cfg: AIConfig,
   system: string,
@@ -441,6 +833,15 @@ export async function generateNextWordOptions(
   signal?: AbortSignal,
   onMetrics?: (metrics: LyricsCallMetrics) => void,
 ): Promise<z.infer<typeof nextWordOptionsSchema>> {
+  if (cfg.provider === "openrouter" && (await isLyricsModelDecisions(cfg))) {
+    return generateNextWordOptionsViaDecisions(
+      cfg,
+      system,
+      prompt,
+      signal,
+      onMetrics,
+    );
+  }
   const provider = buildProvider(cfg);
   const t0 = Date.now();
   const result = await generateObjectLenient({
@@ -479,12 +880,55 @@ export const popupSuggestionsSchema = z.object({
 
 export type PopupSuggestions = z.infer<typeof popupSuggestionsSchema>;
 
+async function generatePopupSuggestionsViaDecisions(
+  cfg: AIConfig,
+  system: string,
+  prompt: string,
+  signal: AbortSignal | undefined,
+): Promise<PopupSuggestions> {
+  const generatorCfg = buildGeneratorConfig(cfg);
+  const t0 = Date.now();
+  const provider = buildProvider(generatorCfg);
+  const result = await generateObjectLenient({
+    provider,
+    schema: popupSuggestionsSchema,
+    system,
+    prompt,
+    maxOutputTokens: 300,
+    maxRetries: 1,
+    signal,
+  });
+  logAI("generatePopupSuggestions (generator stage)", {
+    model: generatorCfg.model,
+    system,
+    prompt,
+    usage: result.usage,
+    finishReason: result.finishReason,
+    servedBy: result.response?.modelId,
+    text: JSON.stringify(result.object),
+    durationMs: Date.now() - t0,
+  });
+
+  // Rank within the list — the popup shows every suggestion, best first.
+  const { items: ranked } = await rankByDecisions(
+    cfg,
+    system,
+    prompt,
+    result.object.suggestions,
+    signal,
+  );
+  return { suggestions: ranked };
+}
+
 export async function generatePopupSuggestions(
   cfg: AIConfig,
   system: string,
   prompt: string,
   signal?: AbortSignal,
 ): Promise<PopupSuggestions> {
+  if (cfg.provider === "openrouter" && (await isLyricsModelDecisions(cfg))) {
+    return generatePopupSuggestionsViaDecisions(cfg, system, prompt, signal);
+  }
   const provider = buildProvider(cfg);
   const t0 = Date.now();
   const result = await generateObjectLenient({
@@ -515,7 +959,9 @@ export async function generateStyleSummary(
   signal?: AbortSignal,
 ): Promise<string> {
   if (recentAccepted.length === 0) return "";
-  const provider = buildProvider(cfg);
+  // Decisions models can't write text — fall back to the generator model.
+  const effectiveCfg = await ensureTextCapableConfig(cfg);
+  const provider = buildProvider(effectiveCfg);
   const t0 = Date.now();
   const result = await generateText({
     model: provider,
@@ -525,7 +971,7 @@ export async function generateStyleSummary(
     abortSignal: signal,
     onFinish({ text, usage, finishReason, response }) {
       logAI("generateStyleSummary", {
-        model: cfg.model || cfg.provider,
+        model: effectiveCfg.model || effectiveCfg.provider,
         prompt: `${recentAccepted.length} lyric lines`,
         usage,
         finishReason,
