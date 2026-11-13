@@ -253,6 +253,7 @@ export async function* streamLyricsSuggestion(
   cfg: AIConfig,
   system: string,
   prompt: string,
+  signal?: AbortSignal,
 ): AsyncGenerator<string> {
   const provider = buildProvider(cfg);
   const t0 = Date.now();
@@ -262,6 +263,8 @@ export async function* streamLyricsSuggestion(
     system,
     prompt,
     maxOutputTokens: 80,
+    maxRetries: 0,
+    abortSignal: signal,
     onFinish({ text, usage, finishReason, response }) {
       logAI("streamLyricsSuggestion", {
         model: cfg.model || cfg.provider,
@@ -293,6 +296,7 @@ export async function generateNextWordOptions(
   cfg: AIConfig,
   system: string,
   prompt: string,
+  signal?: AbortSignal,
 ): Promise<z.infer<typeof nextWordOptionsSchema>> {
   const provider = buildProvider(cfg);
   const t0 = Date.now();
@@ -301,6 +305,9 @@ export async function generateNextWordOptions(
     schema: nextWordOptionsSchema,
     system,
     prompt,
+    maxOutputTokens: 60,
+    maxRetries: 0,
+    abortSignal: signal,
   });
   logAI("generateNextWordOptions", {
     model: cfg.model || cfg.provider,
@@ -330,6 +337,7 @@ export async function generatePopupSuggestions(
   cfg: AIConfig,
   system: string,
   prompt: string,
+  signal?: AbortSignal,
 ): Promise<PopupSuggestions> {
   const provider = buildProvider(cfg);
   const t0 = Date.now();
@@ -338,6 +346,9 @@ export async function generatePopupSuggestions(
     schema: popupSuggestionsSchema,
     system,
     prompt,
+    maxOutputTokens: 300,
+    maxRetries: 1,
+    abortSignal: signal,
   });
   logAI("generatePopupSuggestions", {
     model: cfg.model || cfg.provider,
@@ -355,6 +366,7 @@ export async function generatePopupSuggestions(
 export async function generateStyleSummary(
   cfg: AIConfig,
   recentAccepted: string[],
+  signal?: AbortSignal,
 ): Promise<string> {
   if (recentAccepted.length === 0) return "";
   const provider = buildProvider(cfg);
@@ -363,6 +375,8 @@ export async function generateStyleSummary(
     model: provider,
     prompt: `Analyse the following song lyric lines written by a musician. Write a 1-2 sentence description of their lyric writing style — focus on rhyme scheme, line length, imagery, tone, and vocabulary register. Be concise and specific.\n\nLines:\n${recentAccepted.map((t, i) => `${i + 1}. ${t}`).join("\n")}\n\nDescription:`,
     maxOutputTokens: 60,
+    maxRetries: 1,
+    abortSignal: signal,
     onFinish({ text, usage, finishReason, response }) {
       logAI("generateStyleSummary", {
         model: cfg.model || cfg.provider,
