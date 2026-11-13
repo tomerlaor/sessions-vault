@@ -19,6 +19,7 @@ import {
   type NextWordOption,
 } from "../../src/lib/lyrics-ai";
 import type { AIConfig } from "../../src/types";
+import { rawTextFromObjectError } from "../../src/lib/parse-ai-json";
 import {
   checkCliche,
   checkFormat,
@@ -274,7 +275,10 @@ export async function runTrial(
       },
     };
   } catch (e) {
-    return errorTrial(e instanceof Error ? e.message : String(e));
+    const trial = errorTrial(e instanceof Error ? e.message : String(e));
+    const raw = rawTextFromObjectError(e);
+    if (raw) trial.rawOutput = raw;
+    return trial;
   }
 }
 

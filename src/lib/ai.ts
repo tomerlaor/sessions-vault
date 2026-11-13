@@ -15,6 +15,11 @@ import {
   rankLyricCandidates,
   pingDecisionsModel,
 } from "./openrouter-decisions";
+import {
+  extractJsonText,
+  rawTextFromObjectError,
+  repairAiJsonText,
+} from "./parse-ai-json";
 
 const DEFAULT_MODELS: Record<string, string> = {
   openai: "gpt-4.1-mini",
@@ -47,9 +52,19 @@ export const ANTHROPIC_MODELS = [
   "claude-opus-4-7",
 ];
 
+// Vite inlines import.meta.env at build time (DEV is boolean false in
+// production). Under the Node CLI (tsx / `npm run ai`) it is undefined, so
+// every default argument must tolerate a missing env object.
+export function resolveAiLogEnv(
+  env?: { DEV?: boolean },
+  metaEnv?: { DEV?: boolean },
+): { DEV?: boolean } {
+  return env ?? metaEnv ?? {};
+}
+
 // Release builds must never print prompts or responses to the console.
-export function shouldLogAI(env: { DEV?: boolean } = import.meta.env): boolean {
-  return !!env.DEV;
+export function shouldLogAI(env?: { DEV?: boolean }): boolean {
+  return !!resolveAiLogEnv(env, import.meta.env).DEV;
 }
 
 export function logAI(
@@ -77,7 +92,7 @@ export function logAI(
     // such as typesafe/jev-router this may differ from `model`, or just echo it.
     servedBy?: string;
   },
-  env: { DEV?: boolean } = import.meta.env,
+  env?: { DEV?: boolean },
 ) {
   if (!shouldLogAI(env)) return;
   const clip = (s: string, n = 200) => (s.length > n ? s.slice(0, n) + "…" : s);
@@ -340,6 +355,103 @@ async function rankByDecisions<T extends { text: string }>(
   }
 }
 
+// R1 capped next_word answers at 60 tokens. Structured JSON for 4 short
+// options needs a small envelope on top of those words; this stays a tight
+// cap, not an open-ended completion.
+export const NEXT_WORD_MAX_OUTPUT_TOKENS = 120;
+
+const JSON_ONLY_INSTRUCTION =
+  "Return only a single JSON object that matches the required schema. No markdown fences and no commentary.";
+
+async function generateObjectLenient<S extends z.ZodTypeAny>({
+  provider,
+  schema,
+  system,
+  prompt,
+  maxOutputTokens,
+  maxRetries,
+  signal,
+}: {
+  provider: ReturnType<typeof buildProvider>;
+  schema: S;
+  system?: string;
+  prompt: string;
+  maxOutputTokens?: number;
+  maxRetries?: number;
+  signal?: AbortSignal;
+}): Promise<{
+  object: z.infer<S>;
+  usage?: LanguageModelUsage;
+  finishReason?: string;
+  response?: { modelId?: string };
+}> {
+  const parseFromText = (text: string): z.infer<S> | null => {
+    const extracted = extractJsonText(text);
+    if (!extracted) return null;
+    const parsed = schema.safeParse(JSON.parse(extracted));
+    return parsed.success ? parsed.data : null;
+  };
+
+  try {
+    const result = await generateObject({
+      model: provider,
+      schema,
+      system,
+      prompt,
+      maxOutputTokens,
+      maxRetries,
+      abortSignal: signal,
+      experimental_repairText: repairAiJsonText,
+    });
+    return {
+      object: result.object,
+      usage: result.usage,
+      finishReason: result.finishReason,
+      response: result.response,
+    };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+
+    const raw = rawTextFromObjectError(error);
+    const recovered = raw ? parseFromText(raw) : null;
+    if (recovered) {
+      return { object: recovered };
+    }
+
+    const fallback = await generateText({
+      model: provider,
+      system: [system, JSON_ONLY_INSTRUCTION].filter(Boolean).join("\n\n"),
+      prompt,
+      maxOutputTokens,
+      maxRetries: 0,
+      abortSignal: signal,
+    });
+    const fromText = parseFromText(fallback.text);
+    if (fromText) {
+      return {
+        object: fromText,
+        usage: fallback.usage,
+        finishReason: fallback.finishReason,
+        response: fallback.response,
+      };
+    }
+
+    const rawCombined = (fallback.text || raw).trim();
+    const snippet = rawCombined.slice(0, 500);
+    const base =
+      error instanceof Error
+        ? error.message
+        : "No object generated: could not parse the response.";
+    const err = new Error(
+      snippet ? `${base} Raw text: ${snippet}` : base,
+    ) as Error & {
+      text?: string;
+    };
+    if (rawCombined) err.text = rawCombined;
+    throw err;
+  }
+}
+
 export async function testAIConnection(cfg: AIConfig): Promise<void> {
   if (cfg.provider === "openrouter" && (await isLyricsModelDecisions(cfg))) {
     const t0 = Date.now();
@@ -423,8 +535,8 @@ Name each part as "<SectionName> <Instrument>" (e.g. "Verse Guitar").
 Return exactly ${input.instruments.length} part(s), one per requested instrument.`;
 
   const t0 = Date.now();
-  const result = await generateObject({
-    model: provider,
+  const result = await generateObjectLenient({
+    provider,
     schema: tabPartsSchema,
     prompt,
   });
@@ -667,14 +779,14 @@ async function generateNextWordOptionsViaDecisions(
   const generatorCfg = buildGeneratorConfig(cfg);
   const t0 = Date.now();
   const provider = buildProvider(generatorCfg);
-  const result = await generateObject({
-    model: provider,
+  const result = await generateObjectLenient({
+    provider,
     schema: nextWordOptionsSchema,
     system,
     prompt,
     maxOutputTokens: 60,
     maxRetries: 0,
-    abortSignal: signal,
+    signal,
   });
   const generatorMs = Date.now() - t0;
   logAI("generateNextWordOptions (generator stage)", {
@@ -732,14 +844,14 @@ export async function generateNextWordOptions(
   }
   const provider = buildProvider(cfg);
   const t0 = Date.now();
-  const result = await generateObject({
-    model: provider,
+  const result = await generateObjectLenient({
+    provider,
     schema: nextWordOptionsSchema,
     system,
     prompt,
-    maxOutputTokens: 60,
+    maxOutputTokens: NEXT_WORD_MAX_OUTPUT_TOKENS,
     maxRetries: 0,
-    abortSignal: signal,
+    signal,
   });
   const durationMs = Date.now() - t0;
   logAI("generateNextWordOptions", {
@@ -777,14 +889,14 @@ async function generatePopupSuggestionsViaDecisions(
   const generatorCfg = buildGeneratorConfig(cfg);
   const t0 = Date.now();
   const provider = buildProvider(generatorCfg);
-  const result = await generateObject({
-    model: provider,
+  const result = await generateObjectLenient({
+    provider,
     schema: popupSuggestionsSchema,
     system,
     prompt,
     maxOutputTokens: 300,
     maxRetries: 1,
-    abortSignal: signal,
+    signal,
   });
   logAI("generatePopupSuggestions (generator stage)", {
     model: generatorCfg.model,
@@ -819,14 +931,14 @@ export async function generatePopupSuggestions(
   }
   const provider = buildProvider(cfg);
   const t0 = Date.now();
-  const result = await generateObject({
-    model: provider,
+  const result = await generateObjectLenient({
+    provider,
     schema: popupSuggestionsSchema,
     system,
     prompt,
     maxOutputTokens: 300,
     maxRetries: 1,
-    abortSignal: signal,
+    signal,
   });
   logAI("generatePopupSuggestions", {
     model: cfg.model || cfg.provider,

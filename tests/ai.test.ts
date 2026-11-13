@@ -48,6 +48,8 @@ import {
   testAIConnection,
   shouldLogAI,
   logAI,
+  resolveAiLogEnv,
+  NEXT_WORD_MAX_OUTPUT_TOKENS,
 } from "../src/lib/ai";
 import type { AIConfig } from "../src/types";
 
@@ -81,9 +83,10 @@ describe("lyrics AI call sites in ai.ts", () => {
     await generateNextWordOptions(cfg, "sys", "prompt", controller.signal);
     expect(generateObjectMock).toHaveBeenCalledTimes(1);
     const opts = generateObjectMock.mock.calls[0][0];
-    expect(opts.maxOutputTokens).toBe(60);
+    expect(opts.maxOutputTokens).toBe(NEXT_WORD_MAX_OUTPUT_TOKENS);
     expect(opts.maxRetries).toBe(0);
     expect(opts.abortSignal).toBe(controller.signal);
+    expect(typeof opts.experimental_repairText).toBe("function");
   });
 
   it("generateNextWordOptions reports usage and timing via the optional onMetrics callback", async () => {
@@ -115,6 +118,77 @@ describe("lyrics AI call sites in ai.ts", () => {
     );
   });
 
+  it("recovers next_word options from fenced JSON on a generateObject parse error, without a second call", async () => {
+    const object = {
+      options: [
+        { text: "shadow", kind: "continuation" },
+        { text: "smoke", kind: "rhyme" },
+        { text: "silence", kind: "continuation" },
+      ],
+    };
+    const fenced = "```json\n" + JSON.stringify(object) + "\n```";
+    const err = Object.assign(
+      new Error("No object generated: could not parse the response."),
+      { text: fenced },
+    );
+    generateObjectMock.mockRejectedValueOnce(err);
+
+    const result = await generateNextWordOptions(cfg, "sys", "prompt");
+    expect(result).toEqual(object);
+    expect(generateTextMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to generateText and lenient JSON extraction when generateObject has no recoverable text", async () => {
+    const object = {
+      options: [
+        { text: "shadow", kind: "continuation" },
+        { text: "smoke", kind: "rhyme" },
+        { text: "silence", kind: "continuation" },
+      ],
+    };
+    generateObjectMock.mockRejectedValueOnce(
+      new Error("No object generated: could not parse the response."),
+    );
+    generateTextMock.mockResolvedValueOnce({
+      text: "Here is the JSON:\n```json\n" + JSON.stringify(object) + "\n```",
+      usage: { inputTokens: 10, outputTokens: 20 },
+      finishReason: "stop",
+      response: { modelId: "mock" },
+    });
+
+    const result = await generateNextWordOptions(cfg, "sys", "prompt");
+    expect(result).toEqual(object);
+    expect(generateTextMock).toHaveBeenCalledTimes(1);
+    const opts = generateTextMock.mock.calls[0][0];
+    expect(opts.maxOutputTokens).toBe(NEXT_WORD_MAX_OUTPUT_TOKENS);
+    expect(opts.maxRetries).toBe(0);
+    expect(opts.system).toContain("Return only a single JSON object");
+  });
+
+  it("includes the raw model text when structured output cannot be parsed", async () => {
+    generateObjectMock.mockRejectedValueOnce(
+      new Error("No object generated: could not parse the response."),
+    );
+    generateTextMock.mockResolvedValueOnce({
+      text: "I am just going to talk about lyrics instead.",
+      usage: {},
+      finishReason: "stop",
+      response: { modelId: "mock" },
+    });
+
+    const err = await generateNextWordOptions(cfg, "sys", "prompt").then(
+      () => {
+        throw new Error("expected generateNextWordOptions to reject");
+      },
+      (e: unknown) => e as Error & { text?: string },
+    );
+    expect(err.message).toContain("could not parse the response");
+    expect(err.message).toContain(
+      "I am just going to talk about lyrics instead.",
+    );
+    expect(err.text).toBe("I am just going to talk about lyrics instead.");
+  });
+
   it("generatePopupSuggestions passes maxOutputTokens: 300, maxRetries: 1, and the abort signal", async () => {
     const controller = new AbortController();
     await generatePopupSuggestions(cfg, "sys", "prompt", controller.signal);
@@ -142,21 +216,52 @@ describe("shouldLogAI", () => {
     expect(shouldLogAI({ DEV: false })).toBe(false);
     expect(shouldLogAI({})).toBe(false);
   });
+
+  it("does not throw when the env object is missing (Node CLI / import.meta.env is undefined)", () => {
+    expect(() => shouldLogAI(undefined)).not.toThrow();
+    // Simulate the CLI: import.meta.env itself is undefined, so DEV must be false.
+    expect(resolveAiLogEnv(undefined, undefined)).toEqual({});
+    expect(!!resolveAiLogEnv(undefined, undefined).DEV).toBe(false);
+    // An explicit { DEV: false } wins over a DEV=true fallback (production).
+    expect(resolveAiLogEnv({ DEV: false }, { DEV: true })).toEqual({
+      DEV: false,
+    });
+  });
 });
 
 describe("logAI gating", () => {
+  it("does not throw when the env object is missing", () => {
+    const groupSpy = vi.spyOn(console, "group").mockImplementation(() => {});
+    const groupEndSpy = vi
+      .spyOn(console, "groupEnd")
+      .mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(() =>
+        logAI("testFn", { model: "gpt-4.1-mini", durationMs: 1 }, undefined),
+      ).not.toThrow();
+    } finally {
+      groupSpy.mockRestore();
+      groupEndSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  });
+
   it("is a no-op and never touches the console when DEV is false", () => {
     const groupSpy = vi.spyOn(console, "group").mockImplementation(() => {});
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    logAI(
-      "testFn",
-      { model: "gpt-4.1-mini", prompt: "secret prompt", durationMs: 1 },
-      { DEV: false },
-    );
-    expect(groupSpy).not.toHaveBeenCalled();
-    expect(logSpy).not.toHaveBeenCalled();
-    groupSpy.mockRestore();
-    logSpy.mockRestore();
+    try {
+      logAI(
+        "testFn",
+        { model: "gpt-4.1-mini", prompt: "secret prompt", durationMs: 1 },
+        { DEV: false },
+      );
+      expect(groupSpy).not.toHaveBeenCalled();
+      expect(logSpy).not.toHaveBeenCalled();
+    } finally {
+      groupSpy.mockRestore();
+      logSpy.mockRestore();
+    }
   });
 
   it("logs to the console when DEV is true", () => {
