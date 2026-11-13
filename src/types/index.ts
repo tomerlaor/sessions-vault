@@ -37,6 +37,8 @@ export interface AIConfig {
   // Optional per-feature overrides; fall back to `model` when empty.
   lyricsModel?: string;
   tabAgentModel?: string;
+  // OpenRouter only. Missing/undefined means true (deny data collection/training).
+  openRouterDenyDataCollection?: boolean;
 }
 
 export interface TabPart {
@@ -66,6 +68,7 @@ export interface Project {
   todos: string | null;
   tabs: string | null;
   lyricsContext: string | null;
+  aiOptOut: boolean;
   durationSecs: number | null;
   createdAt: number;
   modifiedAt: number;
@@ -157,6 +160,9 @@ export interface LyricsAIConfig {
   mode: LyricDisplayMode;
   enabledModes: LyricSuggestionMode[];
   feedbackMode: LyricFeedbackMode;
+  // Unix ms when the user consented to sending lyrics to a cloud provider.
+  // Missing for local providers (no consent needed) or if never granted.
+  cloudConsentAt?: number;
 }
 
 export type ProjectFileKind = "mix_project" | "master_project" | "export";

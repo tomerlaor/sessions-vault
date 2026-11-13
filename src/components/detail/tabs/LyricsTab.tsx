@@ -13,7 +13,11 @@ import {
   type SaveState,
 } from "../../../lib/project-tabs";
 import { parseLyricsStructure } from "../../../lib/lyrics-structure";
-import type { Project, LyricSuggestionMode } from "../../../types";
+import { getAIConfigWithoutKey } from "../../../db/queries/ai";
+import { clearStyleMemory } from "../../../db/queries/lyrics-ai";
+import { resolveFeatureConfig } from "../../../lib/ai";
+import { aiBadgeLabel } from "../../../lib/lyrics-privacy";
+import type { Project, AIConfig, LyricSuggestionMode } from "../../../types";
 import LyricsAiOverlay, { type LyricsAiOverlayHandle } from "./LyricsAiOverlay";
 
 interface Props {
@@ -183,12 +187,36 @@ function LyricsTab(
   const [selectionEnd, setSelectionEnd] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [contextDraft, setContextDraft] = useState(p.lyricsContext ?? "");
+  const [aiConfig, setAiConfig] = useState<AIConfig | null>(null);
 
   // Follow the project when switching songs.
   useEffect(
     () => setContextDraft(p.lyricsContext ?? ""),
     [p.id, p.lyricsContext],
   );
+
+  // Badge only — never reads the keychain, so it can never prompt for a
+  // password just from opening a project.
+  useEffect(() => {
+    const load = () => getAIConfigWithoutKey().then(setAiConfig);
+    load();
+    window.addEventListener("lyrics-ai-config-changed", load);
+    return () => window.removeEventListener("lyrics-ai-config-changed", load);
+  }, []);
+
+  const aiBadge = aiBadgeLabel(
+    aiConfig ? resolveFeatureConfig(aiConfig, "lyrics") : null,
+  );
+
+  const handleClearSongMemory = () => {
+    clearStyleMemory(p.id).then(() => {
+      window.dispatchEvent(
+        new CustomEvent("lyrics-style-memory-cleared", {
+          detail: { projectId: p.id },
+        }),
+      );
+    });
+  };
 
   const saveContext = () => {
     const next = contextDraft.trim();
@@ -326,6 +354,24 @@ function LyricsTab(
       <div className="lyrics-toolbar">
         {p.key && <button title="Key">{p.key}</button>}
         {p.bpm && <button title="BPM">{p.bpm} BPM</button>}
+        {aiBadge && (
+          <span
+            title={aiBadge}
+            style={{
+              fontSize: 10.5,
+              padding: "2px 7px",
+              borderRadius: 999,
+              border: "1px solid var(--line-2)",
+              color: "var(--text-3)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: 180,
+            }}
+          >
+            {aiBadge}
+          </span>
+        )}
         {editing && (
           <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
             {structure.length} section{structure.length === 1 ? "" : "s"} ·{" "}
@@ -345,6 +391,27 @@ function LyricsTab(
           </span>
         )}
         <div style={{ flex: 1 }} />
+        {editing && (
+          <button
+            title="Clear this song's style memory"
+            onClick={handleClearSongMemory}
+          >
+            Clear memory
+          </button>
+        )}
+        {editing && (
+          <button
+            title={
+              p.aiOptOut
+                ? "AI is off for this song — click to re-enable"
+                : "Don't send this song to AI"
+            }
+            onClick={() => onUpdate("aiOptOut", !p.aiOptOut)}
+            style={p.aiOptOut ? { color: "var(--accent)" } : undefined}
+          >
+            {p.aiOptOut ? "AI off" : "AI on"}
+          </button>
+        )}
         <button
           title={rtl ? "Switch to LTR" : "Switch to RTL"}
           onClick={() => setRtlOverride((r) => (r === null ? !autoRtl : !r))}

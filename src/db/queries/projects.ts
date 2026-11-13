@@ -101,6 +101,7 @@ const EDITABLE_FIELDS = new Set([
   "key",
   "lyrics",
   "lyricsContext",
+  "aiOptOut",
   "tabs",
   "todos",
   "rating",

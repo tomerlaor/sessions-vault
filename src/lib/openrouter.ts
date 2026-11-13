@@ -1,9 +1,39 @@
+import type { AIConfig } from "../types";
+
 export interface OpenRouterModel {
   id: string;
   name: string;
 }
 
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+
+// Missing/undefined means true (deny) — the safer default.
+export function openRouterDataCollection(cfg: AIConfig): "deny" | "allow" {
+  return cfg.openRouterDenyDataCollection === false ? "allow" : "deny";
+}
+
+// OpenRouter restricts routing to providers that don't collect/train on
+// prompts via a `provider.data_collection` field in the JSON request body
+// (see https://openrouter.ai/docs/guides/routing/provider-selection).
+// @ai-sdk/openai's providerOptions don't surface this OpenRouter-specific
+// field, so it's injected here via a custom fetch that rewrites the body.
+export function createOpenRouterFetch(
+  dataCollection: "deny" | "allow",
+  baseFetch: typeof fetch = fetch,
+): typeof fetch {
+  return async (input, init) => {
+    if (typeof init?.body === "string") {
+      try {
+        const body = JSON.parse(init.body);
+        body.provider = { ...body.provider, data_collection: dataCollection };
+        return baseFetch(input, { ...init, body: JSON.stringify(body) });
+      } catch {
+        // Not a JSON body — pass through unchanged.
+      }
+    }
+    return baseFetch(input, init);
+  };
+}
 
 export function parseOpenRouterModels(json: unknown): OpenRouterModel[] {
   const data = (json as { data?: unknown })?.data;

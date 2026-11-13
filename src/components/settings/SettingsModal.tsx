@@ -28,6 +28,11 @@ import {
   OPENAI_MODELS,
   ANTHROPIC_MODELS,
 } from "../../lib/ai";
+import {
+  needsCloudConsent,
+  pickLocalProvider,
+  switchToLocalAIConfig,
+} from "../../lib/lyrics-privacy";
 import type {
   LocalConfig,
   AIConfig,
@@ -35,6 +40,7 @@ import type {
   LyricsAIConfig,
 } from "../../types";
 import LyricsAiSettings from "./LyricsAiSettings";
+import LyricsCloudConsentModal from "../shared/LyricsCloudConsentModal";
 import Icon from "../shared/Icon";
 
 interface Props {
@@ -132,6 +138,8 @@ export default function SettingsModal({ onClose }: Props) {
     enabledModes: ["completion"],
     feedbackMode: "minimal",
   });
+  const [pendingLyricsCfg, setPendingLyricsCfg] =
+    useState<LyricsAIConfig | null>(null);
   const [aiTesting, setAiTesting] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<"ok" | "error" | null>(null);
@@ -222,13 +230,44 @@ export default function SettingsModal({ onClose }: Props) {
     setAiTestResult(null);
   }, [aiCfg.provider]);
 
-  const handleLyricsAIChange = useCallback(async (next: LyricsAIConfig) => {
+  const commitLyricsConfig = useCallback(async (next: LyricsAIConfig) => {
     setLyricsAICfgState(next);
     await setLyricsAIConfig(next);
     window.dispatchEvent(
       new CustomEvent("lyrics-ai-config-changed", { detail: next }),
     );
   }, []);
+
+  const handleLyricsAIChange = useCallback(
+    async (next: LyricsAIConfig) => {
+      if (
+        next.enabled &&
+        needsCloudConsent(aiCfg.provider, next.cloudConsentAt)
+      ) {
+        setPendingLyricsCfg(next);
+        return;
+      }
+      await commitLyricsConfig(next);
+    },
+    [aiCfg.provider, commitLyricsConfig],
+  );
+
+  const handleConsentUseCloud = useCallback(async () => {
+    if (!pendingLyricsCfg) return;
+    await commitLyricsConfig({
+      ...pendingLyricsCfg,
+      cloudConsentAt: Date.now(),
+    });
+    setPendingLyricsCfg(null);
+  }, [pendingLyricsCfg, commitLyricsConfig]);
+
+  const handleConsentSwitchToLocal = useCallback(async () => {
+    if (!pendingLyricsCfg) return;
+    const nextAiCfg = switchToLocalAIConfig(aiCfg);
+    await handleSaveAI(nextAiCfg);
+    await commitLyricsConfig(pendingLyricsCfg);
+    setPendingLyricsCfg(null);
+  }, [pendingLyricsCfg, aiCfg, handleSaveAI, commitLyricsConfig]);
 
   const handleClearGlobalMemory = useCallback(async () => {
     await clearStyleMemory(null);
@@ -776,6 +815,35 @@ export default function SettingsModal({ onClose }: Props) {
                     }
                     placeholder="Tab Agent model (default if empty)"
                   />
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      fontSize: 11,
+                      color: "var(--text-2)",
+                      cursor: "pointer",
+                      marginTop: 2,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={aiCfg.openRouterDenyDataCollection !== false}
+                      onChange={(e) =>
+                        handleSaveAI({
+                          ...aiCfg,
+                          openRouterDenyDataCollection: e.target.checked,
+                        })
+                      }
+                      style={{
+                        accentColor: "var(--accent)",
+                        width: 13,
+                        height: 13,
+                      }}
+                    />
+                    Don&apos;t route to providers that collect or train on
+                    prompts
+                  </label>
                 </>
               ) : (
                 <>
@@ -859,6 +927,15 @@ export default function SettingsModal({ onClose }: Props) {
           </section>
         </div>
       </div>
+
+      {pendingLyricsCfg && (
+        <LyricsCloudConsentModal
+          provider={aiCfg.provider}
+          localProvider={pickLocalProvider(aiCfg.provider)}
+          onUseCloud={handleConsentUseCloud}
+          onSwitchToLocal={handleConsentSwitchToLocal}
+        />
+      )}
     </div>
   );
 }

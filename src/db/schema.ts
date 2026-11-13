@@ -25,6 +25,7 @@ export const projects = sqliteTable("projects", {
   todos: text("todos"),
   tabs: text("tabs"),
   lyricsContext: text("lyrics_context"),
+  aiOptOut: integer("ai_opt_out", { mode: "boolean" }).notNull().default(false),
   durationSecs: real("duration_secs"),
   createdAt: integer("created_at").notNull(),
   modifiedAt: integer("modified_at").notNull(),

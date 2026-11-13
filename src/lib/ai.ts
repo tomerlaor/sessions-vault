@@ -4,7 +4,11 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import type { AIConfig, AIFeature, Instrument } from "../types";
-import { OPENROUTER_BASE_URL } from "./openrouter";
+import {
+  OPENROUTER_BASE_URL,
+  openRouterDataCollection,
+  createOpenRouterFetch,
+} from "./openrouter";
 
 const DEFAULT_MODELS: Record<string, string> = {
   openai: "gpt-4.1-mini",
@@ -37,7 +41,12 @@ export const ANTHROPIC_MODELS = [
   "claude-opus-4-7",
 ];
 
-function logAI(
+// Release builds must never print prompts or responses to the console.
+export function shouldLogAI(env: { DEV?: boolean } = import.meta.env): boolean {
+  return !!env.DEV;
+}
+
+export function logAI(
   fn: string,
   {
     model,
@@ -62,7 +71,9 @@ function logAI(
     // such as typesafe/jev-router this may differ from `model`, or just echo it.
     servedBy?: string;
   },
+  env: { DEV?: boolean } = import.meta.env,
 ) {
+  if (!shouldLogAI(env)) return;
   const clip = (s: string, n = 200) => (s.length > n ? s.slice(0, n) + "…" : s);
   console.group(`%c[AI] ${fn}`, "color:#ff7a45;font-weight:700");
   console.log("model      :", model);
@@ -115,6 +126,7 @@ function buildProvider(cfg: AIConfig) {
         headers: { "X-Title": "Sessions" },
         // OpenRouter's stable API is chat completions, not the Responses API
         // that createOpenAI(...)(model) targets by default.
+        fetch: createOpenRouterFetch(openRouterDataCollection(cfg)),
       }).chat(model);
 
     case "ollama":
