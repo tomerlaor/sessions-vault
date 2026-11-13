@@ -261,14 +261,25 @@ export async function chatWithTabAgent(
 
 // ── Lyrics AI ─────────────────────────────────────────────────────────────────
 
+// Timing/usage for a single model call, collected for the eval harness
+// (scripts/lyrics-eval). Optional and additive — existing callers that don't
+// pass a callback see no behavior change.
+export interface LyricsCallMetrics {
+  ttftMs: number | null; // time to first stream chunk; null if none arrived
+  totalMs: number;
+  usage?: LanguageModelUsage;
+}
+
 export async function* streamLyricsSuggestion(
   cfg: AIConfig,
   system: string,
   prompt: string,
   signal?: AbortSignal,
+  onMetrics?: (metrics: LyricsCallMetrics) => void,
 ): AsyncGenerator<string> {
   const provider = buildProvider(cfg);
   const t0 = Date.now();
+  let ttftMs: number | null = null;
   // streamText is intentionally not awaited — result.textStream is consumed lazily
   const result = streamText({
     model: provider,
@@ -291,7 +302,14 @@ export async function* streamLyricsSuggestion(
     },
   });
   for await (const chunk of result.textStream) {
+    if (ttftMs === null) ttftMs = Date.now() - t0;
     yield chunk;
+  }
+  // Await usage after the stream is fully consumed so the eval harness
+  // (and any other onMetrics caller) does not race onFinish.
+  if (onMetrics) {
+    const usage = await result.usage;
+    onMetrics({ ttftMs, totalMs: Date.now() - t0, usage });
   }
 }
 
@@ -309,6 +327,7 @@ export async function generateNextWordOptions(
   system: string,
   prompt: string,
   signal?: AbortSignal,
+  onMetrics?: (metrics: LyricsCallMetrics) => void,
 ): Promise<z.infer<typeof nextWordOptionsSchema>> {
   const provider = buildProvider(cfg);
   const t0 = Date.now();
@@ -321,6 +340,7 @@ export async function generateNextWordOptions(
     maxRetries: 0,
     abortSignal: signal,
   });
+  const durationMs = Date.now() - t0;
   logAI("generateNextWordOptions", {
     model: cfg.model || cfg.provider,
     system,
@@ -329,8 +349,10 @@ export async function generateNextWordOptions(
     finishReason: result.finishReason,
     servedBy: result.response?.modelId,
     text: JSON.stringify(result.object),
-    durationMs: Date.now() - t0,
+    durationMs,
   });
+  // generateObject resolves once, with no partial results — TTFT == total.
+  onMetrics?.({ ttftMs: durationMs, totalMs: durationMs, usage: result.usage });
   return result.object;
 }
 

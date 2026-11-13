@@ -1,0 +1,157 @@
+[
+  {
+    "id": "he-next-line-aabb",
+    "lang": "he",
+    "mode": "next_line",
+    "lyrics": "אני הולך ברחוב בלילה\nמחפש תשובה שקטה כמו תפילה\nמצאתי מעיל ישן ומפתח ישן",
+    "cursor": 71,
+    "expect": {
+      "rhymeWith": "ישן"
+    },
+    "bpm": 92
+  },
+  {
+    "id": "he-next-line-abab",
+    "lang": "he",
+    "mode": "next_line",
+    "lyrics": "כל ערב אני חוזר לבית הישן\nסופר כוכבים שכבר לא זוכרים\nמרגיש כמו מישהו שעדיין ישן",
+    "cursor": 79,
+    "expect": {
+      "rhymeWith": "זוכרים"
+    }
+  },
+  {
+    "id": "he-next-line-midverse",
+    "lang": "he",
+    "mode": "next_line",
+    "lyrics": "[בית 1]\nהיא משאירה אור קטן דלוק במסדרון\nמחכה למישהו שלא חוזר יותר\nהרדיו ממלמל שיר ישן מהעבר\nוהקפה עדיין חם אבל כבר לא עוזר",
+    "cursor": 122,
+    "expect": {},
+    "songContext": "שיר על אדם שממשיך להמתין למי שעזב ולא יחזור.",
+    "bpm": 70,
+    "key": "D minor"
+  },
+  {
+    "id": "he-next-line-chorus",
+    "lang": "he",
+    "mode": "next_line",
+    "lyrics": "[בית 1]\nאספתי את התיק לפני שהשמש עלתה\nהשארתי פתק שאמר שאחזור\n[פזמון]\nאנחנו האש שלא נכבית לעולם\nאנחנו ההד שממשיך אחרי הנפילה",
+    "cursor": 123,
+    "expect": {
+      "mustNotContain": ["פזמון", "[בית"]
+    },
+    "songContext": "שיר על עזיבת הבית ועל החלטה פנימית."
+  },
+  {
+    "id": "he-completion-midline",
+    "lang": "he",
+    "mode": "completion",
+    "lyrics": "אני הולך לבד ברחוב הריק\nחושב על כל הדברים שלא",
+    "cursor": 45,
+    "expect": {
+      "syllables": [8, 16]
+    },
+    "songContext": "שיר שקט ומלנכולי על דברים שלא נאמרו."
+  },
+  {
+    "id": "he-completion-short",
+    "lang": "he",
+    "mode": "completion",
+    "lyrics": "הלילה שקט ואני לבד בבית\nאני ",
+    "cursor": 28,
+    "expect": {
+      "syllables": [4, 10]
+    }
+  },
+  {
+    "id": "he-completion-long",
+    "lang": "he",
+    "mode": "completion",
+    "lyrics": "אורות העיר מרצדים כמו להבה גוועת\nכל פינה מחזיקה זיכרון שאיני יכול לשכוח\nועדיין אני מוצא את עצמי חוזר לאותו",
+    "cursor": 106,
+    "expect": {
+      "syllables": [14, 24]
+    }
+  },
+  {
+    "id": "he-completion-chorus-rhyme",
+    "lang": "he",
+    "mode": "completion",
+    "lyrics": "[פזמון]\nהיית האור היחיד בעיר שכבתה\nואני הייתי רק ילד רודף ניצוץ\nעכשיו הרחובות שקטים ואני נושא את הסימן\nשל כל",
+    "cursor": 108,
+    "expect": {
+      "rhymeWith": "הסימן"
+    }
+  },
+  {
+    "id": "he-next-word-1",
+    "lang": "he",
+    "mode": "next_word",
+    "lyrics": "הלכתי מכאן לפני שהתעוררת\nועכשיו אני טובע בתוך תחושה ",
+    "cursor": 52,
+    "expect": {}
+  },
+  {
+    "id": "he-next-word-2",
+    "lang": "he",
+    "mode": "next_word",
+    "lyrics": "הרדיו ממלמל שיר שקט ו",
+    "cursor": 21,
+    "expect": {}
+  },
+  {
+    "id": "he-next-word-3",
+    "lang": "he",
+    "mode": "next_word",
+    "lyrics": "היא לחשה בשקט, ואז היא ",
+    "cursor": 23,
+    "expect": {}
+  },
+  {
+    "id": "he-next-word-context",
+    "lang": "he",
+    "mode": "next_word",
+    "lyrics": "[בית]\nאני נושא את המשקל של אלף פרידות\nמוסתר בפינה של ",
+    "cursor": 53,
+    "expect": {
+      "rhymeWith": "פרידות"
+    },
+    "songContext": "שיר על נשיאת אובדן בשקט."
+  },
+  {
+    "id": "he-alternative-1",
+    "lang": "he",
+    "mode": "alternative",
+    "lyrics": "אני הולך לבד ברחוב הריק\nואני לא יודע לאן אני הולך עוד",
+    "cursor": 29,
+    "expect": {
+      "maxLines": 1
+    }
+  },
+  {
+    "id": "he-alternative-2",
+    "lang": "he",
+    "mode": "alternative",
+    "lyrics": "הלילה כבד ממה שלא נאמר\nאני משאיר את החלון פתוח ליתר ביטחון",
+    "cursor": 32,
+    "expect": {}
+  },
+  {
+    "id": "he-edge-empty",
+    "lang": "he",
+    "mode": "next_line",
+    "lyrics": "",
+    "cursor": 0,
+    "expect": {}
+  },
+  {
+    "id": "he-edge-chords-chorus",
+    "lang": "he",
+    "mode": "next_line",
+    "lyrics": "[בית]\nC G Am F\nAm F C G\n[פזמון]\nאנחנו קמים כשהבוקר מגיע\nאנחנו קמים כשהבוקר מגיע\n[פזמון]\nאנחנו קמים כשהבוקר מגיע\nאנחנו קמים כשהבוקר מגיע",
+    "cursor": 135,
+    "expect": {
+      "mustNotContain": ["פזמון", "[בית"]
+    }
+  }
+]
