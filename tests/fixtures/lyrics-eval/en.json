@@ -1,0 +1,162 @@
+[
+  {
+    "id": "en-next-line-aabb",
+    "lang": "en",
+    "mode": "next_line",
+    "lyrics": "I walked down a street in the rain\nTrying to shake off the pain\nI found an old coat by the door",
+    "cursor": 95,
+    "expect": {
+      "rhymeWith": "door"
+    },
+    "bpm": 96,
+    "key": "G major"
+  },
+  {
+    "id": "en-next-line-abab",
+    "lang": "en",
+    "mode": "next_line",
+    "lyrics": "Every evening I walk this road\nCounting stars that used to shine\nThinking back to what you told",
+    "cursor": 95,
+    "expect": {
+      "rhymeWith": "shine",
+      "syllables": [6, 12]
+    }
+  },
+  {
+    "id": "en-next-line-midverse",
+    "lang": "en",
+    "mode": "next_line",
+    "lyrics": "[Verse 1]\nShe keeps the porch light on for no one\nWaiting on a car that won't return\nThe radio hums some old forgotten tune\nAnd the coffee's always ready but it burns",
+    "cursor": 166,
+    "expect": {},
+    "songContext": "A song about someone waiting for a person who left and isn't coming back.",
+    "bpm": 72,
+    "key": "D minor"
+  },
+  {
+    "id": "en-next-line-chorus",
+    "lang": "en",
+    "mode": "next_line",
+    "lyrics": "[Verse 1]\nI packed my bags before the sun came up\nLeft a note that said I'd call\n[Chorus]\nWe are the fire that never burns out\nWe are the echo after the fall",
+    "cursor": 157,
+    "expect": {
+      "mustNotContain": ["chorus", "verse"]
+    },
+    "songContext": "A song about leaving home and holding onto resolve."
+  },
+  {
+    "id": "en-completion-midline",
+    "lang": "en",
+    "mode": "completion",
+    "lyrics": "I walk alone through the empty street\nThinking of all the things I could not",
+    "cursor": 76,
+    "expect": {
+      "syllables": [9, 15]
+    },
+    "songContext": "A quiet, melancholy song about things left unsaid."
+  },
+  {
+    "id": "en-completion-short",
+    "lang": "en",
+    "mode": "completion",
+    "lyrics": "Under the bridge where the shadows stay\nI ",
+    "cursor": 42,
+    "expect": {
+      "syllables": [6, 12]
+    },
+    "key": "A minor"
+  },
+  {
+    "id": "en-completion-long",
+    "lang": "en",
+    "mode": "completion",
+    "lyrics": "The city lights flicker like a dying flame\nEvery corner holds a memory I can't reclaim\nAnd still I find myself walking back to the same old",
+    "cursor": 139,
+    "expect": {
+      "syllables": [13, 18]
+    }
+  },
+  {
+    "id": "en-completion-chorus-rhyme",
+    "lang": "en",
+    "mode": "completion",
+    "lyrics": "[Chorus]\nYou were the only light in a town gone dark\nAnd I was just a boy chasing a spark\nNow the streets are quiet, and I carry the mark\nOf every",
+    "cursor": 146,
+    "expect": {
+      "rhymeWith": "mark"
+    }
+  },
+  {
+    "id": "en-next-word-rhyme",
+    "lang": "en",
+    "mode": "next_word",
+    "lyrics": "I walked away before you woke\nNow I'm drowning in the ",
+    "cursor": 54,
+    "expect": {
+      "rhymeWith": "woke"
+    }
+  },
+  {
+    "id": "en-next-word-skip",
+    "lang": "en",
+    "mode": "next_word",
+    "lyrics": "The engine hums a quiet ",
+    "cursor": 24,
+    "expect": {}
+  },
+  {
+    "id": "en-next-word-punct",
+    "lang": "en",
+    "mode": "next_word",
+    "lyrics": "She whispered softly, then she ",
+    "cursor": 31,
+    "expect": {}
+  },
+  {
+    "id": "en-next-word-context",
+    "lang": "en",
+    "mode": "next_word",
+    "lyrics": "[Verse]\nI carry the weight of a thousand goodbyes\nHidden in the corner of my ",
+    "cursor": 77,
+    "expect": {
+      "rhymeWith": "goodbyes"
+    },
+    "songContext": "A song about carrying grief quietly."
+  },
+  {
+    "id": "en-alternative-1",
+    "lang": "en",
+    "mode": "alternative",
+    "lyrics": "I walk alone through the empty street\nAnd I don't know where I'm going anymore",
+    "cursor": 49,
+    "expect": {
+      "maxLines": 1
+    }
+  },
+  {
+    "id": "en-alternative-2",
+    "lang": "en",
+    "mode": "alternative",
+    "lyrics": "The night is heavy with things unsaid\nI keep the window open just in case",
+    "cursor": 48,
+    "expect": {}
+  },
+  {
+    "id": "en-edge-empty",
+    "lang": "en",
+    "mode": "next_line",
+    "lyrics": "",
+    "cursor": 0,
+    "expect": {}
+  },
+  {
+    "id": "en-edge-chords-chorus",
+    "lang": "en",
+    "mode": "next_line",
+    "lyrics": "[Verse]\nC G Am F\nAm F C G\n[Chorus]\nWe rise again when the morning comes\nWe rise again when the morning comes\n[Chorus]\nWe rise again when the morning comes\nWe rise again when the morning comes",
+    "cursor": 191,
+    "expect": {
+      "mustNotContain": ["chorus"]
+    }
+  }
+]

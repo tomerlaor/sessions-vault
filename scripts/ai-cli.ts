@@ -2,6 +2,8 @@
 // paths as the UI (src/lib/ai.ts, src/lib/lyrics-ai.ts).
 //
 //   npm run ai -- help
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
 import {
   chatWithTabAgent,
@@ -23,6 +25,10 @@ import type {
   Instrument,
   LyricSuggestionMode,
 } from "../src/types";
+import { loadFixtures, summarizeFixtures } from "./lyrics-eval/fixtures";
+import { buildMarkdownReport } from "./lyrics-eval/report";
+import { buildRubricCsv } from "./lyrics-eval/rubric";
+import { runEval } from "./lyrics-eval/runner";
 
 const KEY_ENV: Record<string, string> = {
   openrouter: "OPENROUTER_API_KEY",
@@ -40,6 +46,8 @@ Commands
   tab-chat <message>       Tab Agent: free-form chat reply
   lyrics                   Lyrics helper: stream an inline suggestion
   lyrics-popup             Lyrics helper: structured popup suggestions
+  eval                     Run the lyrics-eval fixture suite against a live model
+                           --model <id> [--provider p] [--n 3] [--rubric]
 
 Connection (all commands)
   --provider <p>           openrouter (default) | openai | anthropic | ollama | lmstudio
@@ -64,10 +72,18 @@ lyrics / lyrics-popup options
   --context <text>         what the song is about: meaning, mood (the "Song context" field)
   --title / --bpm / --key / --time   song metadata
 
+eval options
+  --n <count>              trials per fixture, default 3
+  --rubric                 also write a blind CSV for human scoring
+  Runs every fixture in tests/fixtures/lyrics-eval/ through the production
+  prompt builders and model calls. Writes eval-results/<date>-<model>.json
+  and .md (gitignored — never commit results, only fixtures/code).
+
 Examples
   OPENROUTER_API_KEY=sk-or-... npm run ai -- ping --model typesafe/jev-router
   npm run ai -- tab --section Chorus --chords "C G Am F" --instruments guitar,bass --model <id>
   npm run ai -- lyrics --lyrics "I walk alone\\nthrough the empty street" --mode next_line --model <id>
+  npm run ai -- eval --model anthropic/claude-haiku-4.5 --n 3 --rubric
 `;
 
 const { values, positionals } = parseArgs({
@@ -89,6 +105,8 @@ const { values, positionals } = parseArgs({
     title: { type: "string", default: "Untitled" },
     bpm: { type: "string" },
     key: { type: "string" },
+    n: { type: "string", default: "3" },
+    rubric: { type: "boolean", default: false },
     help: { type: "boolean", short: "h" },
   },
 });
@@ -239,6 +257,39 @@ async function main() {
         generatePopupSuggestions(cfg, system, prompt),
       );
       console.log(JSON.stringify(result, null, 2));
+      break;
+    }
+    case "eval": {
+      if (!cfg.model) fail("eval requires --model <id>");
+      const n = Number(values.n);
+      if (!Number.isInteger(n) || n < 1) fail("--n must be a positive integer");
+
+      const fixtures = loadFixtures();
+      const summary = summarizeFixtures(fixtures);
+      console.error(
+        `fixtures=${summary.total} (en=${summary.byLang.en} he=${summary.byLang.he}) model=${cfg.model} n=${n}`,
+      );
+
+      const run = await timed("eval", () =>
+        runEval(cfg, fixtures, n, ({ caseId, done, total }) => {
+          console.error(`[eval] ${done}/${total} ${caseId}`);
+        }),
+      );
+
+      mkdirSync("eval-results", { recursive: true });
+      const date = new Date().toISOString().slice(0, 10);
+      const slug = cfg.model.replace(/[^A-Za-z0-9._-]+/g, "-");
+      const base = join("eval-results", `${date}-${slug}`);
+
+      writeFileSync(`${base}.json`, JSON.stringify(run, null, 2));
+      writeFileSync(`${base}.md`, buildMarkdownReport(run));
+      console.log(`wrote ${base}.json`);
+      console.log(`wrote ${base}.md`);
+
+      if (values.rubric) {
+        writeFileSync(`${base}-rubric.csv`, buildRubricCsv(run));
+        console.log(`wrote ${base}-rubric.csv`);
+      }
       break;
     }
     default:

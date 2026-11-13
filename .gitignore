@@ -12,6 +12,9 @@ dist/
 .env
 .env.local
 
+# Lyrics AI eval harness output (scripts/lyrics-eval) — never commit results
+eval-results/
+
 # macOS
 .DS_Store
 .AppleDouble

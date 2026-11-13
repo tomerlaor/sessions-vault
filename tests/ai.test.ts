@@ -14,11 +14,21 @@ const { generateObjectMock, generateTextMock, streamTextMock } = vi.hoisted(
       finishReason: "stop",
       response: { modelId: "mock" },
     })),
-    streamTextMock: vi.fn(() => ({
-      textStream: (async function* () {
-        yield "ok";
-      })(),
-    })),
+    streamTextMock: vi.fn((opts: { onFinish?: (r: unknown) => void }) => {
+      const usage = {};
+      opts?.onFinish?.({
+        text: "ok",
+        usage,
+        finishReason: "stop",
+        response: { modelId: "mock" },
+      });
+      return {
+        textStream: (async function* () {
+          yield "ok";
+        })(),
+        usage: Promise.resolve(usage),
+      };
+    }),
   }),
 );
 
@@ -71,6 +81,35 @@ describe("lyrics AI call sites in ai.ts", () => {
     expect(opts.maxOutputTokens).toBe(60);
     expect(opts.maxRetries).toBe(0);
     expect(opts.abortSignal).toBe(controller.signal);
+  });
+
+  it("generateNextWordOptions reports usage and timing via the optional onMetrics callback", async () => {
+    const onMetrics = vi.fn();
+    await generateNextWordOptions(cfg, "sys", "prompt", undefined, onMetrics);
+    expect(onMetrics).toHaveBeenCalledTimes(1);
+    const metrics = onMetrics.mock.calls[0][0];
+    expect(metrics.usage).toEqual({});
+    expect(metrics.ttftMs).toBe(metrics.totalMs);
+    expect(typeof metrics.totalMs).toBe("number");
+  });
+
+  it("streamLyricsSuggestion reports usage and timing via the optional onMetrics callback", async () => {
+    const onMetrics = vi.fn();
+    const gen = streamLyricsSuggestion(
+      cfg,
+      "sys",
+      "prompt",
+      undefined,
+      onMetrics,
+    );
+    for await (const chunk of gen) void chunk; // drain, triggers onFinish
+    expect(onMetrics).toHaveBeenCalledTimes(1);
+    const metrics = onMetrics.mock.calls[0][0];
+    expect(metrics.usage).toEqual({});
+    expect(typeof metrics.totalMs).toBe("number");
+    expect(metrics.ttftMs === null || typeof metrics.ttftMs === "number").toBe(
+      true,
+    );
   });
 
   it("generatePopupSuggestions passes maxOutputTokens: 300, maxRetries: 1, and the abort signal", async () => {
