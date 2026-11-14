@@ -17,6 +17,7 @@ import {
 } from "./openrouter-decisions";
 import {
   extractJsonText,
+  parseNextWordOptions,
   rawTextFromObjectError,
   repairAiJsonText,
 } from "./parse-ai-json";
@@ -371,6 +372,7 @@ async function generateObjectLenient<S extends z.ZodTypeAny>({
   maxOutputTokens,
   maxRetries,
   signal,
+  parseObject,
 }: {
   provider: ReturnType<typeof buildProvider>;
   schema: S;
@@ -379,6 +381,10 @@ async function generateObjectLenient<S extends z.ZodTypeAny>({
   maxOutputTokens?: number;
   maxRetries?: number;
   signal?: AbortSignal;
+  // Optional lenient parser tried before the schema, so recovery can accept
+  // aliases or salvage a truncated reply. The generateObject call itself
+  // still uses `schema` so the model is shown the canonical JSON shape.
+  parseObject?: (text: string) => z.infer<S> | null;
 }): Promise<{
   object: z.infer<S>;
   usage?: LanguageModelUsage;
@@ -386,10 +392,18 @@ async function generateObjectLenient<S extends z.ZodTypeAny>({
   response?: { modelId?: string };
 }> {
   const parseFromText = (text: string): z.infer<S> | null => {
+    if (parseObject) {
+      const custom = parseObject(text);
+      if (custom) return custom;
+    }
     const extracted = extractJsonText(text);
     if (!extracted) return null;
-    const parsed = schema.safeParse(JSON.parse(extracted));
-    return parsed.success ? parsed.data : null;
+    try {
+      const parsed = schema.safeParse(JSON.parse(extracted));
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
   };
 
   try {
@@ -595,6 +609,12 @@ export interface LyricsCallMetrics {
   // Present only on the OpenRouter decisions "generate, then decide" path.
   generator?: LyricsGeneratorStageMetrics;
   ranker?: LyricsRankerStageMetrics;
+  // Generator-order texts, before the ranker reorders them. The eval uses
+  // these to score every candidate and measure picker accuracy. `pickedIndex`
+  // is the index in this array of the suggestion that was actually returned
+  // (0 when ranking is skipped or falls back to the unranked order).
+  unrankedCandidates?: string[];
+  pickedIndex?: number;
 }
 
 interface CandidateResult {
@@ -676,14 +696,17 @@ async function* streamLyricsSuggestionViaDecisions(
     return;
   }
 
+  const unrankedItems = candidates.map((text) => ({ text }));
   const { items: ranked, ranker } = await rankByDecisions(
     cfg,
     system,
     prompt,
-    candidates.map((text) => ({ text })),
+    unrankedItems,
     signal,
   );
-  yield ranked[0]?.text ?? candidates[0];
+  const picked = ranked[0] ?? unrankedItems[0];
+  const pickedIndex = picked ? unrankedItems.indexOf(picked) : 0;
+  yield picked?.text ?? candidates[0];
 
   if (onMetrics) {
     const totalMs = Date.now() - t0;
@@ -703,6 +726,8 @@ async function* streamLyricsSuggestionViaDecisions(
         count,
       },
       ranker,
+      unrankedCandidates: candidates,
+      pickedIndex: pickedIndex < 0 ? 0 : pickedIndex,
     });
   }
 }
@@ -784,9 +809,10 @@ async function generateNextWordOptionsViaDecisions(
     schema: nextWordOptionsSchema,
     system,
     prompt,
-    maxOutputTokens: 60,
+    maxOutputTokens: NEXT_WORD_MAX_OUTPUT_TOKENS,
     maxRetries: 0,
     signal,
+    parseObject: parseNextWordOptions,
   });
   const generatorMs = Date.now() - t0;
   logAI("generateNextWordOptions (generator stage)", {
@@ -800,13 +826,15 @@ async function generateNextWordOptionsViaDecisions(
     durationMs: generatorMs,
   });
 
+  const unranked = result.object.options;
   const { items: ranked, ranker } = await rankByDecisions(
     cfg,
     system,
     prompt,
-    result.object.options,
+    unranked,
     signal,
   );
+  const pickedIndex = ranked[0] ? unranked.indexOf(ranked[0]) : 0;
 
   const totalMs = Date.now() - t0;
   const usage = ranker
@@ -822,6 +850,8 @@ async function generateNextWordOptionsViaDecisions(
       model: generatorCfg.model,
     },
     ranker,
+    unrankedCandidates: unranked.map((o) => o.text),
+    pickedIndex: pickedIndex < 0 ? 0 : pickedIndex,
   });
   return { options: ranked };
 }
@@ -852,6 +882,7 @@ export async function generateNextWordOptions(
     maxOutputTokens: NEXT_WORD_MAX_OUTPUT_TOKENS,
     maxRetries: 0,
     signal,
+    parseObject: parseNextWordOptions,
   });
   const durationMs = Date.now() - t0;
   logAI("generateNextWordOptions", {

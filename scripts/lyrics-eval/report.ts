@@ -72,6 +72,28 @@ export interface EvalStats {
     totalRankerCost: number | null;
   };
   failingCases: { caseId: string; trial: number; failedChecks: string[] }[];
+  // Present when at least one trial stored pre-ranking candidates (the
+  // decisions "generate, then decide" path). Null rates mean no such trial.
+  pickerAccuracy: PickerAccuracy;
+}
+
+export interface PickerAccuracy {
+  trialsWithCandidates: number;
+  meanCandidates: number | null;
+  // Pass = none of the candidate's checks failed, same rule as a trial pass.
+  pickPassRate: number | null;
+  firstPassRate: number | null;
+  // Expected pass rate of a uniformly random candidate (mean of per-trial
+  // passing fractions). The pick "beats random" when pickPassRate is higher.
+  randomPassRate: number | null;
+  // Upper bound: a trial counts if at least one candidate passed.
+  oraclePassRate: number | null;
+  // Pick is among the candidates with the fewest failed checks (ties count).
+  pickIsBestRate: number | null;
+  pickBeatFirstRate: number | null; // strictly fewer fails than the first
+  pickTiedFirstRate: number | null;
+  pickWorseThanFirstRate: number | null;
+  pickEqualsFirstRate: number | null; // picked index 0 (the generator's first)
 }
 
 // A trial "passes" overall if the call succeeded and none of its checks
@@ -80,6 +102,90 @@ export interface EvalStats {
 function trialPassed(trial: CaseResult["trials"][number]): boolean {
   if (trial.error) return false;
   return CHECK_NAMES.every((name) => trial.checks[name].status !== "fail");
+}
+
+function candidatePassed(
+  checks: CaseResult["trials"][number]["checks"],
+): boolean {
+  return CHECK_NAMES.every((name) => checks[name].status !== "fail");
+}
+
+function failedCheckCount(
+  checks: CaseResult["trials"][number]["checks"],
+): number {
+  return CHECK_NAMES.filter((name) => checks[name].status === "fail").length;
+}
+
+function emptyPickerAccuracy(): PickerAccuracy {
+  return {
+    trialsWithCandidates: 0,
+    meanCandidates: null,
+    pickPassRate: null,
+    firstPassRate: null,
+    randomPassRate: null,
+    oraclePassRate: null,
+    pickIsBestRate: null,
+    pickBeatFirstRate: null,
+    pickTiedFirstRate: null,
+    pickWorseThanFirstRate: null,
+    pickEqualsFirstRate: null,
+  };
+}
+
+function computePickerAccuracy(run: EvalRunResult): PickerAccuracy {
+  let trials = 0;
+  let candidateTotal = 0;
+  let pickPass = 0;
+  let firstPass = 0;
+  let randomSum = 0;
+  let oraclePass = 0;
+  let pickIsBest = 0;
+  let beatFirst = 0;
+  let tiedFirst = 0;
+  let worseFirst = 0;
+  let equalsFirst = 0;
+
+  for (const c of run.cases) {
+    for (const trial of c.trials) {
+      const cands = trial.candidates;
+      if (!cands || cands.length < 2 || trial.error) continue;
+      const pick = cands.find((x) => x.isPick) ?? cands[trial.pickedIndex ?? 0];
+      const first = cands.find((x) => x.isFirst) ?? cands[0];
+      if (!pick || !first) continue;
+      trials++;
+      candidateTotal += cands.length;
+      const pickFails = failedCheckCount(pick.checks);
+      const firstFails = failedCheckCount(first.checks);
+      const bestFails = Math.min(
+        ...cands.map((x) => failedCheckCount(x.checks)),
+      );
+      const passing = cands.filter((x) => candidatePassed(x.checks)).length;
+      if (candidatePassed(pick.checks)) pickPass++;
+      if (candidatePassed(first.checks)) firstPass++;
+      randomSum += passing / cands.length;
+      if (passing > 0) oraclePass++;
+      if (pickFails === bestFails) pickIsBest++;
+      if (pickFails < firstFails) beatFirst++;
+      else if (pickFails === firstFails) tiedFirst++;
+      else worseFirst++;
+      if (pick.index === first.index) equalsFirst++;
+    }
+  }
+
+  if (trials === 0) return emptyPickerAccuracy();
+  return {
+    trialsWithCandidates: trials,
+    meanCandidates: candidateTotal / trials,
+    pickPassRate: pickPass / trials,
+    firstPassRate: firstPass / trials,
+    randomPassRate: randomSum / trials,
+    oraclePassRate: oraclePass / trials,
+    pickIsBestRate: pickIsBest / trials,
+    pickBeatFirstRate: beatFirst / trials,
+    pickTiedFirstRate: tiedFirst / trials,
+    pickWorseThanFirstRate: worseFirst / trials,
+    pickEqualsFirstRate: equalsFirst / trials,
+  };
 }
 
 export function computeStats(run: EvalRunResult): EvalStats {
@@ -190,6 +296,7 @@ export function computeStats(run: EvalRunResult): EvalStats {
         rankerCosts.length > 0 ? rankerCosts.reduce((a, b) => a + b, 0) : null,
     },
     failingCases,
+    pickerAccuracy: computePickerAccuracy(run),
   };
 }
 
@@ -279,6 +386,34 @@ export function buildMarkdownReport(run: EvalRunResult): string {
     );
     lines.push(
       `- Ranker stage — mean duration: ${fmtMs(dp.meanRankerMs)}, mean tokens: ${fmtTokens(dp.meanRankerInputTokens)} in / ${fmtTokens(dp.meanRankerOutputTokens)} out, total cost: ${fmtCost(dp.totalRankerCost)}`,
+    );
+    lines.push("");
+  }
+
+  if (stats.pickerAccuracy.trialsWithCandidates > 0) {
+    const pa = stats.pickerAccuracy;
+    lines.push("## Picker accuracy");
+    lines.push("");
+    lines.push(
+      'Each decisions-path trial is scored on every pre-ranking candidate. The pick is what the app would return; first is the generator\'s unranked top candidate; random is the expected pass rate of a uniformly chosen candidate; oracle is the pass rate if the picker always chose a passing candidate when one exists. A candidate "passes" when none of its checks failed. "Best" means the fewest failed checks (ties count as accurate).',
+    );
+    lines.push("");
+    lines.push(
+      `- Trials with 2+ candidates: ${pa.trialsWithCandidates}/${stats.totalTrials} · Mean candidates per trial: ${pa.meanCandidates === null ? "n/a" : pa.meanCandidates.toFixed(1)}`,
+    );
+    lines.push("");
+    lines.push("| Selector | Pass rate |");
+    lines.push("| --- | --- |");
+    lines.push(`| jev pick | ${pct(pa.pickPassRate)} |`);
+    lines.push(`| first candidate | ${pct(pa.firstPassRate)} |`);
+    lines.push(`| random candidate | ${pct(pa.randomPassRate)} |`);
+    lines.push(`| oracle (best candidate) | ${pct(pa.oraclePassRate)} |`);
+    lines.push("");
+    lines.push(
+      `- Picker accuracy (pick is a best-scoring candidate): ${pct(pa.pickIsBestRate)}`,
+    );
+    lines.push(
+      `- vs first candidate — beat: ${pct(pa.pickBeatFirstRate)} · tied: ${pct(pa.pickTiedFirstRate)} · worse: ${pct(pa.pickWorseThanFirstRate)} · picked first: ${pct(pa.pickEqualsFirstRate)}`,
     );
     lines.push("");
   }

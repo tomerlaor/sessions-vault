@@ -78,7 +78,7 @@ describe("lyrics AI call sites in ai.ts", () => {
     expect(opts.abortSignal).toBe(controller.signal);
   });
 
-  it("generateNextWordOptions passes maxOutputTokens: 60, maxRetries: 0, and the abort signal", async () => {
+  it("generateNextWordOptions passes NEXT_WORD_MAX_OUTPUT_TOKENS, maxRetries: 0, and the abort signal", async () => {
     const controller = new AbortController();
     await generateNextWordOptions(cfg, "sys", "prompt", controller.signal);
     expect(generateObjectMock).toHaveBeenCalledTimes(1);
@@ -135,6 +135,49 @@ describe("lyrics AI call sites in ai.ts", () => {
 
     const result = await generateNextWordOptions(cfg, "sys", "prompt");
     expect(result).toEqual(object);
+    expect(generateTextMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts word/candidates aliases in a fenced next_word reply", async () => {
+    const object = {
+      candidates: [
+        { word: "shadow", kind: "continuation" },
+        { text: "smoke", kind: "rhyme" },
+      ],
+    };
+    const fenced = "```json\n" + JSON.stringify(object) + "\n```";
+    const err = Object.assign(
+      new Error("No object generated: could not parse the response."),
+      { text: fenced },
+    );
+    generateObjectMock.mockRejectedValueOnce(err);
+
+    const result = await generateNextWordOptions(cfg, "sys", "prompt");
+    expect(result).toEqual({
+      options: [
+        { text: "shadow", kind: "continuation" },
+        { text: "smoke", kind: "rhyme" },
+      ],
+    });
+    expect(generateTextMock).not.toHaveBeenCalled();
+  });
+
+  it("salvages complete next_word options from a truncated fenced reply", async () => {
+    const truncated =
+      '```json\n{\n  "options": [\n    {\n      "word": "turned away",\n      "kind": "continuation"\n    },\n    {\n      "word": "disappeared",\n      "kind": "continuation"\n    },\n    {';
+    const err = Object.assign(
+      new Error("No object generated: could not parse the response."),
+      { text: truncated },
+    );
+    generateObjectMock.mockRejectedValueOnce(err);
+
+    const result = await generateNextWordOptions(cfg, "sys", "prompt");
+    expect(result).toEqual({
+      options: [
+        { text: "turned away", kind: "continuation" },
+        { text: "disappeared", kind: "continuation" },
+      ],
+    });
     expect(generateTextMock).not.toHaveBeenCalled();
   });
 
@@ -362,6 +405,8 @@ describe("OpenRouter decisions pipeline (generate, then decide)", () => {
     const metrics = onMetrics.mock.calls[0][0];
     expect(metrics.generator?.count).toBe(3);
     expect(metrics.ranker?.model).toBe("typesafe/jev-1.14-20261014");
+    expect(metrics.unrankedCandidates).toEqual(["cand A", "cand B", "cand C"]);
+    expect(metrics.pickedIndex).toBe(1);
   });
 
   it("streamLyricsSuggestion: falls back to the unranked generator output when ranking fails (non-abort)", async () => {
@@ -433,8 +478,20 @@ describe("OpenRouter decisions pipeline (generate, then decide)", () => {
       onMetrics,
     );
     expect(result.options.map((o) => o.text)).toEqual(["opt3", "opt1", "opt2"]);
+    expect(generateObjectMock.mock.calls[0][0].maxOutputTokens).toBe(
+      NEXT_WORD_MAX_OUTPUT_TOKENS,
+    );
+    expect(
+      typeof generateObjectMock.mock.calls[0][0].experimental_repairText,
+    ).toBe("function");
     expect(onMetrics.mock.calls[0][0].ranker).toBeDefined();
     expect(onMetrics.mock.calls[0][0].generator).toBeDefined();
+    expect(onMetrics.mock.calls[0][0].unrankedCandidates).toEqual([
+      "opt1",
+      "opt2",
+      "opt3",
+    ]);
+    expect(onMetrics.mock.calls[0][0].pickedIndex).toBe(2);
   });
 
   it("generatePopupSuggestions: ranks suggestions within the list", async () => {

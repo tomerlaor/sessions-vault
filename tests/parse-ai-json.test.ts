@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   extractJsonText,
+  parseNextWordOptions,
   rawTextFromObjectError,
   repairAiJsonText,
   sliceBalancedJson,
@@ -68,5 +69,84 @@ describe("rawTextFromObjectError", () => {
 
   it("returns empty string when no text is attached", () => {
     expect(rawTextFromObjectError(new Error("boom"))).toBe("");
+  });
+});
+
+describe("parseNextWordOptions", () => {
+  it("maps the word and candidates aliases onto the canonical schema", () => {
+    expect(
+      parseNextWordOptions(
+        JSON.stringify({
+          candidates: [
+            { word: "shadow", kind: "continuation" },
+            { text: "smoke", kind: "rhyme" },
+          ],
+        }),
+      ),
+    ).toEqual({
+      options: [
+        { text: "shadow", kind: "continuation" },
+        { text: "smoke", kind: "rhyme" },
+      ],
+    });
+  });
+
+  it("accepts a fenced reply that uses those aliases", () => {
+    const inner = JSON.stringify({
+      candidates: [
+        { word: "שתיקה", kind: "rhyme" },
+        { word: "חדר אפל", kind: "continuation" },
+      ],
+    });
+    expect(parseNextWordOptions("```json\n" + inner + "\n```")).toEqual({
+      options: [
+        { text: "שתיקה", kind: "rhyme" },
+        { text: "חדר אפל", kind: "continuation" },
+      ],
+    });
+  });
+
+  // Reproduces the truncated Haiku replies from the PR #87 jev eval: an
+  // opening markdown fence, alias keys, and a cut-off third option.
+  const truncatedEnglish = `\`\`\`json
+{
+  "options": [
+    {
+      "word": "turned away",
+      "kind": "continuation"
+    },
+    {
+      "word": "disappeared",
+      "kind": "continuation"
+    },
+    {`;
+
+  const truncatedHebrew = `\`\`\`json
+{
+  "candidates": [
+    {
+      "text": "של דממה",
+      "kind": "continuation"
+    },
+    {
+      "text": "שחוזרת",
+      "kind": "rhyme"`;
+
+  it("salvages complete options from a truncated fenced English reply", () => {
+    expect(parseNextWordOptions(truncatedEnglish)).toEqual({
+      options: [
+        { text: "turned away", kind: "continuation" },
+        { text: "disappeared", kind: "continuation" },
+      ],
+    });
+  });
+
+  it("salvages complete options from a truncated fenced Hebrew reply", () => {
+    expect(parseNextWordOptions(truncatedHebrew)).toEqual({
+      options: [
+        { text: "של דממה", kind: "continuation" },
+        { text: "שחוזרת", kind: "rhyme" },
+      ],
+    });
   });
 });
