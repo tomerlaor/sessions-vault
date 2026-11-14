@@ -6,7 +6,7 @@
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 ![Status](https://img.shields.io/badge/status-pre--development-orange.svg)
 
-SessionsVault is a local-first desktop app for music creators to organize, search, tag, and back up DAW projects. Instead of hunting through folders named `song_idea_v7_FINAL_actual_final`, you get a searchable, tagged library with project metadata (key, BPM, mood), attached lyrics and tab files, and automated cloud backups.
+SessionsVault is a local-first desktop app for music creators to organize, search, tag, and back up DAW projects. Instead of hunting through folders named `song_idea_v7_FINAL_actual_final`, you get a searchable, tagged library with project metadata (key, BPM), attached lyrics and tab files, and backups to a local folder or Google Drive.
 
 ---
 
@@ -32,10 +32,10 @@ Download the latest `.dmg` from the [Releases page](https://github.com/tomerlaor
 ## Features (v1)
 
 - **Scan & index** — point the app at your Music folder, get every project indexed with BPM, key, and track count extracted automatically from Ableton `.als` files
-- **Search** — full-text search across titles, descriptions, lyrics, tags, and filenames
-- **Tags & metadata** — genre, mood, status (`draft`, `mixed`, `released`), star rating
-- **Attachments** — attach lyrics, tabs, reference audio, and cover art per project
-- **Cloud backup** — Dropbox, Google Drive, and S3-compatible providers with versioned snapshots
+- **Search** — search across titles, notes, and tags
+- **Tags & metadata** — tags, status (`draft`, `mixed`, `released`), star rating
+- **Attachments** — lyrics, tabs, and related mix, master, and export files per project
+- **Backup** — timestamped ZIP backups to a local folder or Google Drive. Restore, version history, Dropbox, and S3-compatible providers are planned
 - **Non-destructive** — never touches your original project files
 
 Full requirements: [REQUIREMENTS_1.md](./docs/REQUIREMENTS_1.md)
@@ -44,14 +44,14 @@ Full requirements: [REQUIREMENTS_1.md](./docs/REQUIREMENTS_1.md)
 
 ## Tech Stack
 
-| Layer          | Technology                                |
-| -------------- | ----------------------------------------- |
-| Desktop shell  | [Tauri 2.x](https://tauri.app)            |
-| Frontend       | React + TypeScript + Tailwind             |
-| Backend        | Rust                                      |
-| Local database | SQLite (`rusqlite` / `sqlx`)              |
-| `.als` parsing | `flate2` + `quick-xml`                    |
-| Cloud sync     | Dropbox API, Google Drive API, AWS S3 SDK |
+| Layer          | Technology                        |
+| -------------- | --------------------------------- |
+| Desktop shell  | [Tauri 2.x](https://tauri.app)    |
+| Frontend       | React + TypeScript + Tailwind     |
+| Backend        | Rust                              |
+| Local database | SQLite (`rusqlite` / `sqlx`)      |
+| `.als` parsing | `flate2` + `quick-xml`            |
+| Backup         | Local folder and Google Drive API |
 
 ---
 
@@ -82,7 +82,7 @@ supported.
 - [ ] Library views (grid + list), search, filters
 - [ ] Tags, ratings, and user annotations
 - [ ] Attachment support (lyrics, tabs, audio, images)
-- [ ] Cloud backup — Dropbox, Google Drive, S3
+- [ ] Backup — Dropbox and S3-compatible providers; restore and version history
 - [ ] macOS, Windows, Linux builds
 
 ---
