@@ -5,3 +5,4 @@ CHANGELOG.md
 .release-please-manifest.json
 src-tauri/gen
 src-tauri/target
+src/lib/prosody/data/en-dict.txt

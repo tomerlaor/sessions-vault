@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import {
   checkCliche,
   checkFormat,
@@ -13,6 +13,11 @@ import {
   HE_CLICHE_PAIRS,
   type CheckContext,
 } from "../scripts/lyrics-eval/checks";
+import { loadEnglishDict } from "../src/lib/prosody";
+
+beforeAll(async () => {
+  await loadEnglishDict();
+});
 import {
   loadFixtures,
   summarizeFixtures,
@@ -43,11 +48,17 @@ describe("countSyllables", () => {
   it("applies the silent-e adjustment", () => {
     expect(countSyllables("like", "en")).toBe(1);
   });
-  it("counts Hebrew with niqud as one syllable per vowel point", () => {
-    expect(countSyllables("שָׁלוֹם", "he")).toBeGreaterThan(0);
+  it("does not count niqud marks as syllables", () => {
+    // The pre-R4 checker scored this line as 15 by counting diacritics.
+    const n = countSyllables("וְדַלְתַיִם נִשְׁמְרוּ בִזְכרוֹן בּוֹ.", "he");
+    expect(n).toBeGreaterThanOrEqual(9);
+    expect(n).toBeLessThanOrEqual(12);
+    expect(countSyllables("שָׁלוֹם", "he")).toBe(2);
   });
-  it("falls back to matres lectionis for Hebrew without niqud", () => {
-    expect(countSyllables("שלום", "he")).toBeGreaterThan(0);
+  it("estimates unpointed Hebrew without exploding", () => {
+    const n = countSyllables("ודלתים נשמרו בזכרון בו.", "he");
+    expect(n).toBeGreaterThanOrEqual(6);
+    expect(n).toBeLessThanOrEqual(12);
   });
   it("returns 0 for empty text", () => {
     expect(countSyllables("", "en")).toBe(0);
@@ -63,6 +74,12 @@ describe("rhymes", () => {
   });
   it("rejects unrelated words", () => {
     expect(rhymes("door", "banana", "en")).toBe(false);
+  });
+  it("accepts anymore/door (the old last-2-letter checker missed this)", () => {
+    expect(rhymes("anymore", "door", "en")).toBe(true);
+  });
+  it("rejects back/mark (the old trailing-letter slant wrongly accepted this)", () => {
+    expect(rhymes("back", "mark", "en")).toBe(false);
   });
   it("works for Hebrew suffixes", () => {
     expect(rhymes("תפילה", "לילה", "he")).toBe(true);
@@ -166,11 +183,14 @@ describe("checkSyllables", () => {
     expect(result.status).toBe("pass");
   });
 
-  it("falls back to a +/-2 comparison against prevLine for next_line", () => {
+  it("falls back to a +/-2 comparison against referenceLine for next_line", () => {
     const pass = checkSyllables(
       "walking down the same old street",
       {},
-      ctx({ mode: "next_line", prevLine: "walking down a different street" }),
+      ctx({
+        mode: "next_line",
+        referenceLine: "walking down a different street",
+      }),
     );
     expect(pass.status).toBe("pass");
 
@@ -179,8 +199,32 @@ describe("checkSyllables", () => {
       {},
       ctx({
         mode: "next_line",
-        prevLine: "walking down a very long and winding street indeed",
+        referenceLine: "walking down a very long and winding street indeed",
       }),
+    );
+    expect(fail.status).toBe("fail");
+  });
+
+  it("compares against the last written line, not the line before it", () => {
+    // Cursor-at-end-of-lyrics case: the last written line is short and
+    // the line before it is long. A short candidate must pass when the
+    // reference is the last written line, and fail if we wrongly used
+    // the earlier long line (the pre-R4 prevLine bug).
+    const lastWritten = "a short line here";
+    const earlierLong = "walking down a very long and winding street indeed";
+    const candidate = "another short one";
+
+    const pass = checkSyllables(
+      candidate,
+      {},
+      ctx({ mode: "next_line", referenceLine: lastWritten }),
+    );
+    expect(pass.status).toBe("pass");
+
+    const fail = checkSyllables(
+      candidate,
+      {},
+      ctx({ mode: "next_line", referenceLine: earlierLong }),
     );
     expect(fail.status).toBe("fail");
   });

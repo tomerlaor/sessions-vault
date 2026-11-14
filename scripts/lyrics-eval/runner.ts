@@ -20,6 +20,7 @@ import {
 } from "../../src/lib/lyrics-ai";
 import type { AIConfig } from "../../src/types";
 import { rawTextFromObjectError } from "../../src/lib/parse-ai-json";
+import { currentSection, loadEnglishDict } from "../../src/lib/prosody";
 import {
   checkCliche,
   checkFormat,
@@ -82,7 +83,26 @@ interface CursorInfo {
   textBeforeCursor: string;
   selectionStart: number;
   selectionEnd: number;
-  prevLine?: string;
+  referenceLine?: string;
+}
+
+// The lyric line a next_line candidate should match in length: the last
+// *written* lyric line of the current section (cleaned, skipping
+// headers/chords/remarks) — currentSection() already stops at the section
+// boundary and drops anything that isn't a real lyric line, so the last
+// entry is exactly that, whether the cursor sits right at the end of that
+// line or on a fresh blank line after it.
+//
+// This is deliberately NOT "the last non-empty line before the cursor's
+// line" (the old prevLine) — for almost every next_line fixture the cursor
+// is at the end of the lyrics, so that would be the *second-to-last*
+// written line, one too early.
+function buildReferenceLine(
+  lyrics: string,
+  cursor: number,
+): string | undefined {
+  const lines = currentSection(lyrics, cursor);
+  return lines[lines.length - 1];
 }
 
 // See the comment on EvalFixture in ./types.ts for the selection rule.
@@ -94,18 +114,12 @@ function deriveCursorInfo(fixture: EvalFixture): CursorInfo {
   const currentLine = lyrics.slice(lineStart, lineEnd);
   const textBeforeCursor = lyrics.slice(lineStart, cursor);
 
-  const before = lyrics.slice(0, lineStart);
-  const prevLines = before
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-
   return {
     currentLine,
     textBeforeCursor,
     selectionStart: cursor,
     selectionEnd: mode === "alternative" ? lineEnd : cursor,
-    prevLine: prevLines[prevLines.length - 1],
+    referenceLine: buildReferenceLine(lyrics, cursor),
   };
 }
 
@@ -193,7 +207,7 @@ export async function runTrial(
     mode: fixture.mode,
     lang: fixture.lang,
     linePrefix: cursor.textBeforeCursor,
-    prevLine: cursor.prevLine,
+    referenceLine: cursor.referenceLine,
   };
 
   try {
@@ -288,6 +302,8 @@ export async function runEval(
   n: number,
   onProgress?: (info: { caseId: string; done: number; total: number }) => void,
 ): Promise<EvalRunResult> {
+  await loadEnglishDict(); // so English syllable/rhyme checks are dictionary-backed
+
   const cases: CaseResult[] = [];
   const total = fixtures.length * n;
   let done = 0;

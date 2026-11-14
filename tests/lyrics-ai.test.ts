@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import {
   buildLyricsSuggestionPrompt,
   buildLyricsPopupPrompt,
@@ -7,6 +7,11 @@ import {
   buildNextWordOptionsPrompt,
   normalizeNextWordOptions,
 } from "../src/lib/lyrics-ai";
+import { loadEnglishDict } from "../src/lib/prosody";
+
+beforeAll(async () => {
+  await loadEnglishDict();
+});
 
 describe("buildLyricsSuggestionPrompt", () => {
   const base = {
@@ -232,12 +237,17 @@ describe("song context", () => {
 });
 
 describe("next_line must yield a complete line", () => {
+  // Two lines that actually rhyme (rain/lane) so nextLineTargets() has
+  // enough signal to produce a rhyme hint — unlike the old
+  // extractRhymeContext, the real engine only hints a rhyme when the
+  // existing lines actually show one.
+  const lyricsWithRhyme = "I walk through the rain\nAlone down the lane\n";
   const input = {
-    lyrics: "I walk alone\nthrough the empty street\n",
-    currentLine: "through the empty street",
-    textBeforeCursor: "through the empty street",
-    selectionStart: 38,
-    selectionEnd: 38,
+    lyrics: lyricsWithRhyme,
+    currentLine: "Alone down the lane",
+    textBeforeCursor: "Alone down the lane",
+    selectionStart: lyricsWithRhyme.length,
+    selectionEnd: lyricsWithRhyme.length,
     title: "T",
     bpm: null,
     key: null,
@@ -389,10 +399,30 @@ describe("next_word options", () => {
     expect(prompt).toContain("Current line up to the cursor");
   });
 
-  it("asks for at least three options with a rhyme for the line above", () => {
+  it("asks for at least three options, with no rhyme hint from a single prior line", () => {
+    // Only one complete lyric line exists before the in-progress one, which
+    // isn't enough to infer any scheme (AABB needs two lines to show a
+    // rhyme at all) — unlike the old extractRhymeContext, which guessed a
+    // rhyme target unconditionally, nextLineTargets correctly omits the
+    // hint here and falls back to the generic kind="rhyme" instruction.
     const { system } = buildNextWordOptionsPrompt(input);
     expect(system).toContain("never fewer than 3");
-    expect(system).toContain('must rhyme with "alone"');
+    expect(system).not.toContain("must rhyme with");
+    expect(system).toContain('kind="rhyme"');
+  });
+
+  it("asks for a rhyme with the line above once a scheme is established", () => {
+    const lyrics =
+      "[Verse]\nI walk down the road\nsearching for a code\nthrough the empty ";
+    const { system } = buildNextWordOptionsPrompt({
+      ...input,
+      lyrics,
+      currentLine: "through the empty ",
+      textBeforeCursor: "through the empty ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+    });
+    expect(system).toContain('must rhyme with "code"');
     expect(system).toContain('kind="rhyme"');
   });
 
@@ -404,24 +434,32 @@ describe("next_word options", () => {
   });
 
   it("still asks for a rhyme-marked option when there is no line above", () => {
+    const lyrics = "I walk ";
     const { system } = buildNextWordOptionsPrompt({
       ...input,
-      lyrics: "I walk ",
-      currentLine: "I walk ",
-      textBeforeCursor: "I walk ",
+      lyrics,
+      currentLine: lyrics,
+      textBeforeCursor: lyrics,
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
     });
     expect(system).not.toContain("must rhyme with");
     expect(system).toContain('kind="rhyme"');
   });
 
   it("has a Hebrew version", () => {
+    // Two prior lines that rhyme (תפילה/הלילה) so a scheme is established
+    // before the in-progress third line.
+    const lyrics = "אני שר תפילה\nלבד בתוך הלילה\nברחוב ה";
     const { system } = buildNextWordOptionsPrompt({
       ...input,
-      lyrics: "אני הולך לבד\nברחוב ה",
+      lyrics,
       currentLine: "ברחוב ה",
       textBeforeCursor: "ברחוב ה",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
     });
-    expect(system).toContain("לפחות אפשרות אחת חייבת להתחרז");
+    expect(system).toContain('לפחות אפשרות אחת חייבת להתחרז עם "הלילה"');
     expect(system).toContain("עקרונות כתיבת שירים");
   });
 
