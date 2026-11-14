@@ -199,3 +199,66 @@ describe("picker accuracy", () => {
     expect(computeStats(run).pickerAccuracy.trialsWithCandidates).toBe(0);
   });
 });
+
+function skipChecks(): Record<CheckName, CheckResult> {
+  return {
+    format: { status: "skip" },
+    syllables: { status: "skip" },
+    rhyme: { status: "skip" },
+    noCopy: { status: "skip" },
+    language: { status: "skip" },
+    cliche: { status: "skip" },
+  };
+}
+
+function errorOutcome(
+  error: string,
+  opts: { finishReason?: string; reasoningTokens?: number } = {},
+): TrialOutcome {
+  return {
+    rawOutput: "",
+    ttftMs: null,
+    totalMs: 0,
+    error,
+    finishReason: opts.finishReason,
+    reasoningTokens: opts.reasoningTokens,
+    checks: skipChecks(),
+  };
+}
+
+describe("error kind split and mean reasoning tokens", () => {
+  it("splits errorCount into length/reasoning vs other", () => {
+    const run = runWith([
+      errorOutcome("empty output: finishReason=length, reasoningTokens=80/80", {
+        finishReason: "length",
+        reasoningTokens: 80,
+      }),
+      errorOutcome("ran out mid-thought", { reasoningTokens: 12 }),
+      errorOutcome("network timeout"),
+    ]);
+    const stats = computeStats(run);
+    expect(stats.errorCount).toBe(3);
+    expect(stats.errorKinds).toEqual({ lengthOrReasoning: 2, other: 1 });
+
+    const md = buildMarkdownReport(run);
+    expect(md).toContain("errors: 3 (length/reasoning: 2, other: 1)");
+  });
+
+  it("reports mean reasoning tokens in the latency & tokens section", () => {
+    const run = runWith([
+      { ...trial([candidate("a", 0, [], true)], 0), reasoningTokens: 10 },
+      { ...trial([candidate("b", 0, [], true)], 0), reasoningTokens: 30 },
+    ]);
+    const stats = computeStats(run);
+    expect(stats.tokens.meanReasoning).toBe(20);
+
+    const md = buildMarkdownReport(run);
+    expect(md).toContain("mean reasoning: 20.0");
+  });
+
+  it("is n/a when no trial reports reasoning tokens", () => {
+    const run = runWith([trial([candidate("a", 0, [], true)], 0)]);
+    expect(computeStats(run).tokens.meanReasoning).toBeNull();
+    expect(buildMarkdownReport(run)).toContain("mean reasoning: n/a");
+  });
+});

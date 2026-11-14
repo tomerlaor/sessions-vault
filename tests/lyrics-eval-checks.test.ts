@@ -7,6 +7,8 @@ import {
   checkRhyme,
   checkSyllables,
   countSyllables,
+  isHebrewText,
+  joinCompletion,
   lastWord,
   rhymes,
   EN_CLICHE_PAIRS,
@@ -123,7 +125,7 @@ describe("checkFormat", () => {
   it("passes a clean completion that doesn't repeat the prefix", () => {
     const result = checkFormat(
       "down the road",
-      ctx({ mode: "completion", linePrefix: "I walk alone" }),
+      ctx({ mode: "completion", linePrefix: "I walk alone " }),
     );
     expect(result.status).toBe("pass");
   });
@@ -151,6 +153,39 @@ describe("checkFormat", () => {
     expect(checkFormat("a brand new line of lyrics", ctx()).status).toBe(
       "pass",
     );
+  });
+
+  it("fails on a leading Hebrew label", () => {
+    expect(checkFormat("השלמה: הלכתי לבד", ctx({ lang: "he" })).status).toBe(
+      "fail",
+    );
+  });
+
+  it("fails on a leading Hebrew label with a prefixed ה", () => {
+    expect(checkFormat("ההשלמה: הלכתי לבד", ctx({ lang: "he" })).status).toBe(
+      "fail",
+    );
+  });
+
+  it("does not treat an ordinary colon lyric as a label", () => {
+    expect(checkFormat("אמרתי: לא", ctx({ lang: "he" })).status).toBe("pass");
+  });
+
+  it("fails when a completion is glued to the prefix with no space", () => {
+    const result = checkFormat(
+      "away",
+      ctx({ mode: "completion", linePrefix: "I walk" }),
+    );
+    expect(result.status).toBe("fail");
+    expect(result.detail).toBe("glued to prefix");
+  });
+
+  it("passes a completion separated from the prefix by whitespace", () => {
+    const result = checkFormat(
+      "away",
+      ctx({ mode: "completion", linePrefix: "I walk " }),
+    );
+    expect(result.status).toBe("pass");
   });
 });
 
@@ -330,6 +365,44 @@ describe("checkCliche", () => {
     expect(
       checkCliche("a brand new thought about the morning light").status,
     ).toBe("pass");
+  });
+});
+
+describe("isHebrewText", () => {
+  it("matches ordinary Hebrew letters", () => {
+    expect(isHebrewText("שלום")).toBe(true);
+  });
+
+  it("matches Hebrew presentation-form letters (e.g. U+FB1D)", () => {
+    expect(isHebrewText("יִ")).toBe(true);
+    expect(isHebrewText("aﭏb")).toBe(true);
+  });
+
+  it("matches base letters under niqqud marks", () => {
+    expect(isHebrewText("שָׁלוֹם")).toBe(true);
+  });
+
+  it("does not match plain Latin text", () => {
+    expect(isHebrewText("hello")).toBe(false);
+  });
+});
+
+describe("joinCompletion", () => {
+  it("adds a space when neither side has adjoining whitespace", () => {
+    expect(joinCompletion("could not", "say")).toBe("could not say");
+  });
+
+  it("does not double a space already present on the prefix", () => {
+    expect(joinCompletion("I ", "walk")).toBe("I walk");
+  });
+
+  it("adds a space between glued Hebrew words", () => {
+    expect(joinCompletion("הלכתי", "לבד")).toBe("הלכתי לבד");
+  });
+
+  it("returns the other side unchanged when one side is empty", () => {
+    expect(joinCompletion("", "walk")).toBe("walk");
+    expect(joinCompletion("I walk", "")).toBe("I walk");
   });
 });
 

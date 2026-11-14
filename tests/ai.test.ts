@@ -27,6 +27,7 @@ const { generateObjectMock, generateTextMock, streamTextMock } = vi.hoisted(
           yield "ok";
         })(),
         usage: Promise.resolve(usage),
+        finishReason: Promise.resolve("stop"),
       };
     }),
   }),
