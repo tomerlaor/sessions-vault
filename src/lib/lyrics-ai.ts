@@ -354,6 +354,29 @@ const MODE_INSTRUCTIONS_HE: Record<LyricSuggestionMode, string> = {
     "תן לפחות שלוש אפשרויות שונות למילה הבאה (שתי מילים לכל היותר כל אחת), כפריטי next_word נפרדים, בעברית. לפחות אפשרות אחת חייבת להתחרז עם סוף השורה שמעל. החזר רק את המילים, בלי פיסוק.",
 };
 
+// Stamped on every span's promptVersion (T1, #89) so later prompt rewrites
+// (R6) are comparable by version in the eval report. Bump this — and only
+// this — when prompt wording changes; it is not tied to app releases.
+export const PROMPT_VERSION = "2026-11-13.1";
+
+// Stable id for a span's promptId, e.g. "lyrics.inline.next_line.he". Mirrors
+// the (mode, language) pair buildLyricsSuggestionPrompt already branches on,
+// without changing that function's return shape.
+export function lyricsInlinePromptId(
+  mode: LyricsSuggestionInput["mode"],
+  hebrew: boolean,
+): string {
+  return `lyrics.inline.${mode}.${hebrew ? "he" : "en"}`;
+}
+
+export function lyricsPopupPromptId(hebrew: boolean): string {
+  return `lyrics.popup.${hebrew ? "he" : "en"}`;
+}
+
+export function nextWordOptionsPromptId(hebrew: boolean): string {
+  return `lyrics.next_word.${hebrew ? "he" : "en"}`;
+}
+
 export function buildLyricsSuggestionPrompt(input: LyricsSuggestionInput): {
   system: string;
   prompt: string;
