@@ -142,7 +142,8 @@
     "mode": "next_line",
     "lyrics": "",
     "cursor": 0,
-    "expect": {}
+    "expect": {},
+    "songContext": "שיר פתיחה על התחלה חדשה."
   },
   {
     "id": "he-edge-chords-chorus",

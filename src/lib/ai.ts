@@ -640,8 +640,12 @@ async function generateObjectLenient<S extends z.ZodTypeAny>({
       snippet ? `${base} Raw text: ${snippet}` : base,
     ) as Error & {
       text?: string;
+      finishReason?: string;
+      usage?: LanguageModelUsage;
     };
     if (rawCombined) err.text = rawCombined;
+    if (fallback.finishReason) err.finishReason = fallback.finishReason;
+    if (fallback.usage) err.usage = fallback.usage;
     throw err;
   }
 }
@@ -824,6 +828,7 @@ export interface LyricsCallMetrics {
   ttftMs: number | null; // time to first stream chunk; null if none arrived
   totalMs: number; // end-to-end total, including the ranker stage if any
   usage?: LanguageModelUsage; // end-to-end total, summed across stages
+  finishReason?: string;
   // Present only on the OpenRouter decisions "generate, then decide" path.
   generator?: LyricsGeneratorStageMetrics;
   ranker?: LyricsRankerStageMetrics;
@@ -1019,11 +1024,14 @@ export async function* streamLyricsSuggestion(
       if (ttftMs === null) ttftMs = Date.now() - t0;
       yield chunk;
     }
-    // Await usage after the stream is fully consumed so the eval harness
-    // (and any other onMetrics caller) does not race onFinish.
+    // Await usage/finishReason after the stream is fully consumed so the
+    // eval harness (and any other onMetrics caller) does not race onFinish.
     if (onMetrics) {
-      const usage = await result.usage;
-      onMetrics({ ttftMs, totalMs: Date.now() - t0, usage });
+      const [usage, finishReason] = await Promise.all([
+        result.usage,
+        result.finishReason,
+      ]);
+      onMetrics({ ttftMs, totalMs: Date.now() - t0, usage, finishReason });
     }
   } catch (err) {
     finalizeTraceError(trace, err);
@@ -1094,6 +1102,7 @@ async function generateNextWordOptionsViaDecisions(
       ttftMs: totalMs,
       totalMs,
       usage,
+      finishReason: result.finishReason,
       generator: {
         durationMs: generatorMs,
         usage: result.usage,
@@ -1170,6 +1179,7 @@ export async function generateNextWordOptions(
       ttftMs: durationMs,
       totalMs: durationMs,
       usage: result.usage,
+      finishReason: result.finishReason,
     });
     return result.object;
   } catch (err) {

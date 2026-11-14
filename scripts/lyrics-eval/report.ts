@@ -2,6 +2,7 @@
 // raw JSON. Pure string formatting — no I/O here, the CLI handles writing.
 import {
   CHECK_NAMES,
+  isLengthOrReasoningError,
   type CaseResult,
   type CheckName,
   type EvalRunResult,
@@ -45,6 +46,9 @@ function mean(values: number[]): number | null {
 export interface EvalStats {
   totalTrials: number;
   errorCount: number;
+  // Split of errorCount by kind: the model ran out of output tokens (often
+  // while reasoning) vs. a genuine failure (network, parse, etc).
+  errorKinds: { lengthOrReasoning: number; other: number };
   overallTrialPassRate: number | null;
   byCheck: Record<CheckName, PassFailSkip>;
   byMode: Record<string, PassFailSkip>;
@@ -59,6 +63,7 @@ export interface EvalStats {
     meanInput: number | null;
     meanOutput: number | null;
     meanTotal: number | null;
+    meanReasoning: number | null;
   };
   // Only populated for trials that went through the OpenRouter decisions
   // "generate, then decide" pipeline (src/lib/ai.ts) — null fields mean no
@@ -210,9 +215,11 @@ export function computeStats(run: EvalRunResult): EvalStats {
   const rankerInputTokens: number[] = [];
   const rankerOutputTokens: number[] = [];
   const rankerCosts: number[] = [];
+  const reasoningTokenValues: number[] = [];
 
   let totalTrials = 0;
   let errorCount = 0;
+  let lengthOrReasoningErrorCount = 0;
   let passedTrials = 0;
 
   for (const c of run.cases) {
@@ -221,7 +228,13 @@ export function computeStats(run: EvalRunResult): EvalStats {
 
     c.trials.forEach((trial, trialIdx) => {
       totalTrials++;
-      if (trial.error) errorCount++;
+      if (trial.error) {
+        errorCount++;
+        if (isLengthOrReasoningError(trial)) lengthOrReasoningErrorCount++;
+      }
+      if (typeof trial.reasoningTokens === "number") {
+        reasoningTokenValues.push(trial.reasoningTokens);
+      }
 
       const passed = trialPassed(trial);
       if (passed) passedTrials++;
@@ -271,6 +284,10 @@ export function computeStats(run: EvalRunResult): EvalStats {
   return {
     totalTrials,
     errorCount,
+    errorKinds: {
+      lengthOrReasoning: lengthOrReasoningErrorCount,
+      other: errorCount - lengthOrReasoningErrorCount,
+    },
     overallTrialPassRate: totalTrials > 0 ? passedTrials / totalTrials : null,
     byCheck,
     byMode,
@@ -285,6 +302,7 @@ export function computeStats(run: EvalRunResult): EvalStats {
       meanInput: mean(inputTokens),
       meanOutput: mean(outputTokens),
       meanTotal: mean(totalTokens),
+      meanReasoning: mean(reasoningTokenValues),
     },
     decisionsPipeline: {
       trialsWithRanker: rankerMsValues.length,
@@ -328,7 +346,7 @@ export function buildMarkdownReport(run: EvalRunResult): string {
     `- Generated: ${run.meta.generatedAt} · Fixtures: ${run.meta.fixtureCount} · n per case: ${run.meta.n}`,
   );
   lines.push(
-    `- Total trials: ${stats.totalTrials} (errors: ${stats.errorCount})`,
+    `- Total trials: ${stats.totalTrials} (errors: ${stats.errorCount} (length/reasoning: ${stats.errorKinds.lengthOrReasoning}, other: ${stats.errorKinds.other}))`,
   );
   lines.push(`- **Overall pass rate: ${pct(stats.overallTrialPassRate)}**`);
   lines.push("");
@@ -370,7 +388,7 @@ export function buildMarkdownReport(run: EvalRunResult): string {
   );
   lines.push(`- TTFT — mean: ${fmtMs(stats.latency.meanTtftMs)}`);
   lines.push(
-    `- Tokens — mean input: ${fmtTokens(stats.tokens.meanInput)}, mean output: ${fmtTokens(stats.tokens.meanOutput)}, mean total: ${fmtTokens(stats.tokens.meanTotal)}`,
+    `- Tokens — mean input: ${fmtTokens(stats.tokens.meanInput)}, mean output: ${fmtTokens(stats.tokens.meanOutput)}, mean total: ${fmtTokens(stats.tokens.meanTotal)}, mean reasoning: ${fmtTokens(stats.tokens.meanReasoning)}`,
   );
   lines.push("");
 

@@ -53,9 +53,12 @@ export interface CheckContext {
 
 // ── shared helpers ──────────────────────────────────────────────
 
-// eslint-disable-next-line no-misleading-character-class -- Hebrew presentation forms are intentional
-const HEBREW_RE = /[א-תיִ-פֿ]/;
-const HEBREW_LETTER_G = /[א-ת]/g;
+// Hebrew letters (U+05D0-U+05EA) plus the Hebrew presentation forms block
+// (U+FB1D-U+FB4F, e.g. ligatures and niqqud-bearing letter variants). ASCII
+// \u escapes so this can't be mangled by source-encoding normalization the
+// way a literal Hebrew character range in the source could be.
+const HEBREW_RE = /[\u05D0-\u05EA\uFB1D-\uFB4F]/;
+const HEBREW_LETTER_G = /[\u05D0-\u05EA\uFB1D-\uFB4F]/g;
 const LATIN_LETTER_G = /[A-Za-z]/g;
 
 export function isHebrewText(text: string): boolean {
@@ -68,6 +71,16 @@ export function lastWord(text: string): string {
   const trimmed = text.trim().replace(/[.,!?;:"'“”‘’)\]]+$/u, "");
   const words = trimmed.split(/\s+/).filter(Boolean);
   return words[words.length - 1] ?? "";
+}
+
+// Joins a completion's typed prefix with the model's output for scoring
+// (syllables/rhyme). Adds a separating space only when neither side already
+// has adjoining whitespace, so a genuinely glued reply like "walk"+"away"
+// still gets a word boundary, but "I "+"walk" doesn't end up "I  walk".
+export function joinCompletion(prefix: string, output: string): string {
+  if (prefix.length === 0 || output.length === 0) return prefix + output;
+  if (/\s$/.test(prefix) || /^\s/.test(output)) return prefix + output;
+  return `${prefix} ${output}`;
 }
 
 // Counts syllables across a whole string (line or output), word by word.
@@ -106,7 +119,7 @@ function isChordOrHeaderLine(line: string): boolean {
 // ── checks ────────────────────────────────────────────────────────────────
 
 const LABEL_RE =
-  /^(suggestion|next line|next word|completion|option|alternative|answer)\s*:/i;
+  /^(suggestion|next line|next word|completion|option|alternative|answer|ה?(?:הצעה|השלמה|שורה הבאה|מילה הבאה|אפשרות|חלופה|תשובה))\s*:/i;
 const META_PHRASES = [
   "here is",
   "here's",
@@ -167,6 +180,16 @@ export function checkFormat(
     }
   }
 
+  if (
+    ctx.mode === "completion" &&
+    ctx.linePrefix.length > 0 &&
+    output.length > 0 &&
+    !/\s$/.test(ctx.linePrefix) &&
+    !/^\s/.test(output)
+  ) {
+    return { status: "fail", detail: "glued to prefix" };
+  }
+
   if (ctx.mode === "next_word") {
     const words = trimmed.split(/\s+/).filter(Boolean);
     if (words.length > 2) {
@@ -198,7 +221,8 @@ export function checkSyllables(
   expect: EvalExpect,
   ctx: CheckContext,
 ): CheckResult {
-  const target = ctx.mode === "completion" ? ctx.linePrefix + output : output;
+  const target =
+    ctx.mode === "completion" ? joinCompletion(ctx.linePrefix, output) : output;
 
   if (expect.syllables) {
     const [min, max] = expect.syllables;
@@ -238,7 +262,8 @@ export function checkRhyme(
 ): CheckResult {
   if (!expect.rhymeWith) return { status: "skip" };
 
-  const target = ctx.mode === "completion" ? ctx.linePrefix + output : output;
+  const target =
+    ctx.mode === "completion" ? joinCompletion(ctx.linePrefix, output) : output;
   const word = lastWord(target);
   if (!word) return { status: "fail", detail: "no word to check" };
 

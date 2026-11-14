@@ -60,6 +60,8 @@ export interface TrialOutcome {
   ttftMs: number | null;
   totalMs: number;
   usage?: LanguageModelUsage;
+  finishReason?: string;
+  reasoningTokens?: number;
   error?: string;
   checks: Record<CheckName, CheckResult>;
   // Present only when `model` is an OpenRouter decisions model — see
@@ -234,12 +236,42 @@ function scoreUnrankedCandidates(
   };
 }
 
-function errorTrial(message: string): TrialOutcome {
+// Reads the reasoning-token count the "empty output ran out on reasoning"
+// detection needs. outputTokenDetails.reasoningTokens is the standard AI SDK
+// shape; usage.reasoningTokens is a fallback for providers/mocks that report
+// it flat instead.
+function reasoningTokensFrom(usage: unknown): number | undefined {
+  const u = usage as
+    | {
+        outputTokenDetails?: { reasoningTokens?: number };
+        reasoningTokens?: number;
+      }
+    | undefined;
+  if (typeof u?.outputTokenDetails?.reasoningTokens === "number") {
+    return u.outputTokenDetails.reasoningTokens;
+  }
+  if (typeof u?.reasoningTokens === "number") return u.reasoningTokens;
+  return undefined;
+}
+
+// True when a trial's error is attributable to the model running out of
+// output tokens (often while "thinking") rather than a genuine failure —
+// used by the report to split the error count by kind.
+export function isLengthOrReasoningError(trial: TrialOutcome): boolean {
+  if (!trial.error) return false;
+  return trial.finishReason === "length" || (trial.reasoningTokens ?? 0) > 0;
+}
+
+function errorTrial(
+  message: string,
+  extra: Partial<TrialOutcome> = {},
+): TrialOutcome {
   const skip: CheckResult = { status: "skip" };
   return {
     rawOutput: "",
     ttftMs: null,
     totalMs: 0,
+    ...extra,
     error: message,
     checks: {
       format: skip,
@@ -282,6 +314,16 @@ export async function runTrial(
         result.options,
         cursor.textBeforeCursor,
       );
+      const reasoningTokens = reasoningTokensFrom(metrics?.usage);
+      if (options.length === 0) {
+        return errorTrial("no options returned", {
+          ttftMs: metrics?.ttftMs ?? null,
+          totalMs: metrics?.totalMs ?? 0,
+          usage: metrics?.usage,
+          finishReason: metrics?.finishReason,
+          reasoningTokens,
+        });
+      }
       // Score the generator-order texts (pre-ranking). Only present on
       // the decisions path, where the ranker actually chose a winner.
       const scored = scoreUnrankedCandidates(
@@ -295,6 +337,8 @@ export async function runTrial(
         ttftMs: metrics?.ttftMs ?? null,
         totalMs: metrics?.totalMs ?? 0,
         usage: metrics?.usage,
+        finishReason: metrics?.finishReason,
+        reasoningTokens,
         generator: metrics?.generator,
         ranker: metrics?.ranker,
         candidates: scored?.candidates,
@@ -337,6 +381,24 @@ export async function runTrial(
     )) {
       output += chunk;
     }
+    const finishReason = metrics?.finishReason;
+    const reasoningTokens = reasoningTokensFrom(metrics?.usage);
+    if (
+      output.trim().length === 0 &&
+      (finishReason === "length" || (reasoningTokens ?? 0) > 0)
+    ) {
+      const outputTokens = metrics?.usage?.outputTokens ?? 0;
+      return errorTrial(
+        `empty output: finishReason=${finishReason ?? "unknown"}, reasoningTokens=${reasoningTokens ?? 0}/${outputTokens}`,
+        {
+          ttftMs: metrics?.ttftMs ?? null,
+          totalMs: metrics?.totalMs ?? 0,
+          usage: metrics?.usage,
+          finishReason,
+          reasoningTokens,
+        },
+      );
+    }
     const scored = scoreUnrankedCandidates(
       metrics?.unrankedCandidates,
       metrics?.pickedIndex,
@@ -348,6 +410,8 @@ export async function runTrial(
       ttftMs: metrics?.ttftMs ?? null,
       totalMs: metrics?.totalMs ?? 0,
       usage: metrics?.usage,
+      finishReason,
+      reasoningTokens,
       generator: metrics?.generator,
       ranker: metrics?.ranker,
       candidates: scored?.candidates,
@@ -362,7 +426,13 @@ export async function runTrial(
       },
     };
   } catch (e) {
-    const trial = errorTrial(e instanceof Error ? e.message : String(e));
+    const typedErr = e as
+      { finishReason?: string; usage?: LanguageModelUsage } | undefined;
+    const trial = errorTrial(e instanceof Error ? e.message : String(e), {
+      usage: typedErr?.usage,
+      finishReason: typedErr?.finishReason,
+      reasoningTokens: reasoningTokensFrom(typedErr?.usage),
+    });
     const raw = rawTextFromObjectError(e);
     if (raw) trial.rawOutput = raw;
     return trial;
