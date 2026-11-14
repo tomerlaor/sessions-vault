@@ -36,6 +36,10 @@ vi.mock("ai", () => ({
   generateObject: generateObjectMock,
   generateText: generateTextMock,
   streamText: streamTextMock,
+  // Tracing wraps every provider model via buildProvider (T1, #89). A
+  // passthrough keeps this suite's assertions about the underlying model
+  // (e.g. `.modelId`) and call args unaffected by that wrapping.
+  wrapLanguageModel: ({ model }: { model: unknown }) => model,
 }));
 
 import {

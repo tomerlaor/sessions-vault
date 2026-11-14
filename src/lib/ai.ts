@@ -1,4 +1,9 @@
-import { generateObject, generateText, streamText } from "ai";
+import {
+  generateObject,
+  generateText,
+  streamText,
+  wrapLanguageModel,
+} from "ai";
 import type { LanguageModelUsage } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
@@ -21,6 +26,17 @@ import {
   rawTextFromObjectError,
   repairAiJsonText,
 } from "./parse-ai-json";
+import { isLocalProvider } from "./lyrics-privacy";
+import {
+  createTraceContext,
+  createTracingMiddleware,
+  hashPrompt,
+  scrubError,
+  type SpanMode,
+  type SpanRecord,
+  type SpanStatus,
+  type TraceContext,
+} from "./ai-trace";
 
 const DEFAULT_MODELS: Record<string, string> = {
   openai: "gpt-4.1-mini",
@@ -68,19 +84,14 @@ export function shouldLogAI(env?: { DEV?: boolean }): boolean {
   return !!resolveAiLogEnv(env, import.meta.env).DEV;
 }
 
+// DEV console sink of a completed trace SpanRecord (T1, #89) — never prints
+// prompt/system/output text because SpanRecord never carries it. This is
+// the only overload new code should reach for; the string-label overload
+// below is kept so existing call sites compile unchanged.
+export function logAI(span: SpanRecord, env?: { DEV?: boolean }): void;
 export function logAI(
   fn: string,
-  {
-    model,
-    system,
-    prompt,
-    messages,
-    usage,
-    finishReason,
-    text,
-    durationMs,
-    servedBy,
-  }: {
+  fields: {
     model: string;
     system?: string;
     prompt?: string;
@@ -94,7 +105,89 @@ export function logAI(
     servedBy?: string;
   },
   env?: { DEV?: boolean },
-) {
+): void;
+export function logAI(
+  fnOrSpan: string | SpanRecord,
+  fieldsOrEnv?:
+    | {
+        model: string;
+        system?: string;
+        prompt?: string;
+        messages?: { role: string; content: string }[];
+        usage?: LanguageModelUsage;
+        finishReason?: string;
+        text?: string;
+        durationMs: number;
+        servedBy?: string;
+      }
+    | { DEV?: boolean },
+  maybeEnv?: { DEV?: boolean },
+): void {
+  if (typeof fnOrSpan !== "string") {
+    const span = fnOrSpan;
+    const env = fieldsOrEnv as { DEV?: boolean } | undefined;
+    if (!shouldLogAI(env)) return;
+    console.group(
+      `%c[AI] span ${span.operation}`,
+      "color:#ff7a45;font-weight:700",
+    );
+    console.log(
+      "feature    :",
+      span.feature,
+      span.mode ? `(${span.mode})` : "",
+    );
+    console.log(
+      "provider   :",
+      span.provider ?? "(unknown)",
+      span.locality ? `· ${span.locality}` : "",
+    );
+    console.log("model      :", span.requestModel ?? "(unknown)");
+    if (span.responseModel) console.log("served by  :", span.responseModel);
+    console.log("status     :", span.status, `(attempts: ${span.attempts})`);
+    if (span.durationMs !== undefined) {
+      console.log("duration   :", `${span.durationMs}ms`);
+    }
+    if (span.ttftMs !== undefined && span.ttftMs !== null) {
+      console.log("ttft       :", `${span.ttftMs}ms`);
+    }
+    if (span.inputTokens !== undefined || span.outputTokens !== undefined) {
+      console.log(
+        "tokens     :",
+        `${span.inputTokens ?? "?"} in + ${span.outputTokens ?? "?"} out`,
+      );
+    }
+    if (span.finishReason) console.log("finish     :", span.finishReason);
+    if (span.promptHash) console.log("prompt hash:", span.promptHash);
+    if (span.errorType) {
+      console.log("error      :", span.errorType, span.errorMessage ?? "");
+    }
+    console.groupEnd();
+    return;
+  }
+
+  const fn = fnOrSpan;
+  const {
+    model,
+    system,
+    prompt,
+    messages,
+    usage,
+    finishReason,
+    text,
+    durationMs,
+    servedBy,
+  } = fieldsOrEnv as {
+    model: string;
+    system?: string;
+    prompt?: string;
+    messages?: { role: string; content: string }[];
+    usage?: LanguageModelUsage;
+    finishReason?: string;
+    text?: string;
+    durationMs: number;
+    servedBy?: string;
+  };
+  const env = maybeEnv;
   if (!shouldLogAI(env)) return;
   const clip = (s: string, n = 200) => (s.length > n ? s.slice(0, n) + "…" : s);
   console.group(`%c[AI] ${fn}`, "color:#ff7a45;font-weight:700");
@@ -131,9 +224,7 @@ export function resolveFeatureConfig(
   return override ? { ...cfg, model: override } : cfg;
 }
 
-function buildProvider(cfg: AIConfig) {
-  const model = cfg.model || DEFAULT_MODELS[cfg.provider];
-
+function buildProviderModel(cfg: AIConfig, model: string) {
   switch (cfg.provider) {
     case "openai":
       return createOpenAI({ apiKey: cfg.apiKey })(model);
@@ -162,6 +253,95 @@ function buildProvider(cfg: AIConfig) {
         baseURL: (cfg.baseUrl || "http://localhost:1234") + "/v1",
         apiKey: "lm-studio",
       })(model);
+  }
+}
+
+// The single choke point every provider client goes through (T1, #89). When
+// a trace is given, the resulting model is wrapped with the tracing
+// middleware, so every one of the 7 call sites below is observed the same
+// way regardless of provider. There is no persistence here — a trace with
+// no `store` just records attempts/usage onto `trace.span` in memory.
+function buildProvider(cfg: AIConfig, trace?: TraceContext) {
+  const model = cfg.model || DEFAULT_MODELS[cfg.provider];
+  const base = buildProviderModel(cfg, model);
+  if (!trace) return base;
+
+  trace.span.provider = cfg.provider;
+  trace.span.locality = isLocalProvider(cfg.provider) ? "local" : "cloud";
+  trace.span.requestModel = model;
+
+  return wrapLanguageModel({
+    model: base,
+    middleware: createTracingMiddleware(trace),
+  });
+}
+
+// Used by every one of the 7 call sites below when the caller didn't thread
+// a TraceContext through (no caller does yet in this PR — that's T2's job).
+// Still wraps the provider via buildProvider so untraced call sites remain
+// visible to a DEV console warning instead of silently skipping tracing.
+function resolveTrace(
+  trace: TraceContext | undefined,
+  meta: { operation: string; mode?: SpanMode },
+): TraceContext {
+  if (trace) return trace;
+  if (shouldLogAI()) {
+    console.warn(
+      `[ai-trace] ${meta.operation} called without a trace context; recording as feature:"unknown"`,
+    );
+  }
+  return createTraceContext({
+    feature: "unknown",
+    operation: meta.operation,
+    mode: meta.mode,
+  });
+}
+
+// Shared by every call site's outer catch: classifies the final (possibly
+// already-transformed, e.g. by generateObjectLenient's fallback) error onto
+// the operation-level span. Tracing must never throw, so this swallows its
+// own failures — the original error is always rethrown by the caller.
+function finalizeTraceError(trace: TraceContext, err: unknown): void {
+  try {
+    const { errorType, errorMessage } = scrubError(err);
+    const status: SpanStatus =
+      errorType === "abort"
+        ? err instanceof Error && err.name === "TimeoutError"
+          ? "timeout"
+          : "cancelled"
+        : "error";
+    trace.span.status = status;
+    trace.span.errorType = errorType;
+    trace.span.errorMessage = errorMessage;
+  } catch {
+    // tracing failures must never break the model call
+  }
+}
+
+// Fills in the span metadata ai.ts's wrappers can know without ever storing
+// prompt/system/output text itself — only char counts, params and (when a
+// salt is available on the trace) a keyed hash.
+async function annotateTrace(
+  trace: TraceContext,
+  opts: {
+    system?: string;
+    prompt?: string;
+    params?: Record<string, unknown>;
+  },
+): Promise<void> {
+  if (opts.system !== undefined) trace.span.systemChars = opts.system.length;
+  if (opts.prompt !== undefined) trace.span.promptChars = opts.prompt.length;
+  if (opts.params) trace.span.paramsJson = JSON.stringify(opts.params);
+  if (trace.salt && opts.system !== undefined && opts.prompt !== undefined) {
+    try {
+      trace.span.promptHash = await hashPrompt(
+        trace.salt,
+        opts.system,
+        opts.prompt,
+      );
+    } catch {
+      // never block a call on a hashing failure
+    }
   }
 }
 
@@ -466,35 +646,50 @@ async function generateObjectLenient<S extends z.ZodTypeAny>({
   }
 }
 
-export async function testAIConnection(cfg: AIConfig): Promise<void> {
-  if (cfg.provider === "openrouter" && (await isLyricsModelDecisions(cfg))) {
-    const t0 = Date.now();
-    const response = await pingDecisionsModel(cfg);
-    logAI("testAIConnection", {
-      model: cfg.model || cfg.provider,
-      prompt: "decisions ping (noul question)",
-      servedBy: response.model,
-      durationMs: Date.now() - t0,
-    });
-    return;
-  }
-  const provider = buildProvider(cfg);
-  const t0 = Date.now();
-  await generateText({
-    model: provider,
-    prompt: "Reply with the single word: ok",
-    onFinish({ text, usage, finishReason, response }) {
+export async function testAIConnection(
+  cfg: AIConfig,
+  options?: { trace?: TraceContext },
+): Promise<void> {
+  const trace = resolveTrace(options?.trace, { operation: "test_connection" });
+  try {
+    if (cfg.provider === "openrouter" && (await isLyricsModelDecisions(cfg))) {
+      const t0 = Date.now();
+      const response = await pingDecisionsModel(cfg);
+      trace.span.provider = cfg.provider;
+      trace.span.requestModel = cfg.model || cfg.provider;
+      trace.span.responseModel = response.model;
+      trace.span.durationMs = Date.now() - t0;
       logAI("testAIConnection", {
         model: cfg.model || cfg.provider,
-        prompt: "Reply with the single word: ok",
-        usage,
-        finishReason,
-        servedBy: response?.modelId,
-        text,
-        durationMs: Date.now() - t0,
+        prompt: "decisions ping (noul question)",
+        servedBy: response.model,
+        durationMs: trace.span.durationMs,
       });
-    },
-  });
+      return;
+    }
+    const provider = buildProvider(cfg, trace);
+    const t0 = Date.now();
+    await generateText({
+      model: provider,
+      prompt: "Reply with the single word: ok",
+      onFinish({ text, usage, finishReason, response }) {
+        trace.span.durationMs = Date.now() - t0;
+        trace.span.outputChars = text.length;
+        logAI("testAIConnection", {
+          model: cfg.model || cfg.provider,
+          prompt: "Reply with the single word: ok",
+          usage,
+          finishReason,
+          servedBy: response?.modelId,
+          text,
+          durationMs: trace.span.durationMs,
+        });
+      },
+    });
+  } catch (err) {
+    finalizeTraceError(trace, err);
+    throw err;
+  }
 }
 
 export interface TabGenerationInput {
@@ -521,10 +716,12 @@ export type GeneratedParts = z.infer<typeof tabPartsSchema>;
 export async function generateTabStructure(
   cfg: AIConfig,
   input: TabGenerationInput,
+  options?: { trace?: TraceContext },
 ): Promise<GeneratedParts> {
+  const trace = resolveTrace(options?.trace, { operation: "tab_structure" });
   // Decisions models can't write text — fall back to the generator model.
   const effectiveCfg = await ensureTextCapableConfig(cfg);
-  const provider = buildProvider(effectiveCfg);
+  const provider = buildProvider(effectiveCfg, trace);
 
   const instList = input.instruments.join(", ");
   const styleClause = input.styleNote ? `\nStyle/feel: ${input.styleNote}` : "";
@@ -548,53 +745,74 @@ Rules per instrument:
 Name each part as "<SectionName> <Instrument>" (e.g. "Verse Guitar").
 Return exactly ${input.instruments.length} part(s), one per requested instrument.`;
 
+  await annotateTrace(trace, {
+    prompt,
+    params: { schema: "tabParts" },
+  });
   const t0 = Date.now();
-  const result = await generateObjectLenient({
-    provider,
-    schema: tabPartsSchema,
-    prompt,
-  });
-  logAI("generateTabStructure", {
-    model: effectiveCfg.model || effectiveCfg.provider,
-    prompt,
-    usage: result.usage,
-    finishReason: result.finishReason,
-    servedBy: result.response?.modelId,
-    text: JSON.stringify(result.object),
-    durationMs: Date.now() - t0,
-  });
+  try {
+    const result = await generateObjectLenient({
+      provider,
+      schema: tabPartsSchema,
+      prompt,
+    });
+    trace.span.durationMs = Date.now() - t0;
+    trace.span.outputChars = JSON.stringify(result.object).length;
+    logAI("generateTabStructure", {
+      model: effectiveCfg.model || effectiveCfg.provider,
+      prompt,
+      usage: result.usage,
+      finishReason: result.finishReason,
+      servedBy: result.response?.modelId,
+      text: JSON.stringify(result.object),
+      durationMs: trace.span.durationMs,
+    });
 
-  return result.object;
+    return result.object;
+  } catch (err) {
+    finalizeTraceError(trace, err);
+    throw err;
+  }
 }
 
 export async function chatWithTabAgent(
   cfg: AIConfig,
   system: string,
   messages: { role: "user" | "assistant"; content: string }[],
+  options?: { trace?: TraceContext },
 ): Promise<string> {
+  const trace = resolveTrace(options?.trace, { operation: "tab_chat" });
   // Decisions models can't write text — fall back to the generator model.
   const effectiveCfg = await ensureTextCapableConfig(cfg);
-  const provider = buildProvider(effectiveCfg);
+  const provider = buildProvider(effectiveCfg, trace);
+  await annotateTrace(trace, { system, params: { maxOutputTokens: 400 } });
   const t0 = Date.now();
-  const result = await generateText({
-    model: provider,
-    system,
-    messages,
-    maxOutputTokens: 400,
-    onFinish({ text, usage, finishReason, response }) {
-      logAI("chatWithTabAgent", {
-        model: effectiveCfg.model || effectiveCfg.provider,
-        system,
-        messages,
-        usage,
-        finishReason,
-        servedBy: response?.modelId,
-        text,
-        durationMs: Date.now() - t0,
-      });
-    },
-  });
-  return result.text.trim();
+  try {
+    const result = await generateText({
+      model: provider,
+      system,
+      messages,
+      maxOutputTokens: 400,
+      onFinish({ text, usage, finishReason, response }) {
+        trace.span.durationMs = Date.now() - t0;
+        trace.span.outputChars = text.length;
+        logAI("chatWithTabAgent", {
+          model: effectiveCfg.model || effectiveCfg.provider,
+          system,
+          messages,
+          usage,
+          finishReason,
+          servedBy: response?.modelId,
+          text,
+          durationMs: trace.span.durationMs,
+        });
+      },
+    });
+    return result.text.trim();
+  } catch (err) {
+    finalizeTraceError(trace, err);
+    throw err;
+  }
 }
 
 // ── Lyrics AI ─────────────────────────────────────────────────────────────────
@@ -627,8 +845,9 @@ async function generateOneLyricCandidate(
   system: string,
   prompt: string,
   signal: AbortSignal | undefined,
+  trace: TraceContext,
 ): Promise<CandidateResult> {
-  const provider = buildProvider(generatorCfg);
+  const provider = buildProvider(generatorCfg, trace);
   const result = await generateText({
     model: provider,
     system,
@@ -650,85 +869,94 @@ async function* streamLyricsSuggestionViaDecisions(
   prompt: string,
   signal: AbortSignal | undefined,
   onMetrics: ((metrics: LyricsCallMetrics) => void) | undefined,
+  trace: TraceContext,
 ): AsyncGenerator<string> {
-  const generatorCfg = buildGeneratorConfig(cfg);
-  const count = clampCandidateCount(cfg.lyricsCandidateCount);
-  const t0 = Date.now();
+  try {
+    const generatorCfg = buildGeneratorConfig(cfg);
+    const count = clampCandidateCount(cfg.lyricsCandidateCount);
+    const t0 = Date.now();
 
-  const settled = await Promise.allSettled(
-    Array.from({ length: count }, () =>
-      generateOneLyricCandidate(generatorCfg, system, prompt, signal),
-    ),
-  );
-  const fulfilled = settled.filter(
-    (r): r is PromiseFulfilledResult<CandidateResult> =>
-      r.status === "fulfilled",
-  );
-  if (fulfilled.length === 0) {
-    const firstRejected = settled.find(
-      (r): r is PromiseRejectedResult => r.status === "rejected",
+    const settled = await Promise.allSettled(
+      Array.from({ length: count }, () =>
+        generateOneLyricCandidate(generatorCfg, system, prompt, signal, trace),
+      ),
     );
-    throw firstRejected
-      ? firstRejected.reason
-      : new Error("All candidate generations failed");
-  }
+    const fulfilled = settled.filter(
+      (r): r is PromiseFulfilledResult<CandidateResult> =>
+        r.status === "fulfilled",
+    );
+    if (fulfilled.length === 0) {
+      const firstRejected = settled.find(
+        (r): r is PromiseRejectedResult => r.status === "rejected",
+      );
+      throw firstRejected
+        ? firstRejected.reason
+        : new Error("All candidate generations failed");
+    }
 
-  const generatorMs = Date.now() - t0;
-  const genUsage = fulfilled.reduce(
-    (acc, r) => addUsage(acc, r.value.usage),
-    emptyUsage(),
-  );
-  if (shouldLogAI()) {
-    logAI("streamLyricsSuggestion (generator stage)", {
-      model: generatorCfg.model,
+    const generatorMs = Date.now() - t0;
+    const genUsage = fulfilled.reduce(
+      (acc, r) => addUsage(acc, r.value.usage),
+      emptyUsage(),
+    );
+    if (shouldLogAI()) {
+      logAI("streamLyricsSuggestion (generator stage)", {
+        model: generatorCfg.model,
+        system,
+        prompt,
+        usage: genUsage,
+        durationMs: generatorMs,
+      });
+    }
+
+    const candidates = fulfilled
+      .map((r) => r.value.text)
+      .filter((t) => t.length > 0);
+    if (candidates.length === 0) {
+      trace.span.durationMs = Date.now() - t0;
+      onMetrics?.({ ttftMs: null, totalMs: Date.now() - t0, usage: genUsage });
+      return;
+    }
+
+    const unrankedItems = candidates.map((text) => ({ text }));
+    const { items: ranked, ranker } = await rankByDecisions(
+      cfg,
       system,
       prompt,
-      usage: genUsage,
-      durationMs: generatorMs,
-    });
-  }
+      unrankedItems,
+      signal,
+    );
+    const picked = ranked[0] ?? unrankedItems[0];
+    const pickedIndex = picked ? unrankedItems.indexOf(picked) : 0;
+    trace.span.durationMs = Date.now() - t0;
+    trace.span.outputChars = (picked?.text ?? candidates[0]).length;
+    yield picked?.text ?? candidates[0];
 
-  const candidates = fulfilled
-    .map((r) => r.value.text)
-    .filter((t) => t.length > 0);
-  if (candidates.length === 0) {
-    onMetrics?.({ ttftMs: null, totalMs: Date.now() - t0, usage: genUsage });
-    return;
-  }
-
-  const unrankedItems = candidates.map((text) => ({ text }));
-  const { items: ranked, ranker } = await rankByDecisions(
-    cfg,
-    system,
-    prompt,
-    unrankedItems,
-    signal,
-  );
-  const picked = ranked[0] ?? unrankedItems[0];
-  const pickedIndex = picked ? unrankedItems.indexOf(picked) : 0;
-  yield picked?.text ?? candidates[0];
-
-  if (onMetrics) {
-    const totalMs = Date.now() - t0;
-    const usage = ranker
-      ? addUsage(genUsage, decisionsUsageAsLanguageModelUsage(ranker.usage))
-      : genUsage;
-    // One emission once ranking completes — no earlier partial token to
-    // time, so ttftMs and totalMs are the same here.
-    onMetrics({
-      ttftMs: totalMs,
-      totalMs,
-      usage,
-      generator: {
-        durationMs: generatorMs,
-        usage: genUsage,
-        model: generatorCfg.model,
-        count,
-      },
-      ranker,
-      unrankedCandidates: candidates,
-      pickedIndex: pickedIndex < 0 ? 0 : pickedIndex,
-    });
+    if (onMetrics) {
+      const totalMs = Date.now() - t0;
+      const usage = ranker
+        ? addUsage(genUsage, decisionsUsageAsLanguageModelUsage(ranker.usage))
+        : genUsage;
+      // One emission once ranking completes — no earlier partial token to
+      // time, so ttftMs and totalMs are the same here.
+      onMetrics({
+        ttftMs: totalMs,
+        totalMs,
+        usage,
+        generator: {
+          durationMs: generatorMs,
+          usage: genUsage,
+          model: generatorCfg.model,
+          count,
+        },
+        ranker,
+        unrankedCandidates: candidates,
+        pickedIndex: pickedIndex < 0 ? 0 : pickedIndex,
+      });
+    }
+  } catch (err) {
+    finalizeTraceError(trace, err);
+    throw err;
   }
 }
 
@@ -738,7 +966,17 @@ export async function* streamLyricsSuggestion(
   prompt: string,
   signal?: AbortSignal,
   onMetrics?: (metrics: LyricsCallMetrics) => void,
+  options?: { trace?: TraceContext },
 ): AsyncGenerator<string> {
+  const trace = resolveTrace(options?.trace, {
+    operation: "stream_suggestion",
+  });
+  await annotateTrace(trace, {
+    system,
+    prompt,
+    params: { maxOutputTokens: 80, maxRetries: 0 },
+  });
+
   if (cfg.provider === "openrouter" && (await isLyricsModelDecisions(cfg))) {
     yield* streamLyricsSuggestionViaDecisions(
       cfg,
@@ -746,42 +984,50 @@ export async function* streamLyricsSuggestion(
       prompt,
       signal,
       onMetrics,
+      trace,
     );
     return;
   }
-  const provider = buildProvider(cfg);
+  const provider = buildProvider(cfg, trace);
   const t0 = Date.now();
   let ttftMs: number | null = null;
-  // streamText is intentionally not awaited — result.textStream is consumed lazily
-  const result = streamText({
-    model: provider,
-    system,
-    prompt,
-    maxOutputTokens: 80,
-    maxRetries: 0,
-    abortSignal: signal,
-    onFinish({ text, usage, finishReason, response }) {
-      logAI("streamLyricsSuggestion", {
-        model: cfg.model || cfg.provider,
-        system,
-        prompt,
-        usage,
-        finishReason,
-        servedBy: response?.modelId,
-        text,
-        durationMs: Date.now() - t0,
-      });
-    },
-  });
-  for await (const chunk of result.textStream) {
-    if (ttftMs === null) ttftMs = Date.now() - t0;
-    yield chunk;
-  }
-  // Await usage after the stream is fully consumed so the eval harness
-  // (and any other onMetrics caller) does not race onFinish.
-  if (onMetrics) {
-    const usage = await result.usage;
-    onMetrics({ ttftMs, totalMs: Date.now() - t0, usage });
+  try {
+    // streamText is intentionally not awaited — result.textStream is consumed lazily
+    const result = streamText({
+      model: provider,
+      system,
+      prompt,
+      maxOutputTokens: 80,
+      maxRetries: 0,
+      abortSignal: signal,
+      onFinish({ text, usage, finishReason, response }) {
+        trace.span.durationMs = Date.now() - t0;
+        trace.span.outputChars = text.length;
+        logAI("streamLyricsSuggestion", {
+          model: cfg.model || cfg.provider,
+          system,
+          prompt,
+          usage,
+          finishReason,
+          servedBy: response?.modelId,
+          text,
+          durationMs: trace.span.durationMs,
+        });
+      },
+    });
+    for await (const chunk of result.textStream) {
+      if (ttftMs === null) ttftMs = Date.now() - t0;
+      yield chunk;
+    }
+    // Await usage after the stream is fully consumed so the eval harness
+    // (and any other onMetrics caller) does not race onFinish.
+    if (onMetrics) {
+      const usage = await result.usage;
+      onMetrics({ ttftMs, totalMs: Date.now() - t0, usage });
+    }
+  } catch (err) {
+    finalizeTraceError(trace, err);
+    throw err;
   }
 }
 
@@ -800,60 +1046,68 @@ async function generateNextWordOptionsViaDecisions(
   prompt: string,
   signal: AbortSignal | undefined,
   onMetrics: ((metrics: LyricsCallMetrics) => void) | undefined,
+  trace: TraceContext,
 ): Promise<z.infer<typeof nextWordOptionsSchema>> {
-  const generatorCfg = buildGeneratorConfig(cfg);
-  const t0 = Date.now();
-  const provider = buildProvider(generatorCfg);
-  const result = await generateObjectLenient({
-    provider,
-    schema: nextWordOptionsSchema,
-    system,
-    prompt,
-    maxOutputTokens: NEXT_WORD_MAX_OUTPUT_TOKENS,
-    maxRetries: 0,
-    signal,
-    parseObject: parseNextWordOptions,
-  });
-  const generatorMs = Date.now() - t0;
-  logAI("generateNextWordOptions (generator stage)", {
-    model: generatorCfg.model,
-    system,
-    prompt,
-    usage: result.usage,
-    finishReason: result.finishReason,
-    servedBy: result.response?.modelId,
-    text: JSON.stringify(result.object),
-    durationMs: generatorMs,
-  });
-
-  const unranked = result.object.options;
-  const { items: ranked, ranker } = await rankByDecisions(
-    cfg,
-    system,
-    prompt,
-    unranked,
-    signal,
-  );
-  const pickedIndex = ranked[0] ? unranked.indexOf(ranked[0]) : 0;
-
-  const totalMs = Date.now() - t0;
-  const usage = ranker
-    ? addUsage(result.usage, decisionsUsageAsLanguageModelUsage(ranker.usage))
-    : result.usage;
-  onMetrics?.({
-    ttftMs: totalMs,
-    totalMs,
-    usage,
-    generator: {
-      durationMs: generatorMs,
-      usage: result.usage,
+  try {
+    const generatorCfg = buildGeneratorConfig(cfg);
+    const t0 = Date.now();
+    const provider = buildProvider(generatorCfg, trace);
+    const result = await generateObjectLenient({
+      provider,
+      schema: nextWordOptionsSchema,
+      system,
+      prompt,
+      maxOutputTokens: NEXT_WORD_MAX_OUTPUT_TOKENS,
+      maxRetries: 0,
+      signal,
+      parseObject: parseNextWordOptions,
+    });
+    const generatorMs = Date.now() - t0;
+    logAI("generateNextWordOptions (generator stage)", {
       model: generatorCfg.model,
-    },
-    ranker,
-    unrankedCandidates: unranked.map((o) => o.text),
-    pickedIndex: pickedIndex < 0 ? 0 : pickedIndex,
-  });
-  return { options: ranked };
+      system,
+      prompt,
+      usage: result.usage,
+      finishReason: result.finishReason,
+      servedBy: result.response?.modelId,
+      text: JSON.stringify(result.object),
+      durationMs: generatorMs,
+    });
+
+    const unranked = result.object.options;
+    const { items: ranked, ranker } = await rankByDecisions(
+      cfg,
+      system,
+      prompt,
+      unranked,
+      signal,
+    );
+    const pickedIndex = ranked[0] ? unranked.indexOf(ranked[0]) : 0;
+
+    const totalMs = Date.now() - t0;
+    const usage = ranker
+      ? addUsage(result.usage, decisionsUsageAsLanguageModelUsage(ranker.usage))
+      : result.usage;
+    trace.span.durationMs = totalMs;
+    trace.span.outputChars = JSON.stringify(ranked).length;
+    onMetrics?.({
+      ttftMs: totalMs,
+      totalMs,
+      usage,
+      generator: {
+        durationMs: generatorMs,
+        usage: result.usage,
+        model: generatorCfg.model,
+      },
+      ranker,
+      unrankedCandidates: unranked.map((o) => o.text),
+      pickedIndex: pickedIndex < 0 ? 0 : pickedIndex,
+    });
+    return { options: ranked };
+  } catch (err) {
+    finalizeTraceError(trace, err);
+    throw err;
+  }
 }
 
 export async function generateNextWordOptions(
@@ -862,7 +1116,19 @@ export async function generateNextWordOptions(
   prompt: string,
   signal?: AbortSignal,
   onMetrics?: (metrics: LyricsCallMetrics) => void,
+  options?: { trace?: TraceContext },
 ): Promise<z.infer<typeof nextWordOptionsSchema>> {
+  const trace = resolveTrace(options?.trace, { operation: "next_word" });
+  await annotateTrace(trace, {
+    system,
+    prompt,
+    params: {
+      maxOutputTokens: NEXT_WORD_MAX_OUTPUT_TOKENS,
+      maxRetries: 0,
+      schema: "nextWordOptions",
+    },
+  });
+
   if (cfg.provider === "openrouter" && (await isLyricsModelDecisions(cfg))) {
     return generateNextWordOptionsViaDecisions(
       cfg,
@@ -870,34 +1136,46 @@ export async function generateNextWordOptions(
       prompt,
       signal,
       onMetrics,
+      trace,
     );
   }
-  const provider = buildProvider(cfg);
-  const t0 = Date.now();
-  const result = await generateObjectLenient({
-    provider,
-    schema: nextWordOptionsSchema,
-    system,
-    prompt,
-    maxOutputTokens: NEXT_WORD_MAX_OUTPUT_TOKENS,
-    maxRetries: 0,
-    signal,
-    parseObject: parseNextWordOptions,
-  });
-  const durationMs = Date.now() - t0;
-  logAI("generateNextWordOptions", {
-    model: cfg.model || cfg.provider,
-    system,
-    prompt,
-    usage: result.usage,
-    finishReason: result.finishReason,
-    servedBy: result.response?.modelId,
-    text: JSON.stringify(result.object),
-    durationMs,
-  });
-  // generateObject resolves once, with no partial results — TTFT == total.
-  onMetrics?.({ ttftMs: durationMs, totalMs: durationMs, usage: result.usage });
-  return result.object;
+  try {
+    const provider = buildProvider(cfg, trace);
+    const t0 = Date.now();
+    const result = await generateObjectLenient({
+      provider,
+      schema: nextWordOptionsSchema,
+      system,
+      prompt,
+      maxOutputTokens: NEXT_WORD_MAX_OUTPUT_TOKENS,
+      maxRetries: 0,
+      signal,
+      parseObject: parseNextWordOptions,
+    });
+    const durationMs = Date.now() - t0;
+    trace.span.durationMs = durationMs;
+    trace.span.outputChars = JSON.stringify(result.object).length;
+    logAI("generateNextWordOptions", {
+      model: cfg.model || cfg.provider,
+      system,
+      prompt,
+      usage: result.usage,
+      finishReason: result.finishReason,
+      servedBy: result.response?.modelId,
+      text: JSON.stringify(result.object),
+      durationMs,
+    });
+    // generateObject resolves once, with no partial results — TTFT == total.
+    onMetrics?.({
+      ttftMs: durationMs,
+      totalMs: durationMs,
+      usage: result.usage,
+    });
+    return result.object;
+  } catch (err) {
+    finalizeTraceError(trace, err);
+    throw err;
+  }
 }
 
 export const popupSuggestionsSchema = z.object({
@@ -916,39 +1194,47 @@ async function generatePopupSuggestionsViaDecisions(
   system: string,
   prompt: string,
   signal: AbortSignal | undefined,
+  trace: TraceContext,
 ): Promise<PopupSuggestions> {
-  const generatorCfg = buildGeneratorConfig(cfg);
-  const t0 = Date.now();
-  const provider = buildProvider(generatorCfg);
-  const result = await generateObjectLenient({
-    provider,
-    schema: popupSuggestionsSchema,
-    system,
-    prompt,
-    maxOutputTokens: 300,
-    maxRetries: 1,
-    signal,
-  });
-  logAI("generatePopupSuggestions (generator stage)", {
-    model: generatorCfg.model,
-    system,
-    prompt,
-    usage: result.usage,
-    finishReason: result.finishReason,
-    servedBy: result.response?.modelId,
-    text: JSON.stringify(result.object),
-    durationMs: Date.now() - t0,
-  });
+  try {
+    const generatorCfg = buildGeneratorConfig(cfg);
+    const t0 = Date.now();
+    const provider = buildProvider(generatorCfg, trace);
+    const result = await generateObjectLenient({
+      provider,
+      schema: popupSuggestionsSchema,
+      system,
+      prompt,
+      maxOutputTokens: 300,
+      maxRetries: 1,
+      signal,
+    });
+    logAI("generatePopupSuggestions (generator stage)", {
+      model: generatorCfg.model,
+      system,
+      prompt,
+      usage: result.usage,
+      finishReason: result.finishReason,
+      servedBy: result.response?.modelId,
+      text: JSON.stringify(result.object),
+      durationMs: Date.now() - t0,
+    });
 
-  // Rank within the list — the popup shows every suggestion, best first.
-  const { items: ranked } = await rankByDecisions(
-    cfg,
-    system,
-    prompt,
-    result.object.suggestions,
-    signal,
-  );
-  return { suggestions: ranked };
+    // Rank within the list — the popup shows every suggestion, best first.
+    const { items: ranked } = await rankByDecisions(
+      cfg,
+      system,
+      prompt,
+      result.object.suggestions,
+      signal,
+    );
+    trace.span.durationMs = Date.now() - t0;
+    trace.span.outputChars = JSON.stringify(ranked).length;
+    return { suggestions: ranked };
+  } catch (err) {
+    finalizeTraceError(trace, err);
+    throw err;
+  }
 }
 
 export async function generatePopupSuggestions(
@@ -956,61 +1242,96 @@ export async function generatePopupSuggestions(
   system: string,
   prompt: string,
   signal?: AbortSignal,
+  options?: { trace?: TraceContext },
 ): Promise<PopupSuggestions> {
+  const trace = resolveTrace(options?.trace, { operation: "popup" });
+  await annotateTrace(trace, {
+    system,
+    prompt,
+    params: { maxOutputTokens: 300, maxRetries: 1, schema: "popupSuggestions" },
+  });
+
   if (cfg.provider === "openrouter" && (await isLyricsModelDecisions(cfg))) {
-    return generatePopupSuggestionsViaDecisions(cfg, system, prompt, signal);
+    return generatePopupSuggestionsViaDecisions(
+      cfg,
+      system,
+      prompt,
+      signal,
+      trace,
+    );
   }
-  const provider = buildProvider(cfg);
-  const t0 = Date.now();
-  const result = await generateObjectLenient({
-    provider,
-    schema: popupSuggestionsSchema,
-    system,
-    prompt,
-    maxOutputTokens: 300,
-    maxRetries: 1,
-    signal,
-  });
-  logAI("generatePopupSuggestions", {
-    model: cfg.model || cfg.provider,
-    system,
-    prompt,
-    usage: result.usage,
-    finishReason: result.finishReason,
-    servedBy: result.response?.modelId,
-    text: JSON.stringify(result.object),
-    durationMs: Date.now() - t0,
-  });
-  return result.object;
+  try {
+    const provider = buildProvider(cfg, trace);
+    const t0 = Date.now();
+    const result = await generateObjectLenient({
+      provider,
+      schema: popupSuggestionsSchema,
+      system,
+      prompt,
+      maxOutputTokens: 300,
+      maxRetries: 1,
+      signal,
+    });
+    trace.span.durationMs = Date.now() - t0;
+    trace.span.outputChars = JSON.stringify(result.object).length;
+    logAI("generatePopupSuggestions", {
+      model: cfg.model || cfg.provider,
+      system,
+      prompt,
+      usage: result.usage,
+      finishReason: result.finishReason,
+      servedBy: result.response?.modelId,
+      text: JSON.stringify(result.object),
+      durationMs: trace.span.durationMs,
+    });
+    return result.object;
+  } catch (err) {
+    finalizeTraceError(trace, err);
+    throw err;
+  }
 }
 
 export async function generateStyleSummary(
   cfg: AIConfig,
   recentAccepted: string[],
   signal?: AbortSignal,
+  options?: { trace?: TraceContext },
 ): Promise<string> {
   if (recentAccepted.length === 0) return "";
+  const trace = resolveTrace(options?.trace, { operation: "style_summary" });
   // Decisions models can't write text — fall back to the generator model.
   const effectiveCfg = await ensureTextCapableConfig(cfg);
-  const provider = buildProvider(effectiveCfg);
+  const provider = buildProvider(effectiveCfg, trace);
   const t0 = Date.now();
-  const result = await generateText({
-    model: provider,
-    prompt: `Analyse the following song lyric lines written by a musician. Write a 1-2 sentence description of their lyric writing style — focus on rhyme scheme, line length, imagery, tone, and vocabulary register. Be concise and specific.\n\nLines:\n${recentAccepted.map((t, i) => `${i + 1}. ${t}`).join("\n")}\n\nDescription:`,
-    maxOutputTokens: 60,
-    maxRetries: 1,
-    abortSignal: signal,
-    onFinish({ text, usage, finishReason, response }) {
-      logAI("generateStyleSummary", {
-        model: effectiveCfg.model || effectiveCfg.provider,
-        prompt: `${recentAccepted.length} lyric lines`,
-        usage,
-        finishReason,
-        servedBy: response?.modelId,
-        text,
-        durationMs: Date.now() - t0,
-      });
-    },
+  const prompt = `Analyse the following song lyric lines written by a musician. Write a 1-2 sentence description of their lyric writing style — focus on rhyme scheme, line length, imagery, tone, and vocabulary register. Be concise and specific.\n\nLines:\n${recentAccepted.map((t, i) => `${i + 1}. ${t}`).join("\n")}\n\nDescription:`;
+  await annotateTrace(trace, {
+    prompt,
+    params: { maxOutputTokens: 60, maxRetries: 1 },
   });
-  return result.text.trim();
+  try {
+    const result = await generateText({
+      model: provider,
+      prompt,
+      maxOutputTokens: 60,
+      maxRetries: 1,
+      abortSignal: signal,
+      onFinish({ text, usage, finishReason, response }) {
+        trace.span.durationMs = Date.now() - t0;
+        trace.span.outputChars = text.length;
+        logAI("generateStyleSummary", {
+          model: effectiveCfg.model || effectiveCfg.provider,
+          prompt: `${recentAccepted.length} lyric lines`,
+          usage,
+          finishReason,
+          servedBy: response?.modelId,
+          text,
+          durationMs: trace.span.durationMs,
+        });
+      },
+    });
+    return result.text.trim();
+  } catch (err) {
+    finalizeTraceError(trace, err);
+    throw err;
+  }
 }
