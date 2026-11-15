@@ -33,6 +33,15 @@ export type AIFeature = "lyrics" | "tabAgent";
 // the catalog/known patterns; "on"/"off" force the classification either way.
 export type LyricsDecisionsMode = "auto" | "on" | "off";
 
+// OpenRouter only (see src/lib/openrouter.ts resolveReasoningParam). "off"
+// (the default — undefined means "off") sends reasoning:{effort:"none"}
+// when the model's catalog entry allows it; "provider-default" sends
+// nothing and leaves the provider's own default reasoning behavior in
+// place. The named efforts aren't surfaced in Settings — they exist so
+// scripts/ai-cli.ts --reasoning can run reasoning-level experiments.
+export type LyricsReasoningSetting =
+  "off" | "provider-default" | "minimal" | "low" | "medium" | "high";
+
 export interface AIConfig {
   provider: AIProvider;
   apiKey: string;
@@ -51,6 +60,10 @@ export interface AIConfig {
   lyricsGeneratorModel?: string;
   lyricsCandidateCount?: number;
   lyricsDecisionsMode?: LyricsDecisionsMode;
+  // Applied to lyrics calls only (stream, next_word, popup, decisions
+  // generators) and the style summary — never the Tab Agent, tab structure,
+  // or testAIConnection. See src/lib/ai.ts buildProvider.
+  lyricsReasoning?: LyricsReasoningSetting;
 }
 
 export interface TabPart {
