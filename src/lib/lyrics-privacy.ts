@@ -38,20 +38,46 @@ export const LOCAL_PROVIDER_DEFAULT_BASE_URL: Record<string, string> = {
   lmstudio: "http://localhost:1234",
 };
 
-// True once the lyrics helper would send a cloud request without the user
-// ever having agreed to it — either never granted, or granted for a
-// provider that has since changed.
+// True once a feature would send a cloud request without the user ever
+// having agreed to it for the *current* provider — never granted, granted
+// for a provider that has since changed, or a legacy timestamp with no
+// stored provider (re-ask; the disclosure names a specific provider).
 export function needsCloudConsent(
   provider: AIProvider | null | undefined,
   cloudConsentAt: number | null | undefined,
+  cloudConsentProvider?: AIProvider | null,
 ): boolean {
-  return !!provider && isCloudProvider(provider) && !cloudConsentAt;
+  if (!provider || !isCloudProvider(provider)) return false;
+  if (!cloudConsentAt) return true;
+  if (!cloudConsentProvider) return true;
+  return cloudConsentProvider !== provider;
 }
 
 // Used by the consent modal's "Switch to local" action: keeps the current
 // provider if it's already local, otherwise defaults to Ollama.
 export function pickLocalProvider(current: AIProvider): AIProvider {
   return isLocalProvider(current) ? current : "ollama";
+}
+
+// Builds the AIConfig to persist when the user switches provider in
+// Settings → AI Assistant. Clears the key, per-feature model overrides,
+// and Tab Agent consent so a disclosure for the previous provider cannot
+// unlock the new one. Lyrics consent lives on LyricsAIConfig and is
+// re-checked by needsCloudConsent via cloudConsentProvider.
+export function switchAIProvider(
+  current: AIConfig,
+  nextProvider: AIProvider,
+): AIConfig {
+  return {
+    ...current,
+    provider: nextProvider,
+    apiKey: "",
+    model: "",
+    lyricsModel: "",
+    tabAgentModel: "",
+    tabAgentCloudConsentAt: undefined,
+    tabAgentCloudConsentProvider: undefined,
+  };
 }
 
 // Builds the AIConfig to persist when the user chooses "Switch to local" in
@@ -85,13 +111,20 @@ export function gateCloudAi(
   feature: AIFeature,
   project: { aiOptOut: boolean },
   provider: AIProvider | null | undefined,
-  opts: { cloudConsentAt?: number | null; enabled?: boolean },
+  opts: {
+    cloudConsentAt?: number | null;
+    cloudConsentProvider?: AIProvider | null;
+    enabled?: boolean;
+  },
 ): CloudAiGate {
   if (project.aiOptOut) return { status: "opted_out" };
   if (feature === "lyrics" && opts.enabled === false) {
     return { status: "disabled" };
   }
-  if (provider && needsCloudConsent(provider, opts.cloudConsentAt)) {
+  if (
+    provider &&
+    needsCloudConsent(provider, opts.cloudConsentAt, opts.cloudConsentProvider)
+  ) {
     return { status: "needs_consent", provider };
   }
   return { status: "ok" };
@@ -105,6 +138,7 @@ export function gateLyricsAi(
 ): CloudAiGate {
   return gateCloudAi("lyrics", { aiOptOut: projectAiOptOut }, provider, {
     cloudConsentAt: cfg.cloudConsentAt,
+    cloudConsentProvider: cfg.cloudConsentProvider,
     enabled: cfg.enabled,
   });
 }
@@ -127,6 +161,7 @@ export function resolveTabAgentLoad(
   if (project.aiOptOut) return { kind: "opted_out" };
   const gate = gateCloudAi("tabAgent", project, cfgNoKey?.provider ?? null, {
     cloudConsentAt: cfgNoKey?.tabAgentCloudConsentAt,
+    cloudConsentProvider: cfgNoKey?.tabAgentCloudConsentProvider,
   });
   if (gate.status === "needs_consent") {
     return { kind: "needs_consent", provider: gate.provider };

@@ -36,6 +36,7 @@ type Step =
   | "loading"
   | "opted-out"
   | "no-config"
+  | "load-error"
   | "needs-consent"
   | "confirm"
   | "section"
@@ -79,6 +80,7 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
   const [consentProvider, setConsentProvider] = useState<AIProvider | null>(
     null,
   );
+  const [consentBusy, setConsentBusy] = useState(false);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [wizard, setWizard] = useState<WizardState>({
     sectionName: "",
@@ -96,7 +98,6 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
-  const initialized = useRef(false);
 
   const addAgent = (text: string) =>
     setMessages((m) => [...m, { role: "agent", text }]);
@@ -158,67 +159,110 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
   // Mirrors LyricsAiOverlay.checkAndMaybeLoad: never read the keychain or
   // call the AI provider while opted out or lacking cloud consent.
   useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
+    let cancelled = false;
 
-    if (project.aiOptOut) {
-      setStep("opted-out");
-      return;
-    }
+    const load = async () => {
+      try {
+        if (project.aiOptOut) {
+          if (!cancelled) setStep("opted-out");
+          return;
+        }
 
-    getAIConfigWithoutKey().then((cfgNoKey) => {
-      const decision = resolveTabAgentLoad(project, cfgNoKey);
+        const cfgNoKey = await getAIConfigWithoutKey();
+        if (cancelled) return;
+        const decision = resolveTabAgentLoad(project, cfgNoKey);
 
-      if (decision.kind === "opted_out") {
-        setStep("opted-out");
-        return;
-      }
-      if (decision.kind === "needs_consent") {
-        setConsentProvider(decision.provider);
-        setStep("needs-consent");
-        return;
-      }
-      if (decision.kind === "no_config") {
-        setStep("no-config");
-        return;
-      }
-      if (!decision.readKeychain) {
-        // Local providers need no API key — skip the keychain entirely.
-        // (decision.kind === "ok" only when cfgNoKey is non-null.)
-        applyResolvedConfig(resolveFeatureConfig(cfgNoKey!, "tabAgent"));
-        return;
-      }
-      getAIConfigFor("tabAgent").then((cfg) => {
+        if (decision.kind === "opted_out") {
+          if (!cancelled) setStep("opted-out");
+          return;
+        }
+        if (decision.kind === "needs_consent") {
+          if (!cancelled) {
+            setConsentProvider(decision.provider);
+            setStep("needs-consent");
+          }
+          return;
+        }
+        if (decision.kind === "no_config") {
+          if (!cancelled) setStep("no-config");
+          return;
+        }
+        if (!decision.readKeychain) {
+          // Local providers need no API key — skip the keychain entirely.
+          // (decision.kind === "ok" only when cfgNoKey is non-null.)
+          if (!cancelled) {
+            applyResolvedConfig(resolveFeatureConfig(cfgNoKey!, "tabAgent"));
+          }
+          return;
+        }
+        const cfg = await getAIConfigFor("tabAgent");
+        if (cancelled) return;
         if (!cfg) {
           setStep("no-config");
           return;
         }
         applyResolvedConfig(cfg);
-      });
-    });
-  }, [project]);
+      } catch {
+        // Never leave the modal stuck on "Analysing your project…".
+        if (!cancelled) setStep("load-error");
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+    // Mount-only: the modal remounts on every open, and the cancelled flag
+    // ignores late results after unmount, including StrictMode's double-invoke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleConsentUseCloud = async () => {
-    const current = await getAIConfigWithoutKey();
-    if (!current) return;
-    const next: AIConfig = { ...current, tabAgentCloudConsentAt: Date.now() };
-    await setAIConfig(next);
-    setConsentProvider(null);
-    const cfg = await getAIConfigFor("tabAgent");
-    if (!cfg) {
-      setStep("no-config");
-      return;
+    if (consentBusy) return;
+    setConsentBusy(true);
+    try {
+      const current = await getAIConfigWithoutKey();
+      if (!current) {
+        setStep("no-config");
+        return;
+      }
+      const next: AIConfig = {
+        ...current,
+        tabAgentCloudConsentAt: Date.now(),
+        tabAgentCloudConsentProvider: current.provider,
+      };
+      await setAIConfig(next);
+      setConsentProvider(null);
+      const cfg = await getAIConfigFor("tabAgent");
+      if (!cfg) {
+        setStep("no-config");
+        return;
+      }
+      applyResolvedConfig(cfg);
+    } catch {
+      setStep("load-error");
+    } finally {
+      setConsentBusy(false);
     }
-    applyResolvedConfig(cfg);
   };
 
   const handleConsentSwitchToLocal = async () => {
-    const current = await getAIConfigWithoutKey();
-    if (!current) return;
-    const next = switchToLocalAIConfig(current);
-    await setAIConfig(next);
-    setConsentProvider(null);
-    applyResolvedConfig(resolveFeatureConfig(next, "tabAgent"));
+    if (consentBusy) return;
+    setConsentBusy(true);
+    try {
+      const current = await getAIConfigWithoutKey();
+      if (!current) {
+        setStep("no-config");
+        return;
+      }
+      const next = switchToLocalAIConfig(current);
+      await setAIConfig(next);
+      setConsentProvider(null);
+      applyResolvedConfig(resolveFeatureConfig(next, "tabAgent"));
+    } catch {
+      setStep("load-error");
+    } finally {
+      setConsentBusy(false);
+    }
   };
 
   const goToInstruments = (sectionName: string, chords: string) => {
@@ -295,7 +339,7 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
   };
 
   const handleGenerate = async () => {
-    if (!aiCfg) return;
+    if (!aiCfg || project.aiOptOut) return;
     setStep("generating");
     addAgent("Generating your tab structure…");
     try {
@@ -331,7 +375,7 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
 
   const sendFreeformMessage = async () => {
     const text = chatInput.trim();
-    if (!text || !aiCfg || chatSending) return;
+    if (!text || !aiCfg || chatSending || project.aiOptOut) return;
     setChatInput("");
     addUser(text);
     setChatSending(true);
@@ -373,12 +417,14 @@ If the user asks a question rather than requesting generation, answer concisely.
     step !== "loading" &&
     step !== "opted-out" &&
     step !== "no-config" &&
+    step !== "load-error" &&
     step !== "needs-consent" &&
     step !== "generating";
   const composeDisabled =
     step === "loading" ||
     step === "opted-out" ||
     step === "no-config" ||
+    step === "load-error" ||
     step === "needs-consent" ||
     step === "generating";
 
@@ -422,7 +468,7 @@ If the user asks a question rather than requesting generation, answer concisely.
               <span className="agent-avatar">✦</span>
               <div className="agent-bubble-text">
                 The Tab Agent is set to use a cloud AI provider. Choose how to
-                proceed above.
+                proceed in the dialog.
               </div>
             </div>
           )}
@@ -434,6 +480,16 @@ If the user asks a question rather than requesting generation, answer concisely.
                 No AI provider configured yet. Open{" "}
                 <b>Settings → AI Assistant</b> to add your API key or local
                 runner URL, then come back.
+              </div>
+            </div>
+          )}
+
+          {step === "load-error" && (
+            <div className="agent-bubble agent">
+              <span className="agent-avatar">✦</span>
+              <div className="agent-bubble-text">
+                Couldn't load AI settings. Open <b>Settings → AI Assistant</b>{" "}
+                and try again.
               </div>
             </div>
           )}
@@ -597,6 +653,7 @@ If the user asks a question rather than requesting generation, answer concisely.
         <TabAgentCloudConsentModal
           provider={consentProvider}
           localProvider={pickLocalProvider(consentProvider)}
+          busy={consentBusy}
           onUseCloud={handleConsentUseCloud}
           onSwitchToLocal={handleConsentSwitchToLocal}
         />

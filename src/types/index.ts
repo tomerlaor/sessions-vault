@@ -56,8 +56,12 @@ export interface AIConfig {
   // history) to a cloud provider. Separate from LyricsAIConfig.cloudConsentAt
   // — the R2 disclosure lists exactly what is sent, and Tab Agent's payload
   // is not the lyrics payload. Missing for local providers or if never
-  // granted.
+  // granted. A timestamp without tabAgentCloudConsentProvider is treated as
+  // stale and must be re-granted (safe default for older configs).
   tabAgentCloudConsentAt?: number;
+  // The cloud provider named in the Tab Agent disclosure when consent was
+  // granted. Consent is re-asked if the current provider differs.
+  tabAgentCloudConsentProvider?: AIProvider;
 }
 
 export interface TabPart {
@@ -181,7 +185,12 @@ export interface LyricsAIConfig {
   feedbackMode: LyricFeedbackMode;
   // Unix ms when the user consented to sending lyrics to a cloud provider.
   // Missing for local providers (no consent needed) or if never granted.
+  // A timestamp without cloudConsentProvider is treated as stale and must
+  // be re-granted (safe default for older configs).
   cloudConsentAt?: number;
+  // The cloud provider named in the lyrics disclosure when consent was
+  // granted. Consent is re-asked if the current provider differs.
+  cloudConsentProvider?: AIProvider;
 }
 
 export type ProjectFileKind = "mix_project" | "master_project" | "export";

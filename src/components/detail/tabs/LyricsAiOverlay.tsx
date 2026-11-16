@@ -211,13 +211,18 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
     }, [checkAndMaybeLoad]);
 
     const handleConsentUseCloud = useCallback(async () => {
-      const next = { ...cfg, cloudConsentAt: Date.now() };
+      if (!consentProvider) return;
+      const next: LyricsAIConfig = {
+        ...cfg,
+        cloudConsentAt: Date.now(),
+        cloudConsentProvider: consentProvider,
+      };
       await setLyricsAIConfig(next);
       setCfg(next);
       window.dispatchEvent(
         new CustomEvent("lyrics-ai-config-changed", { detail: next }),
       );
-    }, [cfg]);
+    }, [cfg, consentProvider]);
 
     const handleConsentSwitchToLocal = useCallback(async () => {
       const current = (await getAIConfigWithoutKey()) ?? {

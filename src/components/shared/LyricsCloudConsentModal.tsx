@@ -7,6 +7,7 @@ interface Props {
   localProvider: AIProvider;
   onUseCloud: () => void;
   onSwitchToLocal: () => void;
+  busy?: boolean;
 }
 
 const SENT_ITEMS = [
@@ -22,6 +23,7 @@ export default function LyricsCloudConsentModal({
   localProvider,
   onUseCloud,
   onSwitchToLocal,
+  busy,
 }: Props) {
   return (
     <CloudConsentModal
@@ -37,6 +39,7 @@ export default function LyricsCloudConsentModal({
       localProvider={localProvider}
       onUseCloud={onUseCloud}
       onSwitchToLocal={onSwitchToLocal}
+      busy={busy}
     />
   );
 }

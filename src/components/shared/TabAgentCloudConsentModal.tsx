@@ -7,6 +7,7 @@ interface Props {
   localProvider: AIProvider;
   onUseCloud: () => void;
   onSwitchToLocal: () => void;
+  busy?: boolean;
 }
 
 const SENT_ITEMS = [
@@ -23,6 +24,7 @@ export default function TabAgentCloudConsentModal({
   localProvider,
   onUseCloud,
   onSwitchToLocal,
+  busy,
 }: Props) {
   return (
     <CloudConsentModal
@@ -38,6 +40,7 @@ export default function TabAgentCloudConsentModal({
       localProvider={localProvider}
       onUseCloud={onUseCloud}
       onSwitchToLocal={onSwitchToLocal}
+      busy={busy}
     />
   );
 }

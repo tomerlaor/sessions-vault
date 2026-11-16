@@ -14,6 +14,7 @@ interface Props {
   localProvider: AIProvider;
   onUseCloud: () => void;
   onSwitchToLocal: () => void;
+  busy?: boolean;
 }
 
 export default function CloudConsentModal({
@@ -24,6 +25,7 @@ export default function CloudConsentModal({
   localProvider,
   onUseCloud,
   onSwitchToLocal,
+  busy = false,
 }: Props) {
   return createPortal(
     <div
@@ -90,7 +92,8 @@ export default function CloudConsentModal({
             style={{ fontSize: 11, color: "var(--text-3)", lineHeight: 1.6 }}
           >
             Nothing is sent until you choose. You can change this later in
-            Settings → AI Assistant.
+            Settings → AI Assistant. Switch to local applies app-wide, including
+            the lyrics helper and the Tab Agent.
           </div>
         </div>
 
@@ -104,6 +107,7 @@ export default function CloudConsentModal({
           <button
             className="tb-btn"
             style={{ flex: 1, justifyContent: "center", fontSize: 12 }}
+            disabled={busy}
             onClick={onSwitchToLocal}
           >
             Switch to local ({localProviderLabel(localProvider)})
@@ -111,6 +115,7 @@ export default function CloudConsentModal({
           <button
             className="tb-btn"
             style={{ flex: 1, justifyContent: "center", fontSize: 12 }}
+            disabled={busy}
             onClick={onUseCloud}
           >
             Use cloud ({cloudProviderLabel(provider)})
