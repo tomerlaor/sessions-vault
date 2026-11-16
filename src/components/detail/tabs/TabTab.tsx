@@ -182,9 +182,12 @@ export default function TabTab({ project: p, onUpdate }: Props) {
           <div className="tab-add-row">
             <button
               className="tb-btn primary"
-              onClick={() => setAgentOpen(true)}
+              disabled={p.aiOptOut}
+              onClick={() => {
+                if (!p.aiOptOut) setAgentOpen(true);
+              }}
             >
-              ✦ Generate with AI
+              {p.aiOptOut ? "AI off for this song" : "✦ Generate with AI"}
             </button>
           </div>
           <div className="tab-add-row" style={{ paddingTop: 0 }}>
@@ -260,10 +263,17 @@ export default function TabTab({ project: p, onUpdate }: Props) {
               </button>
               <button
                 className="tab-part-btn"
-                style={{ color: "var(--accent)" }}
-                onClick={() => setAgentOpen(true)}
+                style={
+                  p.aiOptOut
+                    ? { color: "var(--text-3)" }
+                    : { color: "var(--accent)" }
+                }
+                disabled={p.aiOptOut}
+                onClick={() => {
+                  if (!p.aiOptOut) setAgentOpen(true);
+                }}
               >
-                ✦ AI
+                {p.aiOptOut ? "AI off for this song" : "✦ AI"}
               </button>
             </>
           )}

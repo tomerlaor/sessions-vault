@@ -1,4 +1,4 @@
-import type { AIConfig, AIProvider, LyricsAIConfig } from "../types";
+import type { AIConfig, AIFeature, AIProvider, LyricsAIConfig } from "../types";
 import { resolveIsDecisionsModel } from "./openrouter-decisions";
 
 export const CLOUD_AI_PROVIDERS: AIProvider[] = [
@@ -71,25 +71,68 @@ export function switchToLocalAIConfig(current: AIConfig): AIConfig {
   };
 }
 
-export type LyricsAiGate =
+export type CloudAiGate =
   | { status: "opted_out" }
   | { status: "disabled" }
   | { status: "needs_consent"; provider: AIProvider }
   | { status: "ok" };
 
-// The single gate LyricsAiOverlay consults before reading the API key from
-// the keychain or making any cloud request.
+export type LyricsAiGate = CloudAiGate;
+
+// The single gate every cloud-AI feature (lyrics, tab agent) consults before
+// reading the API key from the keychain or making any cloud request.
+export function gateCloudAi(
+  feature: AIFeature,
+  project: { aiOptOut: boolean },
+  provider: AIProvider | null | undefined,
+  opts: { cloudConsentAt?: number | null; enabled?: boolean },
+): CloudAiGate {
+  if (project.aiOptOut) return { status: "opted_out" };
+  if (feature === "lyrics" && opts.enabled === false) {
+    return { status: "disabled" };
+  }
+  if (provider && needsCloudConsent(provider, opts.cloudConsentAt)) {
+    return { status: "needs_consent", provider };
+  }
+  return { status: "ok" };
+}
+
+// Thin wrapper kept for the lyrics helper's existing call sites/tests.
 export function gateLyricsAi(
   projectAiOptOut: boolean,
   cfg: LyricsAIConfig,
   provider: AIProvider | null | undefined,
-): LyricsAiGate {
-  if (projectAiOptOut) return { status: "opted_out" };
-  if (!cfg.enabled) return { status: "disabled" };
-  if (provider && needsCloudConsent(provider, cfg.cloudConsentAt)) {
-    return { status: "needs_consent", provider };
+): CloudAiGate {
+  return gateCloudAi("lyrics", { aiOptOut: projectAiOptOut }, provider, {
+    cloudConsentAt: cfg.cloudConsentAt,
+    enabled: cfg.enabled,
+  });
+}
+
+export type TabAgentLoadDecision =
+  | { kind: "opted_out" }
+  | { kind: "no_config" }
+  | { kind: "needs_consent"; provider: AIProvider }
+  | { kind: "ok"; readKeychain: boolean };
+
+// The Tab Agent modal's mount-time decision: whether it's safe to read the
+// keychain and start the wizard, or whether it must stop and show opt-out,
+// no-config, or consent UI first. `readKeychain` tells the caller whether
+// it still needs getAIConfigFor (cloud) or can skip straight to
+// resolveFeatureConfig on cfgNoKey (local — no key to read).
+export function resolveTabAgentLoad(
+  project: { aiOptOut: boolean },
+  cfgNoKey: AIConfig | null,
+): TabAgentLoadDecision {
+  if (project.aiOptOut) return { kind: "opted_out" };
+  const gate = gateCloudAi("tabAgent", project, cfgNoKey?.provider ?? null, {
+    cloudConsentAt: cfgNoKey?.tabAgentCloudConsentAt,
+  });
+  if (gate.status === "needs_consent") {
+    return { kind: "needs_consent", provider: gate.provider };
   }
-  return { status: "ok" };
+  if (!cfgNoKey) return { kind: "no_config" };
+  return { kind: "ok", readKeychain: !isLocalProvider(cfgNoKey.provider) };
 }
 
 // Lyrics toolbar badge. Callers should resolve the lyrics model override

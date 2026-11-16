@@ -51,6 +51,13 @@ export interface AIConfig {
   lyricsGeneratorModel?: string;
   lyricsCandidateCount?: number;
   lyricsDecisionsMode?: LyricsDecisionsMode;
+  // Unix ms when the user consented to sending Tab Agent data (section name,
+  // chords, instruments/bars/time signature, optional style note, chat
+  // history) to a cloud provider. Separate from LyricsAIConfig.cloudConsentAt
+  // — the R2 disclosure lists exactly what is sent, and Tab Agent's payload
+  // is not the lyrics payload. Missing for local providers or if never
+  // granted.
+  tabAgentCloudConsentAt?: number;
 }
 
 export interface TabPart {

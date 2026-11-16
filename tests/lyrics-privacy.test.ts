@@ -6,6 +6,8 @@ import {
   pickLocalProvider,
   switchToLocalAIConfig,
   gateLyricsAi,
+  gateCloudAi,
+  resolveTabAgentLoad,
   aiBadgeLabel,
   cloudProviderLabel,
   localProviderLabel,
@@ -132,6 +134,135 @@ describe("gateLyricsAi", () => {
 
   it("is ok when no provider is configured yet (nothing to gate)", () => {
     expect(gateLyricsAi(false, cfg, null)).toEqual({ status: "ok" });
+  });
+});
+
+describe("gateCloudAi", () => {
+  it("opt-out wins for tabAgent regardless of provider or consent", () => {
+    expect(gateCloudAi("tabAgent", { aiOptOut: true }, "openai", {})).toEqual({
+      status: "opted_out",
+    });
+    expect(
+      gateCloudAi("tabAgent", { aiOptOut: true }, "ollama", {
+        cloudConsentAt: Date.now(),
+      }),
+    ).toEqual({ status: "opted_out" });
+  });
+
+  it("needs consent for tabAgent with a cloud provider and no tabAgentCloudConsentAt", () => {
+    expect(gateCloudAi("tabAgent", { aiOptOut: false }, "openai", {})).toEqual({
+      status: "needs_consent",
+      provider: "openai",
+    });
+  });
+
+  it("is ok for tabAgent with a local provider and no consent", () => {
+    expect(gateCloudAi("tabAgent", { aiOptOut: false }, "ollama", {})).toEqual({
+      status: "ok",
+    });
+  });
+
+  it("is ok for tabAgent with a cloud provider once tabAgentCloudConsentAt is set", () => {
+    expect(
+      gateCloudAi("tabAgent", { aiOptOut: false }, "openai", {
+        cloudConsentAt: Date.now(),
+      }),
+    ).toEqual({ status: "ok" });
+  });
+
+  it("is ok for tabAgent when no provider is configured yet", () => {
+    expect(gateCloudAi("tabAgent", { aiOptOut: false }, null, {})).toEqual({
+      status: "ok",
+    });
+  });
+
+  it("disabled only applies to the lyrics feature", () => {
+    expect(
+      gateCloudAi("lyrics", { aiOptOut: false }, "openai", {
+        enabled: false,
+        cloudConsentAt: Date.now(),
+      }),
+    ).toEqual({ status: "disabled" });
+    expect(
+      gateCloudAi("tabAgent", { aiOptOut: false }, "ollama", {
+        enabled: false,
+      }),
+    ).toEqual({ status: "ok" });
+  });
+
+  it("a lyrics cloudConsentAt alone does not satisfy the tabAgent gate", () => {
+    // LyricsAIConfig.cloudConsentAt lives on a different config object than
+    // AIConfig.tabAgentCloudConsentAt — granting lyrics consent must not be
+    // mistaken for tab agent consent.
+    const lyricsCfg: LyricsAIConfig = {
+      enabled: true,
+      mode: "inline",
+      enabledModes: ["completion"],
+      feedbackMode: "minimal",
+      cloudConsentAt: Date.now(),
+    };
+    expect(gateLyricsAi(false, lyricsCfg, "openai")).toEqual({
+      status: "ok",
+    });
+    expect(
+      gateCloudAi("tabAgent", { aiOptOut: false }, "openai", {
+        cloudConsentAt: undefined,
+      }),
+    ).toEqual({ status: "needs_consent", provider: "openai" });
+  });
+});
+
+describe("resolveTabAgentLoad", () => {
+  it("opts out regardless of config", () => {
+    expect(resolveTabAgentLoad({ aiOptOut: true }, null)).toEqual({
+      kind: "opted_out",
+    });
+  });
+
+  it("has no config when none is stored", () => {
+    expect(resolveTabAgentLoad({ aiOptOut: false }, null)).toEqual({
+      kind: "no_config",
+    });
+  });
+
+  it("needs consent for a cloud provider with no tabAgentCloudConsentAt", () => {
+    const cfg: AIConfig = {
+      provider: "openai",
+      apiKey: "",
+      baseUrl: "",
+      model: "",
+    };
+    expect(resolveTabAgentLoad({ aiOptOut: false }, cfg)).toEqual({
+      kind: "needs_consent",
+      provider: "openai",
+    });
+  });
+
+  it("is ok and skips the keychain for a local provider", () => {
+    const cfg: AIConfig = {
+      provider: "ollama",
+      apiKey: "",
+      baseUrl: "",
+      model: "",
+    };
+    expect(resolveTabAgentLoad({ aiOptOut: false }, cfg)).toEqual({
+      kind: "ok",
+      readKeychain: false,
+    });
+  });
+
+  it("is ok and reads the keychain for a cloud provider with consent", () => {
+    const cfg: AIConfig = {
+      provider: "openai",
+      apiKey: "",
+      baseUrl: "",
+      model: "",
+      tabAgentCloudConsentAt: Date.now(),
+    };
+    expect(resolveTabAgentLoad({ aiOptOut: false }, cfg)).toEqual({
+      kind: "ok",
+      readKeychain: true,
+    });
   });
 });
 
