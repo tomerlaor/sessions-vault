@@ -2,7 +2,9 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import type { AIProvider } from "../../types";
 import {
+  applyLocalProbeResult,
   cloudProviderLabel,
+  handleConsentEscape,
   localProviderLabel,
   probeLocalAIServer,
 } from "../../lib/lyrics-privacy";
@@ -47,6 +49,8 @@ export default function CloudConsentDialog({
   const previousFocusRef = useRef<Element | null>(null);
   const [probing, setProbing] = useState(false);
   const [probeError, setProbeError] = useState<string | null>(null);
+  const [allowAnyway, setAllowAnyway] = useState(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     previousFocusRef.current = document.activeElement;
@@ -57,19 +61,24 @@ export default function CloudConsentDialog({
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const disabled = busy || probing;
+
+  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      // Capture phase + stop/preventDefault so neither the Tab Agent's own
-      // Esc handler nor the App-level "leave project view" Esc also fires.
-      e.preventDefault();
-      e.stopPropagation();
-      onDismiss();
+      // Capture phase. Swallows Esc even when disabled so a mid-save /
+      // mid-probe Esc cannot dismiss and cannot leak to the Tab Agent or
+      // the app-level "leave project view" handler.
+      handleConsentEscape(e, { disabled, onDismiss });
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [onDismiss]);
-
-  const disabled = busy || probing;
+  }, [onDismiss, disabled]);
 
   const handlePanelKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "Tab" || !panelRef.current) return;
@@ -82,17 +91,26 @@ export default function CloudConsentDialog({
 
   const handleSwitchToLocal = async () => {
     if (disabled) return;
+    // Second click after an unverified probe: the user confirmed "Switch
+    // anyway", so do not probe again and do not get stuck on CORS.
+    if (allowAnyway) {
+      onSwitchToLocal();
+      return;
+    }
     setProbeError(null);
     setProbing(true);
     try {
       const result = await probeLocalAIServer(localProvider, localBaseUrl);
-      if (!result.ok) {
-        setProbeError(result.message);
+      const decision = applyLocalProbeResult(mountedRef.current, result);
+      if (decision === "ignore") return;
+      if (decision === "switch") {
+        onSwitchToLocal();
         return;
       }
-      onSwitchToLocal();
+      if (result.status !== "ok") setProbeError(result.message);
+      if (decision === "warn_allow_anyway") setAllowAnyway(true);
     } finally {
-      setProbing(false);
+      if (mountedRef.current) setProbing(false);
     }
   };
 
@@ -208,7 +226,9 @@ export default function CloudConsentDialog({
             >
               {probing
                 ? "Checking local server…"
-                : `Switch to local (${localProviderLabel(localProvider)})`}
+                : allowAnyway
+                  ? "Switch anyway"
+                  : `Switch to local (${localProviderLabel(localProvider)})`}
             </button>
             <button
               className="tb-btn"
@@ -245,9 +265,12 @@ export default function CloudConsentDialog({
             disabled={disabled}
             onClick={onDismiss}
             style={{
+              // Contrast on --bg-1 (#111114): --text-3 (#4a4a54) is 2.15:1
+              // and --text-2 (#70707c) is 3.86:1, both below WCAG 4.5:1 for
+              // 11px text. --text-1 (#b8b8c2) is 9.58:1.
               justifyContent: "center",
               fontSize: 11,
-              color: "var(--text-3)",
+              color: "var(--text-1)",
               background: "transparent",
               border: "none",
               padding: "2px 0",

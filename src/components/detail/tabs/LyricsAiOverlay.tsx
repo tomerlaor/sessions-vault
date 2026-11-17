@@ -122,6 +122,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
       null,
     );
     const [consentBaseUrl, setConsentBaseUrl] = useState("");
+    const [consentBusy, setConsentBusy] = useState(false);
     const [cfg, setCfg] = useState<LyricsAIConfig>(DEFAULT_CFG);
     const [globalProfile, setGlobalProfile] = useState<string | null>(null);
     const [projectProfile, setProjectProfile] = useState<string | null>(null);
@@ -213,34 +214,45 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
     }, [checkAndMaybeLoad]);
 
     const handleConsentUseCloud = useCallback(async () => {
-      if (!consentProvider) return;
-      const next: LyricsAIConfig = {
-        ...cfg,
-        cloudConsentAt: Date.now(),
-        cloudConsentProvider: consentProvider,
-      };
-      await setLyricsAIConfig(next);
-      setCfg(next);
-      window.dispatchEvent(
-        new CustomEvent("lyrics-ai-config-changed", { detail: next }),
-      );
-    }, [cfg, consentProvider]);
+      if (!consentProvider || consentBusy) return;
+      setConsentBusy(true);
+      try {
+        const next: LyricsAIConfig = {
+          ...cfg,
+          cloudConsentAt: Date.now(),
+          cloudConsentProvider: consentProvider,
+        };
+        await setLyricsAIConfig(next);
+        setCfg(next);
+        window.dispatchEvent(
+          new CustomEvent("lyrics-ai-config-changed", { detail: next }),
+        );
+      } finally {
+        setConsentBusy(false);
+      }
+    }, [cfg, consentProvider, consentBusy]);
 
     const handleConsentSwitchToLocal = useCallback(async () => {
-      const current = (await getAIConfigWithoutKey()) ?? {
-        provider: "ollama" as AIProvider,
-        apiKey: "",
-        baseUrl: "",
-        model: "",
-      };
-      const nextAiCfg = switchToLocalAIConfig(current);
-      await setAIConfig(nextAiCfg);
-      setConsentProvider(null);
-      setAiConfig(nextAiCfg);
-      window.dispatchEvent(
-        new CustomEvent("lyrics-ai-config-changed", { detail: cfg }),
-      );
-    }, [cfg]);
+      if (consentBusy) return;
+      setConsentBusy(true);
+      try {
+        const current = (await getAIConfigWithoutKey()) ?? {
+          provider: "ollama" as AIProvider,
+          apiKey: "",
+          baseUrl: "",
+          model: "",
+        };
+        const nextAiCfg = switchToLocalAIConfig(current);
+        await setAIConfig(nextAiCfg);
+        setConsentProvider(null);
+        setAiConfig(nextAiCfg);
+        window.dispatchEvent(
+          new CustomEvent("lyrics-ai-config-changed", { detail: cfg }),
+        );
+      } finally {
+        setConsentBusy(false);
+      }
+    }, [cfg, consentBusy]);
 
     useEffect(() => {
       Promise.all([
@@ -641,6 +653,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
           provider={consentProvider}
           localProvider={pickLocalProvider(consentProvider)}
           localBaseUrl={consentBaseUrl}
+          busy={consentBusy}
           onUseCloud={handleConsentUseCloud}
           onSwitchToLocal={handleConsentSwitchToLocal}
           onDismiss={() => setConsentProvider(null)}

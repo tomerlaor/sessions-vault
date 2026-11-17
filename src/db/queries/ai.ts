@@ -58,6 +58,8 @@ export async function getAIConfigFor(
   return cfg ? resolveFeatureConfig(cfg, feature) : null;
 }
 
+export const AI_CONFIG_CHANGED_EVENT = "ai-config-changed";
+
 export async function setAIConfig(cfg: AIConfig): Promise<void> {
   const db = await getDb();
   if (cfg.apiKey) await storeSecret(aiKeyName(cfg.provider), cfg.apiKey);
@@ -69,4 +71,13 @@ export async function setAIConfig(cfg: AIConfig): Promise<void> {
       target: backupConfigs.id,
       set: { configJson: JSON.stringify(safe) },
     });
+  // Notify already-open features (Tab Agent, and anything else listening)
+  // so a Settings revoke takes effect without waiting for a remount.
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(AI_CONFIG_CHANGED_EVENT, {
+        detail: { ...safe, apiKey: "" },
+      }),
+    );
+  }
 }

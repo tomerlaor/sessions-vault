@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
+  AI_CONFIG_CHANGED_EVENT,
   getAIConfigFor,
   getAIConfigWithoutKey,
   setAIConfig,
@@ -16,6 +17,7 @@ import {
   pickLocalProvider,
   resolveTabAgentLoad,
   switchToLocalAIConfig,
+  tabAgentOnAIConfigChange,
 } from "../../lib/lyrics-privacy";
 import TabAgentCloudConsentModal from "../shared/TabAgentCloudConsentModal";
 import type {
@@ -220,6 +222,42 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
     // ignores late results after unmount, including StrictMode's double-invoke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // If Settings revokes Tab Agent consent (or switches provider) while this
+  // modal is already open, drop the loaded config immediately so no further
+  // cloud request can go out with a stale key.
+  useEffect(() => {
+    const onCfg = (e: Event) => {
+      const next = (e as CustomEvent<AIConfig>).detail;
+      const change = tabAgentOnAIConfigChange(project, next);
+      if (change.action === "reconsent") {
+        setAiCfg(null);
+        setConsentProvider(change.provider);
+        setConsentBaseUrl(next?.baseUrl ?? "");
+        setStep("needs-consent");
+        return;
+      }
+      if (change.action === "opted_out") {
+        setAiCfg(null);
+        setStep("opted-out");
+        return;
+      }
+      if (change.action === "no_config") {
+        setAiCfg(null);
+        setStep("no-config");
+        return;
+      }
+      if (change.action === "use_local") {
+        applyResolvedConfig(resolveFeatureConfig(next, "tabAgent"));
+      }
+    };
+    window.addEventListener(AI_CONFIG_CHANGED_EVENT, onCfg);
+    return () => window.removeEventListener(AI_CONFIG_CHANGED_EVENT, onCfg);
+    // applyResolvedConfig is recreated each render and only calls setState
+    // / startWizard; resubscribing on every render would drop the listener
+    // unnecessarily. project is the input the decision actually depends on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project]);
 
   const handleConsentUseCloud = async () => {
     if (consentBusy) return;

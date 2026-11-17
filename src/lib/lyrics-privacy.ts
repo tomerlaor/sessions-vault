@@ -97,14 +97,31 @@ export function switchToLocalAIConfig(current: AIConfig): AIConfig {
   };
 }
 
-// Probes the local AI server (Ollama / LM Studio) before "Switch to local"
-// actually flips the provider, so the consent modal can refuse to switch
-// into a config that can't serve requests. Short timeout — this only needs
-// to answer "is something listening here", not do real work.
+// How the probe talks to the local server, and why a failure is not always
+// "the server is down":
+//
+// The app has no Tauri HTTP plugin and no Rust command for Ollama / LM
+// Studio. Real lyrics and Tab Agent requests already go through the webview
+// via the AI SDK (`createOpenAI` + a localhost baseURL in src/lib/ai.ts),
+// so this probe uses the same `fetch` path. A new Rust/reqwest probe would
+// bypass CORS and could report "up" even when the webview cannot actually
+// call the server.
+//
+// CORS still matters: LM Studio has CORS off by default, and Ollama only
+// allows certain origins, so a running server can make webview `fetch`
+// throw. That case is returned as `unverified` (not `unreachable`) so the
+// dialog can warn and still let the user switch. An HTTP error response
+// means we reached something that isn't a healthy local API, so that stays
+// a hard `unreachable`.
+export type LocalProbeResult =
+  | { status: "ok" }
+  | { status: "unreachable"; message: string }
+  | { status: "unverified"; message: string };
+
 export async function probeLocalAIServer(
   provider: AIProvider,
   baseUrl?: string,
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<LocalProbeResult> {
   const base = (
     baseUrl ||
     LOCAL_PROVIDER_DEFAULT_BASE_URL[provider] ||
@@ -112,23 +129,58 @@ export async function probeLocalAIServer(
   ).replace(/\/+$/, "");
   const label = localProviderLabel(provider);
   if (!base) {
-    return { ok: false, message: `No server URL configured for ${label}.` };
+    return {
+      status: "unreachable",
+      message: `No server URL configured for ${label}.`,
+    };
   }
   const path = provider === "lmstudio" ? "/v1/models" : "/api/tags";
-  const unreachable = {
-    ok: false as const,
-    message: `${label} isn't running at ${base}. Start ${label} and try again, or keep using the cloud.`,
-  };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 2000);
   try {
     const res = await fetch(`${base}${path}`, { signal: controller.signal });
-    return res.ok ? { ok: true } : unreachable;
+    if (res.ok) return { status: "ok" };
+    return {
+      status: "unreachable",
+      message: `${label} isn't running at ${base}. Start ${label} and try again, or keep using the cloud.`,
+    };
   } catch {
-    return unreachable;
+    // Network error, abort, or a CORS failure (the browser hides the
+    // response). We cannot tell a down server from a CORS block.
+    return {
+      status: "unverified",
+      message: `${label} couldn't be verified at ${base}. It may be running, but this window couldn't reach it. You can switch anyway.`,
+    };
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Decides what the consent dialog should do after a probe. `mounted` is
+// false if the dialog was closed (or unmounted) while the probe was in
+// flight — in that case a late result must not switch the provider.
+export function applyLocalProbeResult(
+  mounted: boolean,
+  result: LocalProbeResult,
+): "switch" | "block" | "warn_allow_anyway" | "ignore" {
+  if (!mounted) return "ignore";
+  if (result.status === "ok") return "switch";
+  if (result.status === "unverified") return "warn_allow_anyway";
+  return "block";
+}
+
+// Esc on the consent dialog: always swallow the key (so the Tab Agent and
+// the app-level "leave project view" handlers don't also fire), but do not
+// dismiss while a save or probe is in flight.
+export function handleConsentEscape(
+  e: { key: string; preventDefault: () => void; stopPropagation: () => void },
+  opts: { disabled: boolean; onDismiss: () => void },
+): void {
+  if (e.key !== "Escape") return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (opts.disabled) return;
+  opts.onDismiss();
 }
 
 // Settings → AI Assistant "Revoke" for the lyrics helper: clears only the
@@ -231,6 +283,32 @@ export function resolveTabAgentLoad(
   }
   if (!cfgNoKey) return { kind: "no_config" };
   return { kind: "ok", readKeychain: !isLocalProvider(cfgNoKey.provider) };
+}
+
+// What an already-open Tab Agent should do when AI config changes (for
+// example, Settings revoked Tab Agent cloud consent). "reconsent" means
+// drop the loaded config so no further cloud request can go out.
+export type TabAgentConfigChange =
+  | { action: "reconsent"; provider: AIProvider }
+  | { action: "opted_out" }
+  | { action: "no_config" }
+  | { action: "use_local" }
+  | { action: "keep" };
+
+export function tabAgentOnAIConfigChange(
+  project: { aiOptOut: boolean },
+  cfgNoKey: AIConfig | null,
+): TabAgentConfigChange {
+  const decision = resolveTabAgentLoad(project, cfgNoKey);
+  if (decision.kind === "needs_consent") {
+    return { action: "reconsent", provider: decision.provider };
+  }
+  if (decision.kind === "opted_out") return { action: "opted_out" };
+  if (decision.kind === "no_config") return { action: "no_config" };
+  if (decision.kind === "ok" && !decision.readKeychain) {
+    return { action: "use_local" };
+  }
+  return { action: "keep" };
 }
 
 // Lyrics toolbar badge. Callers should resolve the lyrics model override

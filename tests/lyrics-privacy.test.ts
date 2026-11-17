@@ -12,9 +12,12 @@ import {
   aiBadgeLabel,
   cloudProviderLabel,
   localProviderLabel,
+  applyLocalProbeResult,
+  handleConsentEscape,
   probeLocalAIServer,
   revokeLyricsCloudConsent,
   revokeTabAgentCloudConsent,
+  tabAgentOnAIConfigChange,
   tabAgentOptOutButton,
 } from "../src/lib/lyrics-privacy";
 import type { AIConfig, AIProvider, LyricsAIConfig } from "../src/types";
@@ -577,7 +580,7 @@ describe("probeLocalAIServer", () => {
   it("is ok when the server responds", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: true });
     const result = await probeLocalAIServer("ollama");
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ status: "ok" });
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "http://localhost:11434/api/tags",
       expect.anything(),
@@ -590,7 +593,7 @@ describe("probeLocalAIServer", () => {
       "lmstudio",
       "http://localhost:9999",
     );
-    expect(result).toEqual({ ok: true });
+    expect(result).toEqual({ status: "ok" });
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "http://localhost:9999/v1/models",
       expect.anything(),
@@ -600,24 +603,93 @@ describe("probeLocalAIServer", () => {
   it("reports unreachable on a non-ok response, naming the provider and URL", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({ ok: false });
     const result = await probeLocalAIServer("ollama");
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
+    expect(result.status).toBe("unreachable");
+    if (result.status === "unreachable") {
       expect(result.message).toContain("Ollama");
       expect(result.message).toContain("http://localhost:11434");
     }
   });
 
-  it("reports unreachable on a network error, naming the provider and URL", async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error("network down"));
+  it("reports unverified on a network or CORS-like failure, and allows a warning", async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("Failed to fetch"));
     const result = await probeLocalAIServer(
       "lmstudio",
       "http://localhost:1234",
     );
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
+    expect(result.status).toBe("unverified");
+    if (result.status === "unverified") {
       expect(result.message).toContain("LM Studio");
       expect(result.message).toContain("http://localhost:1234");
+      expect(result.message).toMatch(/switch anyway/i);
     }
+  });
+});
+
+describe("applyLocalProbeResult", () => {
+  it("ignores a probe that resolves after the dialog unmounted", () => {
+    expect(applyLocalProbeResult(false, { status: "ok" })).toBe("ignore");
+    expect(
+      applyLocalProbeResult(false, {
+        status: "unverified",
+        message: "nope",
+      }),
+    ).toBe("ignore");
+  });
+
+  it("switches on ok, warns on unverified, and blocks on unreachable", () => {
+    expect(applyLocalProbeResult(true, { status: "ok" })).toBe("switch");
+    expect(
+      applyLocalProbeResult(true, {
+        status: "unverified",
+        message: "cors",
+      }),
+    ).toBe("warn_allow_anyway");
+    expect(
+      applyLocalProbeResult(true, {
+        status: "unreachable",
+        message: "down",
+      }),
+    ).toBe("block");
+  });
+});
+
+describe("handleConsentEscape", () => {
+  it("dismisses on Esc when the dialog is not busy", () => {
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    const onDismiss = vi.fn();
+    handleConsentEscape(
+      { key: "Escape", preventDefault, stopPropagation },
+      { disabled: false, onDismiss },
+    );
+    expect(preventDefault).toHaveBeenCalled();
+    expect(stopPropagation).toHaveBeenCalled();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it("swallows Esc but does not dismiss while busy or probing", () => {
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    const onDismiss = vi.fn();
+    handleConsentEscape(
+      { key: "Escape", preventDefault, stopPropagation },
+      { disabled: true, onDismiss },
+    );
+    expect(preventDefault).toHaveBeenCalled();
+    expect(stopPropagation).toHaveBeenCalled();
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("ignores keys other than Esc", () => {
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    const onDismiss = vi.fn();
+    handleConsentEscape(
+      { key: "Enter", preventDefault, stopPropagation },
+      { disabled: false, onDismiss },
+    );
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(onDismiss).not.toHaveBeenCalled();
   });
 });
 
@@ -668,6 +740,33 @@ describe("revokeLyricsCloudConsent / revokeTabAgentCloudConsent", () => {
 
     expect(resolveTabAgentLoad({ aiOptOut: false }, next)).toEqual({
       kind: "needs_consent",
+      provider: "openai",
+    });
+
+    // An already-open Tab Agent holding the pre-revoke config must drop it
+    // and re-prompt; otherwise it could keep sending with the loaded key.
+    expect(tabAgentOnAIConfigChange({ aiOptOut: false }, cfg).action).toBe(
+      "keep",
+    );
+    expect(tabAgentOnAIConfigChange({ aiOptOut: false }, next)).toEqual({
+      action: "reconsent",
+      provider: "openai",
+    });
+  });
+
+  it("drops an already-loaded lyrics session after revoke", () => {
+    const cfg: LyricsAIConfig = {
+      enabled: true,
+      mode: "inline",
+      enabledModes: ["completion"],
+      feedbackMode: "minimal",
+      cloudConsentAt: Date.now(),
+      cloudConsentProvider: "openai",
+    };
+    expect(gateLyricsAi(false, cfg, "openai").status).toBe("ok");
+    const next = revokeLyricsCloudConsent(cfg);
+    expect(gateLyricsAi(false, next, "openai")).toEqual({
+      status: "needs_consent",
       provider: "openai",
     });
   });
