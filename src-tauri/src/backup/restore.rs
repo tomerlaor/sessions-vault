@@ -9,9 +9,11 @@ use zip::ZipArchive;
 /// Resolves an archive entry's stored name to a path inside `base`, rejecting
 /// anything that could escape it: absolute paths (Unix `/...` or a Windows drive
 /// prefix, checked textually since the archive may have been written on a
-/// different OS than the one restoring it), NUL bytes, and any `..` that would
-/// walk back past `base` itself. Pure — takes the entry name as a plain string so
-/// it's testable without a real zip file.
+/// different OS than the one restoring it), a drive-letter prefix on *any*
+/// path component (not just the first — `foo/C:/evil` is just as dangerous as
+/// `C:/evil` once `PathBuf::push` hits it on Windows), NUL bytes, and any `..`
+/// that would walk back past `base` itself. Pure — takes the entry name as a
+/// plain string so it's testable without a real zip file.
 pub fn safe_extract_path(base: &Path, entry_name: &str) -> Result<PathBuf, String> {
     if entry_name.contains('\0') {
         return Err(format!("rejected entry with a NUL byte: {entry_name}"));
@@ -20,11 +22,7 @@ pub fn safe_extract_path(base: &Path, entry_name: &str) -> Result<PathBuf, Strin
         return Err("rejected empty entry name".to_string());
     }
 
-    let bytes = entry_name.as_bytes();
-    let looks_like_drive_prefix =
-        bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
-    let looks_absolute =
-        entry_name.starts_with('/') || entry_name.starts_with('\\') || looks_like_drive_prefix;
+    let looks_absolute = entry_name.starts_with('/') || entry_name.starts_with('\\');
     if looks_absolute {
         return Err(format!("rejected absolute path: {entry_name}"));
     }
@@ -42,6 +40,14 @@ pub fn safe_extract_path(base: &Path, entry_name: &str) -> Result<PathBuf, Strin
                 resolved.pop();
             }
             p => {
+                // Rejects a drive-letter component (`C:`) wherever it appears,
+                // and any component containing ':' at all (e.g. NTFS
+                // alternate data streams like `file.txt:hidden`).
+                if p.contains(':') {
+                    return Err(format!(
+                        "rejected entry with a drive/colon component: {entry_name}"
+                    ));
+                }
                 depth += 1;
                 resolved.push(p);
             }
@@ -51,7 +57,12 @@ pub fn safe_extract_path(base: &Path, entry_name: &str) -> Result<PathBuf, Strin
     if resolved.as_os_str().is_empty() {
         return Err(format!("rejected empty resolved path: {entry_name}"));
     }
-    Ok(base.join(resolved))
+
+    let joined = base.join(&resolved);
+    if !joined.starts_with(base) {
+        return Err(format!("rejected path escaping the target: {entry_name}"));
+    }
+    Ok(joined)
 }
 
 fn read_manifest(zip: &mut ZipArchive<File>) -> Result<Manifest, String> {
@@ -179,6 +190,9 @@ pub struct RestoreOutcome {
     pub mismatch_count: u32,
     pub conflict_count: u32,
     pub rejected_count: u32,
+    /// Counts both `missing_in_archive` and `error` statuses — anything the
+    /// summary must never silently fold into "restored ok".
+    pub error_count: u32,
     pub files: Vec<RestoredFile>,
 }
 
@@ -198,8 +212,8 @@ pub fn restore_archive(
 
     let total = manifest.files.len();
     let mut files = Vec::with_capacity(total);
-    let (mut ok_count, mut mismatch_count, mut conflict_count, mut rejected_count) =
-        (0u32, 0u32, 0u32, 0u32);
+    let (mut ok_count, mut mismatch_count, mut conflict_count, mut rejected_count, mut error_count) =
+        (0u32, 0u32, 0u32, 0u32, 0u32);
 
     for (i, entry) in manifest.files.iter().enumerate() {
         on_progress(i + 1, total, &entry.archive_path);
@@ -227,10 +241,23 @@ pub fn restore_archive(
         let mut zf = match zip.by_name(&entry.archive_path) {
             Ok(zf) => zf,
             Err(e) => {
+                error_count += 1;
                 files.push(result(None, "missing_in_archive", Some(e.to_string())));
                 continue;
             }
         };
+
+        // Belt-and-suspenders: the zip entry's own name must also resolve to a
+        // safe, enclosed path, independent of whatever the manifest claims.
+        if zf.enclosed_name().is_none() {
+            rejected_count += 1;
+            files.push(result(
+                None,
+                "rejected",
+                Some("archive entry name is not a safe enclosed path".to_string()),
+            ));
+            continue;
+        }
 
         if zf.is_symlink() {
             rejected_count += 1;
@@ -244,6 +271,7 @@ pub fn restore_archive(
 
         if let Some(parent) = target.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
+                error_count += 1;
                 files.push(result(
                     None,
                     "error",
@@ -270,6 +298,7 @@ pub fn restore_archive(
                 continue;
             }
             Err(e) => {
+                error_count += 1;
                 files.push(result(None, "error", Some(e.to_string())));
                 continue;
             }
@@ -277,17 +306,35 @@ pub fn restore_archive(
 
         let mut hashing = HashingReader::new(&mut zf);
         let mut sink = out_file;
-        let copy_ok = std::io::copy(&mut hashing, &mut sink).is_ok();
-        let actual = hashing.finish();
-        let status = if copy_ok && actual == entry.sha256 {
-            ok_count += 1;
-            "ok"
-        } else {
-            mismatch_count += 1;
-            "mismatch"
+        let (status, status_path, detail) = match std::io::copy(&mut hashing, &mut sink) {
+            Err(e) => {
+                let _ = std::fs::remove_file(&target);
+                ("error", None, Some(format!("write failed: {e}")))
+            }
+            Ok(_) => {
+                let actual = hashing.finish();
+                match sink.sync_all() {
+                    Err(e) => {
+                        let _ = std::fs::remove_file(&target);
+                        ("error", None, Some(format!("sync failed: {e}")))
+                    }
+                    Ok(()) if actual == entry.sha256 => ("ok", restored_path, None),
+                    Ok(()) => (
+                        "mismatch",
+                        restored_path,
+                        Some(format!("expected sha256 {}, got {actual}", entry.sha256)),
+                    ),
+                }
+            }
         };
 
-        files.push(result(restored_path, status, None));
+        match status {
+            "ok" => ok_count += 1,
+            "mismatch" => mismatch_count += 1,
+            "error" => error_count += 1,
+            _ => unreachable!("restore_archive produced an unexpected status: {status}"),
+        }
+        files.push(result(status_path, status, detail));
     }
 
     Ok(RestoreOutcome {
@@ -296,6 +343,7 @@ pub fn restore_archive(
         mismatch_count,
         conflict_count,
         rejected_count,
+        error_count,
         files,
     })
 }
@@ -340,6 +388,22 @@ mod tests {
         let base = Path::new("/tmp/restore-root");
         assert!(safe_extract_path(base, "../evil").is_err());
         assert!(safe_extract_path(base, "a/../../evil").is_err());
+    }
+
+    #[test]
+    fn rejects_drive_prefix_hidden_behind_a_leading_component() {
+        // Windows-only bug: a non-first component matching a drive letter made
+        // PathBuf::push replace the whole path once joined, escaping `base`
+        // entirely (`foo/C:/evil` behaved like `C:/evil`).
+        let base = Path::new("/tmp/restore-root");
+        assert!(safe_extract_path(base, "foo/C:/evil").is_err());
+        assert!(safe_extract_path(base, "foo\\D:\\x").is_err());
+    }
+
+    #[test]
+    fn rejects_drive_prefix_without_a_separator() {
+        let base = Path::new("/tmp/restore-root");
+        assert!(safe_extract_path(base, "C:evil").is_err());
     }
 
     #[test]
@@ -430,6 +494,28 @@ mod tests {
         assert_ne!(entry.actual_sha256, Some(entry.expected_sha256.clone()));
     }
 
+    /// Rebuilds `zip_path` at `dest` with every entry copied over except
+    /// `entry_name`, simulating an archive that doesn't match its own
+    /// manifest (used by both the verify and restore "missing" tests).
+    fn rebuild_zip_without_entry(zip_path: &Path, dest: &Path, entry_name: &str) {
+        let src_file = File::open(zip_path).unwrap();
+        let mut src = ZipArchive::new(src_file).unwrap();
+        let dst_file = File::create(dest).unwrap();
+        let mut dst = ZipWriter::new(dst_file);
+        for i in 0..src.len() {
+            let mut entry = src.by_index(i).unwrap();
+            if entry.name() == entry_name {
+                continue;
+            }
+            let name = entry.name().to_string();
+            dst.start_file(&name, SimpleFileOptions::default()).unwrap();
+            let mut buf = Vec::new();
+            entry.read_to_end(&mut buf).unwrap();
+            dst.write_all(&buf).unwrap();
+        }
+        dst.finish().unwrap();
+    }
+
     #[test]
     fn verify_reports_missing_for_entry_removed_from_archive() {
         let dir = tempfile::tempdir().unwrap();
@@ -438,24 +524,7 @@ mod tests {
         // Rebuild the zip with manifest.json intact but the stage file entry
         // dropped, simulating an archive that doesn't match its own manifest.
         let rebuilt = dir.path().join("rebuilt.zip");
-        {
-            let src_file = File::open(&zip_path).unwrap();
-            let mut src = ZipArchive::new(src_file).unwrap();
-            let dst_file = File::create(&rebuilt).unwrap();
-            let mut dst = ZipWriter::new(dst_file);
-            for i in 0..src.len() {
-                let mut entry = src.by_index(i).unwrap();
-                if entry.name() == "stages/export/song_final.wav" {
-                    continue;
-                }
-                let name = entry.name().to_string();
-                dst.start_file(&name, SimpleFileOptions::default()).unwrap();
-                let mut buf = Vec::new();
-                entry.read_to_end(&mut buf).unwrap();
-                dst.write_all(&buf).unwrap();
-            }
-            dst.finish().unwrap();
-        }
+        rebuild_zip_without_entry(&zip_path, &rebuilt, "stages/export/song_final.wav");
 
         let report = verify_archive(&rebuilt).unwrap();
         assert_eq!(report.missing_count, 1);
@@ -560,5 +629,147 @@ mod tests {
         assert!(!dir.path().join("evil.txt").exists());
 
         let _ = std::fs::remove_file(&zip_path);
+    }
+
+    #[test]
+    fn restore_rejects_a_symlink_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let als = write_file(dir.path(), "song.als", b"fake-als-bytes");
+        let (zip_path, _m) = zip_project(&als, "Song", "proj-1", None, None, None, &[]).unwrap();
+
+        let symlink_zip = dir.path().join("symlink.zip");
+        let manifest_json = r#"{
+            "schema": 1,
+            "project": {"id": "proj-1", "title": "Song", "alsPath": "song.als"},
+            "createdAt": 0,
+            "appVersion": "0.0.0",
+            "files": [{
+                "archivePath": "link.txt",
+                "originalPath": "/tmp/link.txt",
+                "stage": null, "exportType": null, "versionLabel": null,
+                "isFinal": false, "sizeBytes": 4, "sha256": "deadbeef", "mtime": 0
+            }],
+            "missing": []
+        }"#;
+        {
+            let file = File::create(&symlink_zip).unwrap();
+            let mut zip = ZipWriter::new(file);
+            zip.start_file("manifest.json", SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(manifest_json.as_bytes()).unwrap();
+            zip.add_symlink("link.txt", "/etc/passwd", SimpleFileOptions::default())
+                .unwrap();
+            zip.finish().unwrap();
+        }
+
+        let dest = dir.path().join("restored");
+        let outcome = restore_archive(&symlink_zip, &dest, |_, _, _| {}).unwrap();
+        assert_eq!(outcome.rejected_count, 1);
+        assert_eq!(outcome.error_count, 0);
+        assert_eq!(outcome.files[0].status, "rejected");
+        assert!(!dest.join("link.txt").exists());
+
+        let _ = std::fs::remove_file(&zip_path);
+    }
+
+    #[test]
+    fn restore_reports_mismatch_for_tampered_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let als = write_file(dir.path(), "song.als", b"fake-als-bytes");
+        let (zip_path, _m) = zip_project(&als, "Song", "proj-1", None, None, None, &[]).unwrap();
+
+        // The zip entry itself is intact (its own CRC32 checks out) — only the
+        // manifest's recorded sha256 is wrong, so this is a genuine hash
+        // mismatch rather than a corrupt/unreadable zip entry (that case is
+        // covered by `restore_reports_error_...` tests via a real I/O error).
+        let mismatch_zip = dir.path().join("mismatch.zip");
+        let manifest_json = r#"{
+            "schema": 1,
+            "project": {"id": "proj-1", "title": "Song", "alsPath": "song.als"},
+            "createdAt": 0,
+            "appVersion": "0.0.0",
+            "files": [{
+                "archivePath": "file.txt",
+                "originalPath": "/tmp/file.txt",
+                "stage": null, "exportType": null, "versionLabel": null,
+                "isFinal": false, "sizeBytes": 5, "sha256": "not-the-real-hash", "mtime": 0
+            }],
+            "missing": []
+        }"#;
+        {
+            let file = File::create(&mismatch_zip).unwrap();
+            let mut zip = ZipWriter::new(file);
+            zip.start_file("manifest.json", SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(manifest_json.as_bytes()).unwrap();
+            zip.start_file("file.txt", SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(b"hello").unwrap();
+            zip.finish().unwrap();
+        }
+
+        let dest = dir.path().join("restored");
+        let outcome = restore_archive(&mismatch_zip, &dest, |_, _, _| {}).unwrap();
+
+        assert_eq!(outcome.mismatch_count, 1);
+        assert_eq!(outcome.error_count, 0);
+        let entry = outcome
+            .files
+            .iter()
+            .find(|f| f.archive_path == "file.txt")
+            .unwrap();
+        assert_eq!(entry.status, "mismatch");
+        assert!(entry.detail.is_some());
+        // The mismatched file is still written to disk for inspection.
+        assert_eq!(std::fs::read(dest.join("file.txt")).unwrap(), b"hello");
+
+        let _ = std::fs::remove_file(&zip_path);
+    }
+
+    #[test]
+    fn restore_reports_missing_in_archive_for_entry_removed_from_zip() {
+        let dir = tempfile::tempdir().unwrap();
+        let zip_path = make_backup_archive(dir.path());
+
+        let rebuilt = dir.path().join("rebuilt.zip");
+        rebuild_zip_without_entry(&zip_path, &rebuilt, "stages/export/song_final.wav");
+
+        let dest = dir.path().join("restored");
+        let outcome = restore_archive(&rebuilt, &dest, |_, _, _| {}).unwrap();
+
+        assert_eq!(outcome.error_count, 1);
+        let entry = outcome
+            .files
+            .iter()
+            .find(|f| f.archive_path == "stages/export/song_final.wav")
+            .unwrap();
+        assert_eq!(entry.status, "missing_in_archive");
+
+        let _ = std::fs::remove_file(&zip_path);
+    }
+
+    #[test]
+    fn restore_reports_error_when_parent_dir_cannot_be_created() {
+        let dir = tempfile::tempdir().unwrap();
+        let zip_path = make_backup_archive(dir.path());
+        let dest = dir.path().join("restored");
+
+        // Block the exact path the stage file's parent directory needs to
+        // occupy with a plain file, so `create_dir_all` fails.
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("stages"), b"not a directory").unwrap();
+
+        let outcome = restore_archive(&zip_path, &dest, |_, _, _| {}).unwrap();
+
+        assert_eq!(outcome.error_count, 1);
+        assert!(outcome.ok_count > 0);
+        let entry = outcome
+            .files
+            .iter()
+            .find(|f| f.archive_path == "stages/export/song_final.wav")
+            .unwrap();
+        assert_eq!(entry.status, "error");
+        assert!(entry.restored_path.is_none());
+        assert!(entry.detail.is_some());
     }
 }
