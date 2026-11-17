@@ -489,7 +489,12 @@ export default function HistoryTab({
                           alignSelf: "flex-start",
                           marginTop: 2,
                         }}
-                        onClick={() => setRestoring(b)}
+                        onClick={() => {
+                          // Tell the drawer synchronously, so there's no frame
+                          // where Escape can still close it before the effect runs.
+                          onRestoreWizardOpenChange?.(true);
+                          setRestoring(b);
+                        }}
                       >
                         Restore…
                       </button>

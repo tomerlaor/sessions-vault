@@ -308,6 +308,9 @@ pub fn restore_archive(
         let mut sink = out_file;
         let (status, status_path, detail) = match std::io::copy(&mut hashing, &mut sink) {
             Err(e) => {
+                // Close the handle before removing: Windows refuses to delete
+                // a file that's still open, which would leave the partial file.
+                drop(sink);
                 let _ = std::fs::remove_file(&target);
                 ("error", None, Some(format!("write failed: {e}")))
             }
@@ -315,6 +318,7 @@ pub fn restore_archive(
                 let actual = hashing.finish();
                 match sink.sync_all() {
                     Err(e) => {
+                        drop(sink);
                         let _ = std::fs::remove_file(&target);
                         ("error", None, Some(format!("sync failed: {e}")))
                     }

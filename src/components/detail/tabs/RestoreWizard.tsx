@@ -89,6 +89,41 @@ export default function RestoreWizard({ project, backup, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [targetExists, setTargetExists] = useState(false);
   const restoringRef = useRef(false);
+  // A gdrive-api backup resolves to a temp file downloaded just for this
+  // wizard. It's tracked here so it's deleted exactly once: after a restore,
+  // or when the wizard closes without restoring (Cancel/Esc/backdrop after
+  // Verify). A local or gdrive-folder backup resolves to the real backup
+  // file, which is never tracked and never deleted.
+  const tempZipRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  const isTempZip =
+    backup.provider !== "local" && !isLocalDestination(backup.destination);
+
+  const deleteTempZipOnce = useCallback(() => {
+    const path = tempZipRef.current;
+    if (!path) return;
+    tempZipRef.current = null;
+    invoke("gdrive_delete_temp_download", { path }).catch(() => {});
+  }, []);
+
+  const trackZipPath = useCallback(
+    (path: string) => {
+      if (!isTempZip) return;
+      tempZipRef.current = path;
+      // The download finished after the wizard closed: clean up right away.
+      if (!mountedRef.current) deleteTempZipOnce();
+    },
+    [isTempZip, deleteTempZipOnce],
+  );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      // A restore in flight still owns the file; its finally block deletes it.
+      if (!restoringRef.current) deleteTempZipOnce();
+    };
+  }, [deleteTempZipOnce]);
 
   useEffect(() => {
     let cancelled = false;
@@ -122,8 +157,12 @@ export default function RestoreWizard({ project, backup, onClose }: Props) {
     setError(null);
     setStep("verifying");
     try {
-      const path = zipPath ?? (await resolveZipPath(backup));
-      setZipPath(path);
+      let path = zipPath;
+      if (!path) {
+        path = await resolveZipPath(backup);
+        trackZipPath(path);
+        setZipPath(path);
+      }
       const report = await invoke<VerifyReport>("verify_backup", {
         zipPath: path,
       });
@@ -133,7 +172,7 @@ export default function RestoreWizard({ project, backup, onClose }: Props) {
       setError(e instanceof Error ? e.message : String(e));
       setStep("review");
     }
-  }, [zipPath, backup]);
+  }, [zipPath, backup, trackZipPath]);
 
   const handlePickTarget = useCallback(async () => {
     const sel = await open({
@@ -154,15 +193,10 @@ export default function RestoreWizard({ project, backup, onClose }: Props) {
     setProgress(null);
 
     let path = zipPath;
-    // A gdrive-api backup resolves to a temp file downloaded just for this
-    // restore; it must be cleaned up once we're done with it either way. A
-    // local or gdrive-folder backup resolves to the real backup file itself,
-    // which must never be deleted.
-    const isTempZip =
-      backup.provider !== "local" && !isLocalDestination(backup.destination);
     try {
       if (!path) {
         path = await resolveZipPath(backup);
+        trackZipPath(path);
         setZipPath(path);
       }
     } catch (e) {
@@ -205,13 +239,12 @@ export default function RestoreWizard({ project, backup, onClose }: Props) {
       });
     } finally {
       unlisten();
-      if (isTempZip && path) {
-        invoke("gdrive_delete_temp_download", { path }).catch(() => {});
-      }
       restoringRef.current = false;
+      deleteTempZipOnce();
+      if (isTempZip) setZipPath(null);
       setStep("result");
     }
-  }, [zipPath, targetDir, backup]);
+  }, [zipPath, targetDir, backup, isTempZip, trackZipPath, deleteTempZipOnce]);
 
   const nonOkVerifyFiles =
     verifyReport?.files.filter((f) => f.status !== "ok") ?? [];

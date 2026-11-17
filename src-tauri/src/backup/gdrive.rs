@@ -578,4 +578,27 @@ mod tests {
         assert!(path.exists());
         let _ = std::fs::remove_file(&path);
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_symlink_in_temp_pointing_outside_it() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("gdrive-test-scratch");
+        std::fs::create_dir_all(&dir).unwrap();
+        let outside = dir.join(format!("symlink-target-{}.zip", std::process::id()));
+        std::fs::write(&outside, b"x").unwrap();
+
+        // Named like one of our downloads, sitting directly in temp.
+        let link =
+            std::env::temp_dir().join(format!("dawmgr-restore-symlink-{}.zip", std::process::id()));
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+        assert!(delete_temp_download(&link).is_err());
+        assert!(outside.exists(), "symlink target outside temp must survive");
+
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_file(&outside);
+    }
 }
