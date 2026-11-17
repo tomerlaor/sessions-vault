@@ -121,6 +121,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
     const [consentProvider, setConsentProvider] = useState<AIProvider | null>(
       null,
     );
+    const [consentBaseUrl, setConsentBaseUrl] = useState("");
     const [cfg, setCfg] = useState<LyricsAIConfig>(DEFAULT_CFG);
     const [globalProfile, setGlobalProfile] = useState<string | null>(null);
     const [projectProfile, setProjectProfile] = useState<string | null>(null);
@@ -174,6 +175,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
           );
           if (gate.status === "needs_consent") {
             setConsentProvider(gate.provider);
+            setConsentBaseUrl(cfgNoKey?.baseUrl ?? "");
             setAiConfig(null);
             return;
           }
@@ -638,8 +640,10 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
         <LyricsCloudConsentModal
           provider={consentProvider}
           localProvider={pickLocalProvider(consentProvider)}
+          localBaseUrl={consentBaseUrl}
           onUseCloud={handleConsentUseCloud}
           onSwitchToLocal={handleConsentSwitchToLocal}
+          onDismiss={() => setConsentProvider(null)}
         />
       );
     }

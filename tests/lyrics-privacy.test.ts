@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   isCloudProvider,
   isLocalProvider,
@@ -12,6 +12,10 @@ import {
   aiBadgeLabel,
   cloudProviderLabel,
   localProviderLabel,
+  probeLocalAIServer,
+  revokeLyricsCloudConsent,
+  revokeTabAgentCloudConsent,
+  tabAgentOptOutButton,
 } from "../src/lib/lyrics-privacy";
 import type { AIConfig, AIProvider, LyricsAIConfig } from "../src/types";
 
@@ -556,5 +560,129 @@ describe("label helpers", () => {
   it("localProviderLabel", () => {
     expect(localProviderLabel("ollama")).toBe("Ollama");
     expect(localProviderLabel("lmstudio")).toBe("LM Studio");
+  });
+});
+
+describe("probeLocalAIServer", () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    vi.useRealTimers();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("is ok when the server responds", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true });
+    const result = await probeLocalAIServer("ollama");
+    expect(result).toEqual({ ok: true });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://localhost:11434/api/tags",
+      expect.anything(),
+    );
+  });
+
+  it("uses the LM Studio endpoint and an explicit baseUrl", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true });
+    const result = await probeLocalAIServer(
+      "lmstudio",
+      "http://localhost:9999",
+    );
+    expect(result).toEqual({ ok: true });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://localhost:9999/v1/models",
+      expect.anything(),
+    );
+  });
+
+  it("reports unreachable on a non-ok response, naming the provider and URL", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false });
+    const result = await probeLocalAIServer("ollama");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.message).toContain("Ollama");
+      expect(result.message).toContain("http://localhost:11434");
+    }
+  });
+
+  it("reports unreachable on a network error, naming the provider and URL", async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("network down"));
+    const result = await probeLocalAIServer(
+      "lmstudio",
+      "http://localhost:1234",
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.message).toContain("LM Studio");
+      expect(result.message).toContain("http://localhost:1234");
+    }
+  });
+});
+
+describe("revokeLyricsCloudConsent / revokeTabAgentCloudConsent", () => {
+  it("clears only the lyrics consent fields, keeping provider/key/model", () => {
+    const cfg: LyricsAIConfig = {
+      enabled: true,
+      mode: "inline",
+      enabledModes: ["completion"],
+      feedbackMode: "minimal",
+      cloudConsentAt: Date.now(),
+      cloudConsentProvider: "openai",
+    };
+    const next = revokeLyricsCloudConsent(cfg);
+    expect(next.cloudConsentAt).toBeUndefined();
+    expect(next.cloudConsentProvider).toBeUndefined();
+    expect(next.enabled).toBe(true);
+    expect(next.mode).toBe("inline");
+
+    expect(gateLyricsAi(false, next, "openai")).toEqual({
+      status: "needs_consent",
+      provider: "openai",
+    });
+  });
+
+  it("clears only the Tab Agent consent fields, keeping provider/key/model", () => {
+    const cfg: AIConfig = {
+      provider: "openai",
+      apiKey: "sk-secret",
+      baseUrl: "",
+      model: "gpt-4.1-mini",
+      tabAgentCloudConsentAt: Date.now(),
+      tabAgentCloudConsentProvider: "openai",
+    };
+    const next = revokeTabAgentCloudConsent(cfg);
+    expect(next.tabAgentCloudConsentAt).toBeUndefined();
+    expect(next.tabAgentCloudConsentProvider).toBeUndefined();
+    expect(next.provider).toBe("openai");
+    expect(next.apiKey).toBe("sk-secret");
+    expect(next.model).toBe("gpt-4.1-mini");
+
+    expect(
+      gateCloudAi("tabAgent", { aiOptOut: false }, next.provider, {
+        cloudConsentAt: next.tabAgentCloudConsentAt,
+        cloudConsentProvider: next.tabAgentCloudConsentProvider,
+      }),
+    ).toEqual({ status: "needs_consent", provider: "openai" });
+
+    expect(resolveTabAgentLoad({ aiOptOut: false }, next)).toEqual({
+      kind: "needs_consent",
+      provider: "openai",
+    });
+  });
+});
+
+describe("tabAgentOptOutButton", () => {
+  it("uses a short label in compact mode", () => {
+    const { label, title } = tabAgentOptOutButton({ compact: true });
+    expect(label).toBe("AI off");
+    expect(title).toMatch(/Lyrics tab/);
+  });
+
+  it("uses the longer label outside compact mode", () => {
+    const { label, title } = tabAgentOptOutButton({ compact: false });
+    expect(label).toBe("AI off for this song");
+    expect(title).toMatch(/Lyrics tab/);
   });
 });

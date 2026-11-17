@@ -97,6 +97,69 @@ export function switchToLocalAIConfig(current: AIConfig): AIConfig {
   };
 }
 
+// Probes the local AI server (Ollama / LM Studio) before "Switch to local"
+// actually flips the provider, so the consent modal can refuse to switch
+// into a config that can't serve requests. Short timeout — this only needs
+// to answer "is something listening here", not do real work.
+export async function probeLocalAIServer(
+  provider: AIProvider,
+  baseUrl?: string,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const base = (
+    baseUrl ||
+    LOCAL_PROVIDER_DEFAULT_BASE_URL[provider] ||
+    ""
+  ).replace(/\/+$/, "");
+  const label = localProviderLabel(provider);
+  if (!base) {
+    return { ok: false, message: `No server URL configured for ${label}.` };
+  }
+  const path = provider === "lmstudio" ? "/v1/models" : "/api/tags";
+  const unreachable = {
+    ok: false as const,
+    message: `${label} isn't running at ${base}. Start ${label} and try again, or keep using the cloud.`,
+  };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2000);
+  try {
+    const res = await fetch(`${base}${path}`, { signal: controller.signal });
+    return res.ok ? { ok: true } : unreachable;
+  } catch {
+    return unreachable;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Settings → AI Assistant "Revoke" for the lyrics helper: clears only the
+// lyrics consent fields, leaving provider/key/model untouched.
+export function revokeLyricsCloudConsent(cfg: LyricsAIConfig): LyricsAIConfig {
+  return { ...cfg, cloudConsentAt: undefined, cloudConsentProvider: undefined };
+}
+
+// Settings → AI Assistant "Revoke" for the Tab Agent: clears only the Tab
+// Agent consent fields, leaving provider/key/model untouched.
+export function revokeTabAgentCloudConsent(cfg: AIConfig): AIConfig {
+  return {
+    ...cfg,
+    tabAgentCloudConsentAt: undefined,
+    tabAgentCloudConsentProvider: undefined,
+  };
+}
+
+// Tab tab's disabled-AI-button copy (empty-state primary button and the
+// compact parts-bar button use the same explanation, different lengths).
+export function tabAgentOptOutButton({ compact }: { compact: boolean }): {
+  label: string;
+  title: string;
+} {
+  return {
+    label: compact ? "AI off" : "AI off for this song",
+    title:
+      "AI is off for this song. Turn it back on with the AI toggle in the Lyrics tab.",
+  };
+}
+
 export type CloudAiGate =
   | { status: "opted_out" }
   | { status: "disabled" }

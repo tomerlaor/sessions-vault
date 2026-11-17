@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Bug Fixes
+
+* Existing users will be asked for AI cloud consent once more, because consent is now tied to the current provider (lyrics helper and Tab Agent).
+
 ## [0.2.0](https://github.com/tomerlaor/sessions-vault/compare/v0.1.0...v0.2.0) (2026-05-30)
 
 

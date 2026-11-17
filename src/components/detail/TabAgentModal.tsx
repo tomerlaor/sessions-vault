@@ -80,6 +80,7 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
   const [consentProvider, setConsentProvider] = useState<AIProvider | null>(
     null,
   );
+  const [consentBaseUrl, setConsentBaseUrl] = useState("");
   const [consentBusy, setConsentBusy] = useState(false);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [wizard, setWizard] = useState<WizardState>({
@@ -112,6 +113,9 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // While the consent modal is up, let it handle Esc via onDismiss —
+      // it calls onClose itself, so handling it here too would double-fire.
+      if (step === "needs-consent") return;
       if (e.key === "Escape") {
         // Consumed here; the app-level Esc (leave project view) must skip it.
         // Capture phase so this runs before App's bubble-phase window listener.
@@ -121,7 +125,7 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [onClose]);
+  }, [onClose, step]);
 
   // Begins the guided wizard once a usable AIConfig is in hand — called
   // from the initial mount load and from the consent modal's "Use cloud" /
@@ -179,6 +183,7 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
         if (decision.kind === "needs_consent") {
           if (!cancelled) {
             setConsentProvider(decision.provider);
+            setConsentBaseUrl(cfgNoKey?.baseUrl ?? "");
             setStep("needs-consent");
           }
           return;
@@ -653,9 +658,11 @@ If the user asks a question rather than requesting generation, answer concisely.
         <TabAgentCloudConsentModal
           provider={consentProvider}
           localProvider={pickLocalProvider(consentProvider)}
+          localBaseUrl={consentBaseUrl}
           busy={consentBusy}
           onUseCloud={handleConsentUseCloud}
           onSwitchToLocal={handleConsentSwitchToLocal}
+          onDismiss={onClose}
         />
       )}
     </div>,

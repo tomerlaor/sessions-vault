@@ -5,8 +5,10 @@ import CloudConsentModal from "./CloudConsentModal";
 interface Props {
   provider: AIProvider;
   localProvider: AIProvider;
+  localBaseUrl?: string;
   onUseCloud: () => void;
   onSwitchToLocal: () => void;
+  onDismiss: () => void;
   busy?: boolean;
 }
 
@@ -22,8 +24,10 @@ const SENT_ITEMS = [
 export default function TabAgentCloudConsentModal({
   provider,
   localProvider,
+  localBaseUrl,
   onUseCloud,
   onSwitchToLocal,
+  onDismiss,
   busy,
 }: Props) {
   return (
@@ -38,8 +42,10 @@ export default function TabAgentCloudConsentModal({
       sentItems={SENT_ITEMS}
       provider={provider}
       localProvider={localProvider}
+      localBaseUrl={localBaseUrl}
       onUseCloud={onUseCloud}
       onSwitchToLocal={onSwitchToLocal}
+      onDismiss={onDismiss}
       busy={busy}
     />
   );
