@@ -128,10 +128,6 @@ jobs:
           codesign --verify --verbose=2 "$DMG"
           spctl -a -t open --context context:primary-signature -vvv "$DMG"
 
-      - name: Clean up App Store Connect API key
-        if: always()
-        run: rm -f "$RUNNER_TEMP/apple_api_key.p8"
-
       - name: Build unsigned (no Apple secrets configured)
         if: env.HAS_APPLE_CERT != 'true'
         uses: tauri-apps/tauri-action@v0

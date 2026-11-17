@@ -64,6 +64,8 @@ workflow still builds and publishes a DMG, but it's **unsigned** — see
 | `APPLE_SIGNING_IDENTITY`     | The certificate's common name, e.g. `Developer ID Application: Jane Doe (TEAMID1234)` |
 | `KEYCHAIN_PASSWORD`          | Optional. Password for the temporary CI keychain tauri-action creates                 |
 
+`APPLE_CERTIFICATE_PASSWORD` and `APPLE_SIGNING_IDENTITY` are both required whenever `APPLE_CERTIFICATE` is set.
+
 To export the `.p12` from Keychain Access: select your "Developer ID
 Application" certificate, right-click → **Export**, save as `.p12`, set an
 export password (this is `APPLE_CERTIFICATE_PASSWORD`), then base64-encode it:
