@@ -311,6 +311,36 @@ export function tabAgentOnAIConfigChange(
   return { action: "keep" };
 }
 
+// What an already-open lyrics overlay should do when the AI provider
+// config changes (for example, Settings switched provider). "reconsent"
+// and "drop" both clear the loaded aiConfig so no further cloud request
+// can go out with a stale key or a provider the user hasn't consented to.
+export type LyricsOverlayConfigChange =
+  | { action: "reconsent"; provider: AIProvider }
+  | { action: "drop" }
+  | { action: "use_local" }
+  | { action: "reload_cloud" };
+
+export function lyricsOverlayOnAIConfigChange(
+  projectAiOptOut: boolean,
+  lyricsCfg: LyricsAIConfig,
+  cfgNoKey: AIConfig | null,
+): LyricsOverlayConfigChange {
+  const gate = gateLyricsAi(
+    projectAiOptOut,
+    lyricsCfg,
+    cfgNoKey?.provider ?? null,
+  );
+  if (gate.status === "needs_consent") {
+    return { action: "reconsent", provider: gate.provider };
+  }
+  if (gate.status === "opted_out" || gate.status === "disabled" || !cfgNoKey) {
+    return { action: "drop" };
+  }
+  if (isLocalProvider(cfgNoKey.provider)) return { action: "use_local" };
+  return { action: "reload_cloud" };
+}
+
 // Lyrics toolbar badge. Callers should resolve the lyrics model override
 // (see resolveFeatureConfig in lib/ai.ts) before passing cfg in. This is a
 // best-effort, synchronous check (pattern-only, no catalog fetch) — it can

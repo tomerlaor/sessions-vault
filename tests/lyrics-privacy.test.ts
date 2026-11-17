@@ -17,6 +17,7 @@ import {
   probeLocalAIServer,
   revokeLyricsCloudConsent,
   revokeTabAgentCloudConsent,
+  lyricsOverlayOnAIConfigChange,
   tabAgentOnAIConfigChange,
   tabAgentOptOutButton,
 } from "../src/lib/lyrics-privacy";
@@ -768,6 +769,37 @@ describe("revokeLyricsCloudConsent / revokeTabAgentCloudConsent", () => {
     expect(gateLyricsAi(false, next, "openai")).toEqual({
       status: "needs_consent",
       provider: "openai",
+    });
+  });
+});
+
+describe("lyricsOverlayOnAIConfigChange", () => {
+  const lyricsCfg: LyricsAIConfig = {
+    enabled: true,
+    mode: "inline",
+    enabledModes: ["completion"],
+    feedbackMode: "minimal",
+    cloudConsentAt: Date.now(),
+    cloudConsentProvider: "openai",
+  };
+  const openai: AIConfig = {
+    provider: "openai",
+    apiKey: "",
+    baseUrl: "",
+    model: "gpt-4.1-mini",
+  };
+
+  it("reloads the cloud session when the provider is unchanged and consent still holds", () => {
+    expect(lyricsOverlayOnAIConfigChange(false, lyricsCfg, openai)).toEqual({
+      action: "reload_cloud",
+    });
+  });
+
+  it("drops a loaded session and re-prompts when Settings switches provider", () => {
+    const switched = switchAIProvider(openai, "anthropic");
+    expect(lyricsOverlayOnAIConfigChange(false, lyricsCfg, switched)).toEqual({
+      action: "reconsent",
+      provider: "anthropic",
     });
   });
 });
