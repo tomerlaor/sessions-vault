@@ -463,8 +463,15 @@ pub fn delete_temp_download(path: &Path) -> Result<(), String> {
     let temp_dir = std::env::temp_dir();
     let canonical_temp = std::fs::canonicalize(&temp_dir).unwrap_or(temp_dir);
     let canonical_path = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
-    if !canonical_path.starts_with(&canonical_temp) {
+    if canonical_path.parent() != Some(canonical_temp.as_path()) {
         return Err("refusing to delete a file outside the temp directory".to_string());
+    }
+    let is_our_download = canonical_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.starts_with("dawmgr-restore-") && n.ends_with(".zip"));
+    if !is_our_download {
+        return Err("refusing to delete a file that isn't a restore download".to_string());
     }
     std::fs::remove_file(&canonical_path).map_err(|e| e.to_string())
 }
@@ -560,6 +567,15 @@ mod tests {
         assert!(delete_temp_download(&path).is_err());
         assert!(path.exists());
 
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn refuses_to_delete_other_temp_files() {
+        let path = std::env::temp_dir().join(format!("not-ours-{}.zip", std::process::id()));
+        std::fs::write(&path, b"x").unwrap();
+        assert!(delete_temp_download(&path).is_err());
+        assert!(path.exists());
         let _ = std::fs::remove_file(&path);
     }
 }
