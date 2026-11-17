@@ -171,6 +171,7 @@ export interface RestoreOutcome {
   mismatchCount: number;
   conflictCount: number;
   rejectedCount: number;
+  errorCount: number;
   files: RestoredFile[];
 }
 
@@ -181,6 +182,7 @@ export interface BackupRestore {
   restoredAt: number;
   okCount: number;
   mismatchCount: number;
+  errorCount: number;
   errorMsg: string | null;
 }
 

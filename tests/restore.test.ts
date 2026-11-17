@@ -125,6 +125,7 @@ describe("summarizeRestore", () => {
       mismatchCount: 0,
       conflictCount: 0,
       rejectedCount: 0,
+      errorCount: 0,
       files: [],
       ...overrides,
     };
@@ -153,6 +154,20 @@ describe("summarizeRestore", () => {
         }),
       ),
     ).toBe("2 ok, 1 mismatch, 3 conflict, 1 rejected");
+  });
+
+  it("never reports all-ok when files errored or are missing from the archive", () => {
+    expect(summarizeRestore(outcome({ okCount: 4, errorCount: 1 }))).toBe(
+      "4 ok, 1 error",
+    );
+  });
+
+  it("includes the error count alongside other non-zero breakdowns", () => {
+    expect(
+      summarizeRestore(
+        outcome({ okCount: 2, mismatchCount: 1, errorCount: 3 }),
+      ),
+    ).toBe("2 ok, 1 mismatch, 3 error");
   });
 });
 

@@ -58,11 +58,13 @@ export function summarizeRestore(outcome: RestoreOutcome): string {
     outcome.okCount +
     outcome.mismatchCount +
     outcome.conflictCount +
-    outcome.rejectedCount;
+    outcome.rejectedCount +
+    outcome.errorCount;
   if (
     outcome.mismatchCount === 0 &&
     outcome.conflictCount === 0 &&
-    outcome.rejectedCount === 0
+    outcome.rejectedCount === 0 &&
+    outcome.errorCount === 0
   ) {
     return `Restored ${total} file${total === 1 ? "" : "s"} ok`;
   }
@@ -73,6 +75,7 @@ export function summarizeRestore(outcome: RestoreOutcome): string {
     parts.push(`${outcome.conflictCount} conflict`);
   if (outcome.rejectedCount > 0)
     parts.push(`${outcome.rejectedCount} rejected`);
+  if (outcome.errorCount > 0) parts.push(`${outcome.errorCount} error`);
   return parts.join(", ");
 }
 

@@ -179,6 +179,15 @@ async function runMigrations(raw: Database): Promise<void> {
     [],
   );
 
+  // US-008 PR2 (restore): counts missing_in_archive/error statuses so the
+  // restore summary can't silently report "ok" when files errored.
+  try {
+    await raw.execute(
+      `ALTER TABLE backup_restores ADD COLUMN error_count INTEGER NOT NULL DEFAULT 0`,
+      [],
+    );
+  } catch {}
+
   await raw.execute(
     `CREATE TABLE IF NOT EXISTS lyric_style_events (
     id TEXT PRIMARY KEY,
