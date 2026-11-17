@@ -97,12 +97,17 @@ points `APPLE_API_KEY_PATH` at it for that run only; the file is deleted at
 the end of the job. `APPLE_API_KEY_PATH` itself cannot be stored as a secret
 since it's a filesystem path, not a credential.
 
+If both notarization options are configured, the workflow prefers the App
+Store Connect API key path and does not export the Apple ID variables. That
+avoids empty or unused credentials reaching tauri, which treats a set-but-empty
+`APPLE_ID` as the Apple ID path and would then fail notarization.
+
 ### Unsigned builds
 
 Without `APPLE_CERTIFICATE`, the workflow logs a warning and builds an
-unsigned DMG. It's still attached to a draft release so it's available for
-manual testing, but macOS Gatekeeper will refuse to open it without the user
-bypassing Gatekeeper manually.
+unsigned DMG. The draft release name gets an ` (UNSIGNED)` suffix so it can't
+be published by mistake. macOS Gatekeeper will refuse to open the DMG without
+the user bypassing Gatekeeper manually.
 
 ### Release flow
 
@@ -114,6 +119,16 @@ bypassing Gatekeeper manually.
 
 Releases are always created as drafts — nothing goes live to users until
 someone verifies the build and publishes it manually.
+
+If the verify step fails, the draft release and its artifacts are still left
+in place (tauri-action uploads before verification). Delete that draft, then
+delete the tag and re-push it, before trying again. Do not publish a draft
+from a failed run.
+
+The workflow notarizes and staples the `.app`. tauri signs the DMG but does
+not notarize or staple it today, so verification checks the DMG's signature
+(`codesign` and `spctl`) rather than a stapler ticket. Notarizing and stapling
+the DMG itself is a follow-up.
 
 > The Tauri updater (`TAURI_SIGNING_PRIVATE_KEY`) is tracked separately in
 > #44, and Windows code signing in #45. Both are out of scope for the macOS

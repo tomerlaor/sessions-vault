@@ -14,7 +14,6 @@ jobs:
     runs-on: macos-latest
     env:
       HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
-      HAS_APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,15 +35,55 @@ jobs:
         if: env.HAS_APPLE_CERT != 'true'
         run: echo "::warning::APPLE_CERTIFICATE not set — building UNSIGNED draft release"
 
-      - name: Write App Store Connect API key
-        if: env.HAS_APPLE_CERT == 'true' && env.HAS_APPLE_API_KEY_P8 == 'true'
+      - name: Select notarization credentials
+        if: env.HAS_APPLE_CERT == 'true'
         env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          KEY_PATH="$RUNNER_TEMP/apple_api_key.p8"
-          ( umask 077 && touch "$KEY_PATH" )
-          printf '%s' "$APPLE_API_KEY_P8" > "$KEY_PATH"
-          echo "APPLE_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+          set -euo pipefail
+          set +x
+
+          # Write only a chosen, non-empty set to GITHUB_ENV so later steps
+          # (and tauri's notarize_auth, which checks var_os) never see an
+          # empty string from an unset GitHub secret.
+          gha_env() {
+            local name="$1"
+            local value="$2"
+            local delim
+            delim="EOF_$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+            {
+              printf '%s<<%s\n' "$name" "$delim"
+              printf '%s\n' "$value"
+              printf '%s\n' "$delim"
+            } >> "$GITHUB_ENV"
+          }
+
+          if [ -n "${APPLE_API_KEY}" ] && [ -n "${APPLE_API_ISSUER}" ] && [ -n "${APPLE_API_KEY_P8}" ]; then
+            KEY_PATH="$RUNNER_TEMP/apple_api_key.p8"
+            ( umask 077 && touch "$KEY_PATH" )
+            printf '%s' "$APPLE_API_KEY_P8" > "$KEY_PATH"
+            gha_env APPLE_API_KEY "$APPLE_API_KEY"
+            gha_env APPLE_API_ISSUER "$APPLE_API_ISSUER"
+            gha_env APPLE_API_KEY_PATH "$KEY_PATH"
+            echo "Using App Store Connect API key for notarization"
+          elif [ -n "${APPLE_ID}" ] && [ -n "${APPLE_PASSWORD}" ] && [ -n "${APPLE_TEAM_ID}" ]; then
+            gha_env APPLE_ID "$APPLE_ID"
+            gha_env APPLE_PASSWORD "$APPLE_PASSWORD"
+            gha_env APPLE_TEAM_ID "$APPLE_TEAM_ID"
+            echo "Using Apple ID for notarization"
+          else
+            echo "::warning::No complete notarization credentials — signed build will skip notarization and the verify step will fail"
+          fi
+
+          if [ -n "${KEYCHAIN_PASSWORD}" ]; then
+            gha_env KEYCHAIN_PASSWORD "$KEYCHAIN_PASSWORD"
+          fi
 
       - name: Build, sign and notarize (universal)
         if: env.HAS_APPLE_CERT == 'true'
@@ -54,15 +93,6 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # Apple ID notarization path
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-          # App Store Connect API key notarization path (alternative to Apple ID)
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
@@ -70,6 +100,10 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --target universal-apple-darwin
+
+      - name: Remove App Store Connect API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/apple_api_key.p8"
 
       - name: Verify signing and notarization
         if: env.HAS_APPLE_CERT == 'true'
@@ -91,7 +125,8 @@ jobs:
             exit 1
           fi
           echo "Verifying $DMG"
-          xcrun stapler validate "$DMG"
+          codesign --verify --verbose=2 "$DMG"
+          spctl -a -t open --context context:primary-signature -vvv "$DMG"
 
       - name: Clean up App Store Connect API key
         if: always()
@@ -104,7 +139,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }} (UNSIGNED)
           releaseBody: "See [CHANGELOG.md](https://github.com/tomerlaor/sessions-vault/blob/main/CHANGELOG.md) for details."
           releaseDraft: true
           prerelease: false
