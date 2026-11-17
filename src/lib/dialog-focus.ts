@@ -17,12 +17,16 @@ export function handleTabTrap(
   if (e.key !== "Tab" || focusables.length === 0) return;
   const first = focusables[0];
   const last = focusables[focusables.length - 1];
+  // The dialog panel itself is focused on open (tabIndex=-1) and is not in
+  // the focusable list. Treat "not in the list" like an outside/null active
+  // so Shift+Tab from the panel cannot escape the trap.
+  const activeInList = active !== null && focusables.includes(active);
   if (e.shiftKey) {
-    if (active === first || active === null) {
+    if (!activeInList || active === first) {
       e.preventDefault();
       last.focus();
     }
-  } else if (active === last) {
+  } else if (!activeInList || active === last) {
     e.preventDefault();
     first.focus();
   }

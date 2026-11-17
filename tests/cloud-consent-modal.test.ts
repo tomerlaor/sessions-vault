@@ -156,6 +156,29 @@ describe("handleTabTrap", () => {
     handleTabTrap({ key: "Tab", shiftKey: false, preventDefault }, [], null);
     expect(preventDefault).not.toHaveBeenCalled();
   });
+
+  it("traps Tab and Shift+Tab when the active element is the dialog panel (not in the list)", () => {
+    const first = makeFocusable();
+    const last = makeFocusable();
+    const panel = makeFocusable();
+    const preventDefault = vi.fn();
+    handleTabTrap(
+      { key: "Tab", shiftKey: true, preventDefault },
+      [first, last],
+      panel,
+    );
+    expect(preventDefault).toHaveBeenCalled();
+    expect(last.focused).toBe(true);
+
+    preventDefault.mockClear();
+    handleTabTrap(
+      { key: "Tab", shiftKey: false, preventDefault },
+      [first, last],
+      panel,
+    );
+    expect(preventDefault).toHaveBeenCalled();
+    expect(first.focused).toBe(true);
+  });
 });
 
 describe("restoreFocus", () => {
