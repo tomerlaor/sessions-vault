@@ -1,4 +1,11 @@
 import type { LyricSuggestionMode } from "../types";
+import { loadEnglishDict, nextLineTargets } from "./prosody";
+
+// Warms the English dictionary on first use of this module so later calls
+// get dictionary-backed rhymes/syllables; every nextLineTargets() call
+// below stays synchronous and falls back to a heuristic until this
+// resolves.
+void loadEnglishDict();
 
 export interface LyricsSuggestionInput {
   lyrics: string;
@@ -36,41 +43,19 @@ function lastWord(line: string): string {
   return words[words.length - 1] ?? "";
 }
 
-// Extract rhyme context: find non-empty lines before the current one and
-// return the word that a new line is most likely expected to rhyme with.
-function extractRhymeContext(
+// The lyrics up to (but not including) the line the cursor is currently
+// composing — used so next_word's rhyme hint is judged against the last
+// *finished* lyric line, never the in-progress one being typed.
+function draftBeforeCurrentLine(
   lyrics: string,
-  currentLine: string,
-): string | null {
-  const lines = lyrics
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && l !== currentLine.trim());
-
-  if (lines.length === 0) return null;
-
-  // Look at the last 4 non-empty lines and find the one that is most likely
-  // the rhyme pair (alternating scheme: A B A B → rhyme with 2 lines back;
-  // couplet A A B B → rhyme with 1 line back).
-  const recent = lines.slice(-4);
-
-  // Simple heuristic: if the last line already has a rhyme partner 2 back,
-  // suggest rhyming with 2 lines back (alternating); otherwise 1 line back (couplet).
-  if (recent.length >= 3) {
-    const last = lastWord(recent[recent.length - 1]);
-    const twoBack = lastWord(recent[recent.length - 3]);
-    // Very rough phonetic similarity for Hebrew: compare last 2 chars
-    if (
-      last.length >= 2 &&
-      twoBack.length >= 2 &&
-      last.slice(-2) === twoBack.slice(-2)
-    ) {
-      // Alternating scheme detected — rhyme with the line immediately above current
-      return lastWord(recent[recent.length - 1]);
-    }
-  }
-
-  return lastWord(recent[recent.length - 1]);
+  selectionStart: number,
+): {
+  draft: string;
+  cursor: number;
+} {
+  const lineStart = lyrics.lastIndexOf("\n", selectionStart - 1) + 1;
+  const draft = lyrics.slice(0, lineStart).replace(/\n+$/, "");
+  return { draft, cursor: draft.length };
 }
 
 function buildStyleContext(
@@ -260,7 +245,7 @@ function buildInlineUserPrompt(
         : `\nWriter typed: "${input.textBeforeCursor}" ← continue from here`,
     );
   } else if (input.mode === "next_line") {
-    const rhyme = extractRhymeContext(input.lyrics, input.currentLine);
+    const rhyme = nextLineTargets(input.lyrics, input.selectionStart).rhymeWith;
     lines.push(
       hebrew
         ? `\nהשורה האחרונה שנכתבה: "${input.currentLine}"\nכתוב את השורה הבאה שבאה מיד אחריה.`
@@ -369,6 +354,29 @@ const MODE_INSTRUCTIONS_HE: Record<LyricSuggestionMode, string> = {
     "תן לפחות שלוש אפשרויות שונות למילה הבאה (שתי מילים לכל היותר כל אחת), כפריטי next_word נפרדים, בעברית. לפחות אפשרות אחת חייבת להתחרז עם סוף השורה שמעל. החזר רק את המילים, בלי פיסוק.",
 };
 
+// Stamped on every span's promptVersion (T1, #89) so later prompt rewrites
+// (R6) are comparable by version in the eval report. Bump this — and only
+// this — when prompt wording changes; it is not tied to app releases.
+export const PROMPT_VERSION = "2026-11-13.1";
+
+// Stable id for a span's promptId, e.g. "lyrics.inline.next_line.he". Mirrors
+// the (mode, language) pair buildLyricsSuggestionPrompt already branches on,
+// without changing that function's return shape.
+export function lyricsInlinePromptId(
+  mode: LyricsSuggestionInput["mode"],
+  hebrew: boolean,
+): string {
+  return `lyrics.inline.${mode}.${hebrew ? "he" : "en"}`;
+}
+
+export function lyricsPopupPromptId(hebrew: boolean): string {
+  return `lyrics.popup.${hebrew ? "he" : "en"}`;
+}
+
+export function nextWordOptionsPromptId(hebrew: boolean): string {
+  return `lyrics.next_word.${hebrew ? "he" : "en"}`;
+}
+
 export function buildLyricsSuggestionPrompt(input: LyricsSuggestionInput): {
   system: string;
   prompt: string;
@@ -394,8 +402,8 @@ export function buildLyricsPopupPrompt(input: LyricsPopupInput): {
     .join("\n");
 
   const rhyme = input.enabledModes.includes("next_line")
-    ? extractRhymeContext(input.lyrics, input.currentLine)
-    : null;
+    ? nextLineTargets(input.lyrics, input.selectionStart).rhymeWith
+    : undefined;
 
   // The next_line group always gets one extra option whose last word rhymes
   // with the last line written (the one the cursor is on).
@@ -475,7 +483,11 @@ export function buildNextWordOptionsPrompt(
   input: Omit<LyricsSuggestionInput, "mode">,
 ): { system: string; prompt: string } {
   const hebrew = isHebrew(input.lyrics || input.currentLine);
-  const rhyme = extractRhymeContext(input.lyrics, input.currentLine);
+  const { draft, cursor } = draftBeforeCurrentLine(
+    input.lyrics,
+    input.selectionStart,
+  );
+  const rhyme = nextLineTargets(draft, cursor).rhymeWith;
 
   const system = (
     hebrew

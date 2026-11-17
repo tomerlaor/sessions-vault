@@ -24,6 +24,7 @@ import type {
 
 interface Props {
   project: Project;
+  onFilesChange?: (files: ProjectFile[]) => void;
 }
 
 interface AudioInfo {
@@ -100,7 +101,7 @@ const chipStyle = (color: string): React.CSSProperties => ({
   border: `1px solid ${color}`,
 });
 
-export default function FilesTab({ project: p }: Props) {
+export default function FilesTab({ project: p, onFilesChange }: Props) {
   const [files, setFiles] = useState<ProjectFile[]>([]);
   const [exists, setExists] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +111,7 @@ export default function FilesTab({ project: p }: Props) {
   const reload = useCallback(async () => {
     const rows = await listFiles(p.id);
     setFiles(rows);
+    onFilesChange?.(rows);
     if (rows.length === 0) {
       setExists({});
       return;
@@ -122,7 +124,7 @@ export default function FilesTab({ project: p }: Props) {
     } catch {
       setExists({});
     }
-  }, [p.id]);
+  }, [p.id, onFilesChange]);
 
   useEffect(() => {
     reload();

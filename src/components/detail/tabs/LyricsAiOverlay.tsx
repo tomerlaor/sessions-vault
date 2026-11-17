@@ -6,9 +6,14 @@ import {
   useImperativeHandle,
   forwardRef,
 } from "react";
-import { getAIConfigFor } from "../../../db/queries/ai";
+import {
+  getAIConfigFor,
+  getAIConfigWithoutKey,
+  setAIConfig,
+} from "../../../db/queries/ai";
 import {
   getLyricsAIConfig,
+  setLyricsAIConfig,
   getStyleProfile,
   logStyleEvent,
   updateEventTag,
@@ -16,12 +21,7 @@ import {
   getRecentAccepted,
   upsertStyleProfile,
 } from "../../../db/queries/lyrics-ai";
-import {
-  streamLyricsSuggestion,
-  generatePopupSuggestions,
-  generateNextWordOptions,
-  generateStyleSummary,
-} from "../../../lib/ai";
+import { generateStyleSummary, resolveFeatureConfig } from "../../../lib/ai";
 import {
   buildLyricsSuggestionPrompt,
   buildLyricsPopupPrompt,
@@ -30,13 +30,39 @@ import {
   normalizeNextWord,
   normalizeNextWordOptions,
 } from "../../../lib/lyrics-ai";
+import {
+  LruCache,
+  createDebouncer,
+  shouldRunRequest,
+  isBlankContext,
+  requestStreamSuggestion,
+  requestNextWordOptions,
+  requestPopupSuggestions,
+  type RunSignature,
+  type NextWordOptionsResult,
+  type PopupSuggestionsResult,
+} from "../../../lib/lyrics-ai-request";
+import {
+  gateLyricsAi,
+  isLocalProvider,
+  pickLocalProvider,
+  switchToLocalAIConfig,
+} from "../../../lib/lyrics-privacy";
+import LyricsCloudConsentModal from "../../shared/LyricsCloudConsentModal";
 import type {
   Project,
   AIConfig,
+  AIProvider,
   LyricsAIConfig,
   LyricSuggestionMode,
   LyricRejectionTag,
 } from "../../../types";
+
+// Shared across overlay instances (e.g. switching lyrics tabs/projects) so
+// retyping or undoing to a previously-seen prompt never re-hits the AI.
+const streamCache = new LruCache<string, string>(50);
+const nextWordCache = new LruCache<string, NextWordOptionsResult>(50);
+const popupCache = new LruCache<string, PopupSuggestionsResult>(50);
 
 export interface LyricsAiOverlayHandle {
   hasSuggestion: () => boolean;
@@ -92,6 +118,9 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
     ref,
   ) => {
     const [aiConfig, setAiConfig] = useState<AIConfig | null>(null);
+    const [consentProvider, setConsentProvider] = useState<AIProvider | null>(
+      null,
+    );
     const [cfg, setCfg] = useState<LyricsAIConfig>(DEFAULT_CFG);
     const [globalProfile, setGlobalProfile] = useState<string | null>(null);
     const [projectProfile, setProjectProfile] = useState<string | null>(null);
@@ -114,29 +143,64 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
       null,
     );
 
-    const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-      undefined,
-    );
+    const debouncer = useRef(createDebouncer(800)).current;
+    const abortControllerRef = useRef<AbortController | null>(null);
+    const lastSignatureRef = useRef<RunSignature | null>(null);
     const tagTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
       undefined,
     );
 
     // The AI config includes the API key, which is read from the OS keychain
-    // (and may prompt for the password), so only load it when the helper is on.
+    // (and may prompt for the password), so only load it once consent (if
+    // needed) is in place.
     const loadAiConfig = useCallback(() => {
       getAIConfigFor("lyrics").then(setAiConfig);
     }, []);
 
+    // The single gate before any cloud request: never read the keychain or
+    // call the AI provider while opted out, disabled, or lacking consent.
+    const checkAndMaybeLoad = useCallback(
+      (lyricsCfg: LyricsAIConfig) => {
+        if (project.aiOptOut || !lyricsCfg.enabled) {
+          setConsentProvider(null);
+          setAiConfig(null);
+          return;
+        }
+        getAIConfigWithoutKey().then((cfgNoKey) => {
+          const gate = gateLyricsAi(
+            project.aiOptOut,
+            lyricsCfg,
+            cfgNoKey?.provider ?? null,
+          );
+          if (gate.status === "needs_consent") {
+            setConsentProvider(gate.provider);
+            setAiConfig(null);
+            return;
+          }
+          setConsentProvider(null);
+          if (!cfgNoKey) {
+            setAiConfig(null);
+          } else if (isLocalProvider(cfgNoKey.provider)) {
+            // Local providers need no API key — skip the keychain entirely.
+            setAiConfig(resolveFeatureConfig(cfgNoKey, "lyrics"));
+          } else {
+            loadAiConfig();
+          }
+        });
+      },
+      [project.aiOptOut, loadAiConfig],
+    );
+
     useEffect(() => {
       getLyricsAIConfig().then((lyricsAI) => {
         setCfg(lyricsAI);
-        if (lyricsAI.enabled) loadAiConfig();
+        checkAndMaybeLoad(lyricsAI);
       });
 
       const onCfgChange = (e: Event) => {
         const next = (e as CustomEvent<LyricsAIConfig>).detail;
         setCfg(next);
-        if (next.enabled) loadAiConfig();
+        checkAndMaybeLoad(next);
       };
       window.addEventListener("lyrics-ai-config-changed", onCfgChange);
 
@@ -144,7 +208,32 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
         clearTimeout(tagTimerRef.current);
         window.removeEventListener("lyrics-ai-config-changed", onCfgChange);
       };
-    }, [loadAiConfig]);
+    }, [checkAndMaybeLoad]);
+
+    const handleConsentUseCloud = useCallback(async () => {
+      const next = { ...cfg, cloudConsentAt: Date.now() };
+      await setLyricsAIConfig(next);
+      setCfg(next);
+      window.dispatchEvent(
+        new CustomEvent("lyrics-ai-config-changed", { detail: next }),
+      );
+    }, [cfg]);
+
+    const handleConsentSwitchToLocal = useCallback(async () => {
+      const current = (await getAIConfigWithoutKey()) ?? {
+        provider: "ollama" as AIProvider,
+        apiKey: "",
+        baseUrl: "",
+        model: "",
+      };
+      const nextAiCfg = switchToLocalAIConfig(current);
+      await setAIConfig(nextAiCfg);
+      setConsentProvider(null);
+      setAiConfig(nextAiCfg);
+      window.dispatchEvent(
+        new CustomEvent("lyrics-ai-config-changed", { detail: cfg }),
+      );
+    }, [cfg]);
 
     useEffect(() => {
       Promise.all([
@@ -156,18 +245,36 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
       });
     }, [project.id]);
 
+    // "Clear this song's memory" (Lyrics tab) clears the DB row directly —
+    // refresh the in-memory profile this overlay is holding so it stops
+    // being used in prompts without waiting for a project switch.
     useEffect(() => {
-      if (!cfg.enabled || !aiConfig) {
+      const onMemoryCleared = (e: Event) => {
+        const { projectId } = (e as CustomEvent<{ projectId: string }>).detail;
+        if (projectId === project.id) setProjectProfile(null);
+      };
+      window.addEventListener("lyrics-style-memory-cleared", onMemoryCleared);
+      return () =>
+        window.removeEventListener(
+          "lyrics-style-memory-cleared",
+          onMemoryCleared,
+        );
+    }, [project.id]);
+
+    useEffect(() => {
+      if (!cfg.enabled || !aiConfig || project.aiOptOut) {
         setGhostText("");
         setCurrentSuggestion(null);
         setStatus("idle");
         return;
       }
 
-      let aborted = false;
-      clearTimeout(debounceRef.current);
+      debouncer.schedule(() => {
+        void runRequest();
+      });
 
-      debounceRef.current = setTimeout(async () => {
+      async function runRequest() {
+        if (!aiConfig) return;
         const mode = determineSuggestionMode(
           draft,
           selectionStart,
@@ -175,8 +282,6 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
           cfg.enabledModes,
         );
         if (!mode) return;
-
-        setCurrentMode(mode);
 
         const textBeforeCursor = draft.slice(0, selectionStart);
         const lineStart = textBeforeCursor.lastIndexOf("\n") + 1;
@@ -187,7 +292,30 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
         );
         const lineTextBeforeCursor = draft.slice(lineStart, selectionStart);
 
+        if (isBlankContext(draft)) {
+          setGhostText("");
+          setCurrentSuggestion(null);
+          setPopupItems([]);
+          setStatus("idle");
+          return;
+        }
+
+        const signature: RunSignature = { mode, currentLine, draft };
+        if (!shouldRunRequest(lastSignatureRef.current, signature)) {
+          // Nothing meaningful changed since the last completed request
+          // (e.g. the cursor just moved) — leave whatever is showing as-is.
+          return;
+        }
+
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+        const { signal } = controller;
+        const isCurrent = () => abortControllerRef.current === controller;
+
+        setCurrentMode(mode);
+
         const recentAccepted = await getRecentAccepted(project.id, 5);
+        if (!isCurrent()) return;
 
         const baseInput = {
           lyrics: draft,
@@ -215,14 +343,20 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
           setStatus("loading");
           try {
             const { system, prompt } = buildNextWordOptionsPrompt(baseInput);
-            const result = await generateNextWordOptions(
+            const result = await requestNextWordOptions({
               aiConfig,
               system,
               prompt,
-            );
-            if (aborted) return;
+              signal,
+              cache: nextWordCache,
+            });
+            if (!isCurrent()) return;
+            if (result.status === "aborted") {
+              setStatus("idle");
+              return;
+            }
             const options = normalizeNextWordOptions(
-              result.options,
+              result.value.options,
               lineTextBeforeCursor,
             );
             if (options.length === 0) {
@@ -239,8 +373,9 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
             // Tab accepts the first (most natural) option.
             setCurrentSuggestion(options[0].text);
             setStatus("ready");
+            lastSignatureRef.current = signature;
           } catch (err) {
-            if (!aborted) {
+            if (isCurrent()) {
               setErrorMsg(
                 err instanceof Error ? err.message : "AI request failed",
               );
@@ -258,26 +393,32 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               ...baseInput,
               enabledModes: cfg.enabledModes,
             });
-            const result = await generatePopupSuggestions(
+            const result = await requestPopupSuggestions({
               aiConfig,
               system,
               prompt,
-            );
-            if (!aborted) {
-              setPopupItems(
-                result.suggestions.map((s) =>
-                  s.mode === "next_word"
-                    ? {
-                        ...s,
-                        text: normalizeNextWord(s.text, lineTextBeforeCursor),
-                      }
-                    : s,
-                ),
-              );
-              setStatus("ready");
+              signal,
+              cache: popupCache,
+            });
+            if (!isCurrent()) return;
+            if (result.status === "aborted") {
+              setStatus("idle");
+              return;
             }
+            setPopupItems(
+              result.value.suggestions.map((s) =>
+                s.mode === "next_word"
+                  ? {
+                      ...s,
+                      text: normalizeNextWord(s.text, lineTextBeforeCursor),
+                    }
+                  : s,
+              ),
+            );
+            setStatus("ready");
+            lastSignatureRef.current = signature;
           } catch (err) {
-            if (!aborted) {
+            if (isCurrent()) {
               setErrorMsg(
                 err instanceof Error ? err.message : "AI request failed",
               );
@@ -297,25 +438,34 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               ...baseInput,
               mode,
             });
-            let accumulated = "";
-            for await (const chunk of streamLyricsSuggestion(
+            const result = await requestStreamSuggestion({
               aiConfig,
+              cacheMode: mode,
               system,
               prompt,
-            )) {
-              if (aborted) break;
-              accumulated += chunk;
-              setGhostText(accumulated);
-              setStatus("streaming");
+              signal,
+              cache: streamCache,
+              onToken: (accumulated) => {
+                if (!isCurrent()) return;
+                setGhostText(accumulated);
+                setStatus("streaming");
+              },
+            });
+            if (!isCurrent()) return;
+            if (result.status === "aborted") {
+              setGhostText("");
+              setStatus("idle");
+              return;
             }
-            if (!aborted && accumulated) {
-              setCurrentSuggestion(accumulated);
+            if (result.value) {
+              setCurrentSuggestion(result.value);
               setStatus("ready");
-            } else if (!aborted) {
+              lastSignatureRef.current = signature;
+            } else {
               setStatus("idle");
             }
           } catch (err) {
-            if (!aborted) {
+            if (isCurrent()) {
               setGhostText("");
               setErrorMsg(
                 err instanceof Error ? err.message : "AI request failed",
@@ -328,11 +478,11 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
             }
           }
         }
-      }, 800);
+      }
 
       return () => {
-        clearTimeout(debounceRef.current);
-        aborted = true;
+        debouncer.cancel();
+        abortControllerRef.current?.abort();
       };
     }, [
       draft,
@@ -340,9 +490,16 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
       selectionEnd,
       cfg,
       aiConfig,
-      project,
+      project.id,
+      project.title,
+      project.bpm,
+      project.key,
+      project.timeSignature,
+      project.lyricsContext,
+      project.aiOptOut,
       globalProfile,
       projectProfile,
+      debouncer,
     ]);
 
     const triggerProfileRegenIfNeeded = useCallback(
@@ -452,6 +609,35 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
     );
 
     if (!cfg.enabled) return null;
+
+    if (project.aiOptOut) {
+      return (
+        <div
+          style={{
+            position: "absolute",
+            right: 10,
+            top: 8,
+            fontSize: 11,
+            color: "var(--text-3)",
+            pointerEvents: "none",
+            zIndex: 5,
+          }}
+        >
+          AI off for this song
+        </div>
+      );
+    }
+
+    if (consentProvider) {
+      return (
+        <LyricsCloudConsentModal
+          provider={consentProvider}
+          localProvider={pickLocalProvider(consentProvider)}
+          onUseCloud={handleConsentUseCloud}
+          onSwitchToLocal={handleConsentSwitchToLocal}
+        />
+      );
+    }
 
     if (!aiConfig) {
       return (

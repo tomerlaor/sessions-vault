@@ -4,8 +4,15 @@ import {
   filterOpenRouterModels,
   type OpenRouterModel,
 } from "../../lib/openrouter";
+import { fetchOpenRouterDecisionsModels } from "../../lib/openrouter-decisions";
 
 const MAX_VISIBLE = 100;
+
+// A decisions model (see src/lib/openrouter-decisions.ts) can't be used as
+// a chat model, but it's still a valid thing to type into any of these
+// pickers (lyrics model especially) — tagged so it's not mistaken for a
+// regular chat model.
+type PickerModel = OpenRouterModel & { isDecisions?: boolean };
 
 interface Props {
   value: string;
@@ -14,14 +21,31 @@ interface Props {
 }
 
 export function OpenRouterModelPicker({ value, onChange, placeholder }: Props) {
-  const [models, setModels] = useState<OpenRouterModel[]>([]);
+  const [models, setModels] = useState<PickerModel[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
   const [query, setQuery] = useState(value);
   const [openList, setOpenList] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetchOpenRouterModels().then(setModels, () => setLoadFailed(true));
+    Promise.allSettled([
+      fetchOpenRouterModels(),
+      fetchOpenRouterDecisionsModels(),
+    ]).then(([chat, decisions]) => {
+      if (chat.status === "rejected" && decisions.status === "rejected") {
+        setLoadFailed(true);
+        return;
+      }
+      const chatModels = chat.status === "fulfilled" ? chat.value : [];
+      const decisionsModels =
+        decisions.status === "fulfilled" ? decisions.value : [];
+      setModels(
+        [
+          ...chatModels.map((m) => ({ ...m, isDecisions: false })),
+          ...decisionsModels.map((m) => ({ ...m, isDecisions: true })),
+        ].sort((a, b) => a.id.localeCompare(b.id)),
+      );
+    });
   }, []);
 
   useEffect(() => setQuery(value), [value]);
@@ -122,8 +146,33 @@ export function OpenRouterModelPicker({ value, onChange, placeholder }: Props) {
                 background: m.id === value ? "var(--bg-3)" : undefined,
               }}
             >
-              <div style={{ fontSize: 11, fontFamily: "var(--font-mono)" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 11,
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
                 {m.id}
+                {m.isDecisions && (
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontFamily: "var(--font-sans)",
+                      fontWeight: 700,
+                      letterSpacing: "0.04em",
+                      textTransform: "uppercase",
+                      color: "var(--accent)",
+                      border: "1px solid var(--accent)",
+                      borderRadius: 3,
+                      padding: "0 4px",
+                    }}
+                  >
+                    decisions
+                  </span>
+                )}
               </div>
               {m.name !== m.id && (
                 <div style={{ fontSize: 10, color: "var(--text-3)" }}>

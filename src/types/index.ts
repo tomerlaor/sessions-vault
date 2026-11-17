@@ -29,6 +29,10 @@ export type AIProvider =
 
 export type AIFeature = "lyrics" | "tabAgent";
 
+// "auto" detects an OpenRouter decisions model (e.g. typesafe/jev-1.14) from
+// the catalog/known patterns; "on"/"off" force the classification either way.
+export type LyricsDecisionsMode = "auto" | "on" | "off";
+
 export interface AIConfig {
   provider: AIProvider;
   apiKey: string;
@@ -37,6 +41,16 @@ export interface AIConfig {
   // Optional per-feature overrides; fall back to `model` when empty.
   lyricsModel?: string;
   tabAgentModel?: string;
+  // OpenRouter only. Missing/undefined means true (deny data collection/training).
+  openRouterDenyDataCollection?: boolean;
+  // OpenRouter decisions models (see src/lib/openrouter-decisions.ts) can't
+  // generate text, so when the effective lyrics model is one, a separate
+  // chat model generates candidates for it to rank. Optional — defaults
+  // apply (see DEFAULT_MODELS.openrouter / DEFAULT_LYRICS_CANDIDATE_COUNT in
+  // src/lib/ai.ts, and "auto" here).
+  lyricsGeneratorModel?: string;
+  lyricsCandidateCount?: number;
+  lyricsDecisionsMode?: LyricsDecisionsMode;
 }
 
 export interface TabPart {
@@ -66,6 +80,7 @@ export interface Project {
   todos: string | null;
   tabs: string | null;
   lyricsContext: string | null;
+  aiOptOut: boolean;
   durationSecs: number | null;
   createdAt: number;
   modifiedAt: number;
@@ -204,6 +219,9 @@ export interface LyricsAIConfig {
   mode: LyricDisplayMode;
   enabledModes: LyricSuggestionMode[];
   feedbackMode: LyricFeedbackMode;
+  // Unix ms when the user consented to sending lyrics to a cloud provider.
+  // Missing for local providers (no consent needed) or if never granted.
+  cloudConsentAt?: number;
 }
 
 export type ProjectFileKind = "mix_project" | "master_project" | "export";

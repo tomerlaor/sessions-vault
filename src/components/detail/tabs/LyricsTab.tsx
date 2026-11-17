@@ -1,11 +1,38 @@
-import { useState, useMemo, useRef, useEffect } from "react";
-import { shouldFlushLyrics } from "../../../lib/project-view";
-import type { Project, LyricSuggestionMode } from "../../../types";
+import {
+  useState,
+  useMemo,
+  useRef,
+  useEffect,
+  useImperativeHandle,
+  forwardRef,
+} from "react";
+import {
+  createAutosaveController,
+  saveFailed,
+  saveSucceeded,
+  type SaveState,
+} from "../../../lib/project-tabs";
+import { parseLyricsStructure } from "../../../lib/lyrics-structure";
+import { getAIConfigWithoutKey } from "../../../db/queries/ai";
+import { clearStyleMemory } from "../../../db/queries/lyrics-ai";
+import { resolveFeatureConfig } from "../../../lib/ai";
+import { aiBadgeLabel } from "../../../lib/lyrics-privacy";
+import type { Project, AIConfig, LyricSuggestionMode } from "../../../types";
 import LyricsAiOverlay, { type LyricsAiOverlayHandle } from "./LyricsAiOverlay";
 
 interface Props {
   project: Project;
   onUpdate: (field: string, value: unknown) => void;
+  onSaveStateChange?: (state: SaveState) => void;
+}
+
+const AUTOSAVE_DELAY_MS = 500;
+
+function saveStatusLabel(state: SaveState): string | null {
+  if (state === "saving") return "Saving…";
+  if (state === "saved") return "Saved · just now";
+  if (state === "error") return "Couldn't save";
+  return null;
 }
 
 const CHORD_RE =
@@ -142,9 +169,17 @@ function LyricsView({ text, rtl }: { text: string; rtl: boolean }) {
   );
 }
 
-export default function LyricsTab({ project: p, onUpdate }: Props) {
+export interface LyricsTabHandle {
+  focusEdit: () => void;
+}
+
+function LyricsTab(
+  { project: p, onUpdate, onSaveStateChange }: Props,
+  ref: React.Ref<LyricsTabHandle>,
+) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const [saveState, setSaveState] = useState<SaveState>("clean");
   const [rtlOverride, setRtlOverride] = useState<boolean | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const overlayRef = useRef<LyricsAiOverlayHandle>(null);
@@ -152,12 +187,36 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
   const [selectionEnd, setSelectionEnd] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
   const [contextDraft, setContextDraft] = useState(p.lyricsContext ?? "");
+  const [aiConfig, setAiConfig] = useState<AIConfig | null>(null);
 
   // Follow the project when switching songs.
   useEffect(
     () => setContextDraft(p.lyricsContext ?? ""),
     [p.id, p.lyricsContext],
   );
+
+  // Badge only — never reads the keychain, so it can never prompt for a
+  // password just from opening a project.
+  useEffect(() => {
+    const load = () => getAIConfigWithoutKey().then(setAiConfig);
+    load();
+    window.addEventListener("lyrics-ai-config-changed", load);
+    return () => window.removeEventListener("lyrics-ai-config-changed", load);
+  }, []);
+
+  const aiBadge = aiBadgeLabel(
+    aiConfig ? resolveFeatureConfig(aiConfig, "lyrics") : null,
+  );
+
+  const handleClearSongMemory = () => {
+    clearStyleMemory(p.id).then(() => {
+      window.dispatchEvent(
+        new CustomEvent("lyrics-style-memory-cleared", {
+          detail: { projectId: p.id },
+        }),
+      );
+    });
+  };
 
   const saveContext = () => {
     const next = contextDraft.trim();
@@ -169,29 +228,77 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
   const autoRtl = useMemo(() => detectRtl(text || draft), [text, draft]);
   const rtl = rtlOverride !== null ? rtlOverride : autoRtl;
 
-  // Save unsaved edits when this instance unmounts (e.g. navigating to another
-  // project). Keyed by project id, so onUpdate here belongs to the old project.
-  const latest = useRef({ editing, draft, text, onUpdate });
-  latest.current = { editing, draft, text, onUpdate };
-  useEffect(
-    () => () => {
-      const l = latest.current;
-      if (shouldFlushLyrics(l.editing, l.draft, l.text))
-        l.onUpdate("lyrics", l.draft);
-    },
-    [],
+  const onSaveStateChangeRef = useRef(onSaveStateChange);
+  onSaveStateChangeRef.current = onSaveStateChange;
+  useEffect(() => {
+    onSaveStateChangeRef.current?.(saveState);
+  }, [saveState]);
+
+  // Persist a draft, tracked via a ref so the autosave controller (created
+  // once) always calls the latest onUpdate for the current project.
+  const onUpdateRef = useRef(onUpdate);
+  onUpdateRef.current = onUpdate;
+  const persistValue = useRef(async (value: string) => {
+    try {
+      await onUpdateRef.current("lyrics", value);
+      setSaveState(saveSucceeded());
+    } catch {
+      setSaveState(saveFailed());
+    }
+  }).current;
+
+  const autosaveRef = useRef(
+    createAutosaveController<string>(AUTOSAVE_DELAY_MS, (value) => {
+      setSaveState("saving");
+      persistValue(value);
+    }),
   );
 
+  // Flush any pending autosave when this instance unmounts (e.g. switching
+  // tabs away from Lyrics or navigating to another project).
+  useEffect(() => () => autosaveRef.current.flush(), []);
+
+  useEffect(() => {
+    if (!editing) return;
+    const onBeforeUnload = () => autosaveRef.current.flush();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [editing]);
+
   const knownChords = useMemo(() => extractUniqueChords(draft), [draft]);
+  const structure = useMemo(() => parseLyricsStructure(draft), [draft]);
+  const wordCount = useMemo(
+    () => (draft.trim() ? draft.trim().split(/\s+/).length : 0),
+    [draft],
+  );
+
+  const commitDraft = (next: string) => {
+    setDraft(next);
+    setSaveState("dirty");
+    autosaveRef.current.schedule(next);
+  };
 
   const startEdit = () => {
     setDraft(text);
+    setSaveState("clean");
     setEditing(true);
   };
 
-  const handleDone = async () => {
-    await onUpdate("lyrics", draft);
+  useImperativeHandle(ref, () => ({
+    focusEdit: () => {
+      if (!editing) startEdit();
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    },
+  }));
+
+  const handleDone = () => {
+    autosaveRef.current.flush();
     setEditing(false);
+  };
+
+  const retrySave = () => {
+    setSaveState("saving");
+    persistValue(draft);
   };
 
   const handleOverlayInsert = (
@@ -201,22 +308,21 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
     const ta = textareaRef.current;
     const lineEnd = draft.indexOf("\n", selectionStart);
     const insertAt = lineEnd === -1 ? draft.length : lineEnd;
-    setDraft((prev) => {
-      if (mode === "completion" || mode === "next_word") {
-        return (
-          prev.slice(0, selectionStart) +
-          suggestion +
-          prev.slice(selectionStart)
-        );
-      }
-      if (mode === "alternative") {
-        return (
-          prev.slice(0, selectionStart) + suggestion + prev.slice(selectionEnd)
-        );
-      }
+    let next: string;
+    if (mode === "completion" || mode === "next_word") {
+      next =
+        draft.slice(0, selectionStart) +
+        suggestion +
+        draft.slice(selectionStart);
+    } else if (mode === "alternative") {
+      next =
+        draft.slice(0, selectionStart) + suggestion + draft.slice(selectionEnd);
+    } else {
       // next_line: insert after current line
-      return prev.slice(0, insertAt) + "\n" + suggestion + prev.slice(insertAt);
-    });
+      next =
+        draft.slice(0, insertAt) + "\n" + suggestion + draft.slice(insertAt);
+    }
+    commitDraft(next);
     if (ta) {
       requestAnimationFrame(() => {
         const newCursor =
@@ -236,7 +342,7 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
     const end = el.selectionEnd;
     const token = `[${chord}]`;
     const next = draft.slice(0, start) + token + draft.slice(end);
-    setDraft(next);
+    commitDraft(next);
     requestAnimationFrame(() => {
       el.focus();
       el.setSelectionRange(start + token.length, start + token.length);
@@ -248,7 +354,64 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
       <div className="lyrics-toolbar">
         {p.key && <button title="Key">{p.key}</button>}
         {p.bpm && <button title="BPM">{p.bpm} BPM</button>}
+        {aiBadge && (
+          <span
+            title={aiBadge}
+            style={{
+              fontSize: 10.5,
+              padding: "2px 7px",
+              borderRadius: 999,
+              border: "1px solid var(--line-2)",
+              color: "var(--text-3)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: 180,
+            }}
+          >
+            {aiBadge}
+          </span>
+        )}
+        {editing && (
+          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+            {structure.length} section{structure.length === 1 ? "" : "s"} ·{" "}
+            {wordCount} word{wordCount === 1 ? "" : "s"}
+          </span>
+        )}
+        {editing && saveStatusLabel(saveState) && (
+          <span
+            className={`lyrics-save-status ${saveState === "error" ? "error" : ""}`}
+          >
+            {saveStatusLabel(saveState)}
+            {saveState === "error" && (
+              <button onClick={retrySave} style={{ color: "var(--red)" }}>
+                Retry
+              </button>
+            )}
+          </span>
+        )}
         <div style={{ flex: 1 }} />
+        {editing && (
+          <button
+            title="Clear this song's style memory"
+            onClick={handleClearSongMemory}
+          >
+            Clear memory
+          </button>
+        )}
+        {editing && (
+          <button
+            title={
+              p.aiOptOut
+                ? "AI is off for this song — click to re-enable"
+                : "Don't send this song to AI"
+            }
+            onClick={() => onUpdate("aiOptOut", !p.aiOptOut)}
+            style={p.aiOptOut ? { color: "var(--accent)" } : undefined}
+          >
+            {p.aiOptOut ? "AI off" : "AI on"}
+          </button>
+        )}
         <button
           title={rtl ? "Switch to LTR" : "Switch to RTL"}
           onClick={() => setRtlOverride((r) => (r === null ? !autoRtl : !r))}
@@ -369,7 +532,8 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
                 zIndex: 1,
               }}
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => commitDraft(e.target.value)}
+              onBlur={() => autosaveRef.current.flush()}
               onSelect={(e) => {
                 setSelectionStart(e.currentTarget.selectionStart);
                 setSelectionEnd(e.currentTarget.selectionEnd);
@@ -422,3 +586,5 @@ export default function LyricsTab({ project: p, onUpdate }: Props) {
     </div>
   );
 }
+
+export default forwardRef(LyricsTab);

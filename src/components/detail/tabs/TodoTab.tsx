@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useImperativeHandle, forwardRef } from "react";
 import Icon from "../../shared/Icon";
 import type { Project } from "../../../types";
 
@@ -13,7 +13,14 @@ interface Props {
   onUpdate: (field: string, value: unknown) => void;
 }
 
-export default function TodoTab({ project: p, onUpdate }: Props) {
+export interface TodoTabHandle {
+  focusAdd: () => void;
+}
+
+function TodoTab(
+  { project: p, onUpdate }: Props,
+  ref: React.Ref<TodoTabHandle>,
+) {
   const [items, setItems] = useState<TodoItem[]>(() => {
     try {
       return JSON.parse(p.todos ?? "[]");
@@ -23,6 +30,10 @@ export default function TodoTab({ project: p, onUpdate }: Props) {
   });
   const [newText, setNewText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useImperativeHandle(ref, () => ({
+    focusAdd: () => inputRef.current?.focus(),
+  }));
 
   const save = (next: TodoItem[]) => {
     setItems(next);
@@ -128,3 +139,5 @@ export default function TodoTab({ project: p, onUpdate }: Props) {
     </>
   );
 }
+
+export default forwardRef(TodoTab);
