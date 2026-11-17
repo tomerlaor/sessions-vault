@@ -1,9 +1,11 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::Rng;
 use sha2::{Digest, Sha256};
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use url::Url;
 
 // ── PKCE helpers ─────────────────────────────────────────────────────────────
@@ -352,15 +354,79 @@ async fn upload_file(
 
 // ── Download (for restore) ──────────────────────────────────────────────────
 
-/// Downloads a Drive file's raw bytes to a temp file and returns its path. Used
-/// by restore when a backup's `destination` is a bare Drive file ID rather than
-/// an already-local path (see `HistoryTab.tsx`'s `gdrive-folder` vs `gdrive-api`
-/// distinction).
+/// A Drive file ID is an opaque token; Google's documented alphabet is
+/// alphanumerics plus `-` and `_`. Rejecting anything else keeps a malformed
+/// or hostile ID (e.g. one containing `/` or `..`) from being interpreted as
+/// something other than a single URL path segment.
+pub fn is_valid_file_id(file_id: &str) -> bool {
+    !file_id.is_empty()
+        && file_id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// Percent-encodes a string for use as one URL path segment. Defense in depth
+/// alongside `is_valid_file_id`: even if validation is ever loosened, the
+/// literal bytes can't smuggle a `/`, `?`, or `#` into the request path.
+fn percent_encode_path_segment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// A path under the OS temp dir that nothing else could have predicted or
+/// pre-created, so the download below can safely use `create_new`.
+fn unique_temp_zip_path() -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let rand_suffix: u64 = rand::thread_rng().gen();
+    std::env::temp_dir().join(format!("dawmgr-restore-{nanos:x}-{rand_suffix:x}.zip"))
+}
+
+/// Removes the temp file on drop unless `keep()` was called — so a download
+/// that fails partway through never leaves a partial file behind.
+struct TempFileGuard(Option<PathBuf>);
+
+impl TempFileGuard {
+    fn keep(mut self) -> PathBuf {
+        self.0.take().expect("guard already consumed")
+    }
+}
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        if let Some(path) = &self.0 {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+/// Downloads a Drive file to a freshly created temp file and returns its
+/// path, streaming the response instead of buffering it whole in memory.
+/// Used by restore when a backup's `destination` is a bare Drive file ID
+/// rather than an already-local path (see `HistoryTab.tsx`'s `gdrive-folder`
+/// vs `gdrive-api` distinction). Callers are responsible for deleting the
+/// returned path once they're done restoring from it (success or error) —
+/// see `delete_temp_download`.
 pub async fn download(file_id: &str, access_token: &str) -> Result<PathBuf, String> {
+    if !is_valid_file_id(file_id) {
+        return Err(format!("invalid Google Drive file id: {file_id}"));
+    }
+
     let client = reqwest::Client::new();
-    let resp = client
+    let mut resp = client
         .get(format!(
-            "https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+            "https://www.googleapis.com/drive/v3/files/{}?alt=media",
+            percent_encode_path_segment(file_id)
         ))
         .bearer_auth(access_token)
         .send()
@@ -371,10 +437,36 @@ pub async fn download(file_id: &str, access_token: &str) -> Result<PathBuf, Stri
         return Err(format!("download failed: HTTP {}", resp.status()));
     }
 
-    let bytes = resp.bytes().await.map_err(|e| format!("download: {e}"))?;
-    let dest = std::env::temp_dir().join(format!("{file_id}.zip"));
-    std::fs::write(&dest, &bytes).map_err(|e| format!("write temp file: {e}"))?;
-    Ok(dest)
+    let dest = unique_temp_zip_path();
+    let guard = TempFileGuard(Some(dest.clone()));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&dest)
+        .map_err(|e| format!("create temp file: {e}"))?;
+
+    while let Some(chunk) = resp.chunk().await.map_err(|e| format!("download: {e}"))? {
+        file.write_all(&chunk)
+            .map_err(|e| format!("write temp file: {e}"))?;
+    }
+    file.flush().map_err(|e| format!("flush temp file: {e}"))?;
+    file.sync_all()
+        .map_err(|e| format!("sync temp file: {e}"))?;
+
+    Ok(guard.keep())
+}
+
+/// Deletes a file previously returned by `download`. Refuses anything
+/// outside the OS temp dir so a bad path can't be used to delete arbitrary
+/// files.
+pub fn delete_temp_download(path: &Path) -> Result<(), String> {
+    let temp_dir = std::env::temp_dir();
+    let canonical_temp = std::fs::canonicalize(&temp_dir).unwrap_or(temp_dir);
+    let canonical_path = std::fs::canonicalize(path).map_err(|e| e.to_string())?;
+    if !canonical_path.starts_with(&canonical_temp) {
+        return Err("refusing to delete a file outside the temp directory".to_string());
+    }
+    std::fs::remove_file(&canonical_path).map_err(|e| e.to_string())
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
@@ -411,5 +503,63 @@ mod tests {
         cache_access_token(&tokens(3600));
         clear_access_token();
         assert_eq!(cached_access_token(), None);
+    }
+
+    // ── is_valid_file_id ─────────────────────────────────────────────────────
+
+    #[test]
+    fn accepts_typical_drive_file_ids() {
+        assert!(is_valid_file_id("1A2b3C4d5E6f7G8h9I0j"));
+        assert!(is_valid_file_id("abc-DEF_123"));
+    }
+
+    #[test]
+    fn rejects_empty_and_path_breaking_file_ids() {
+        assert!(!is_valid_file_id(""));
+        assert!(!is_valid_file_id("../../etc/passwd"));
+        assert!(!is_valid_file_id("abc/def"));
+        assert!(!is_valid_file_id("abc?alt=foo"));
+        assert!(!is_valid_file_id("abc def"));
+        assert!(!is_valid_file_id("abc#frag"));
+    }
+
+    // ── percent_encode_path_segment ──────────────────────────────────────────
+
+    #[test]
+    fn percent_encodes_only_reserved_bytes() {
+        assert_eq!(
+            percent_encode_path_segment("abc-DEF_123.~"),
+            "abc-DEF_123.~"
+        );
+        assert_eq!(percent_encode_path_segment("a/b"), "a%2Fb");
+        assert_eq!(percent_encode_path_segment("a b"), "a%20b");
+    }
+
+    // ── delete_temp_download ─────────────────────────────────────────────────
+
+    #[test]
+    fn deletes_a_file_inside_the_temp_dir() {
+        let path = unique_temp_zip_path();
+        std::fs::write(&path, b"x").unwrap();
+        assert!(delete_temp_download(&path).is_ok());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn refuses_to_delete_a_file_outside_the_temp_dir() {
+        // `tempfile::tempdir()` itself lives under the OS temp dir, so use a
+        // scratch dir under the crate's own target dir instead — definitely
+        // outside it — to prove the guard isn't a no-op.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("gdrive-test-scratch");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("not-a-temp-download.zip");
+        std::fs::write(&path, b"x").unwrap();
+
+        assert!(delete_temp_download(&path).is_err());
+        assert!(path.exists());
+
+        let _ = std::fs::remove_file(&path);
     }
 }

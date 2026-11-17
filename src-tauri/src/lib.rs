@@ -51,6 +51,7 @@ pub fn run() {
             commands::verify_backup,
             commands::restore_backup,
             commands::gdrive_download_backup,
+            commands::gdrive_delete_temp_download,
             commands::store_secret,
             commands::get_secret,
             commands::secret_exists,

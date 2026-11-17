@@ -300,6 +300,18 @@ pub async fn gdrive_download_backup(file_id: String, client_id: String) -> Resul
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// Cleans up the temp file `gdrive_download_backup` created, once the caller
+/// is done restoring (or verifying) from it — whether that finished
+/// successfully or not.
+#[tauri::command]
+pub async fn gdrive_delete_temp_download(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        backup::gdrive::delete_temp_download(Path::new(&path))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub async fn inspect_audio(path: String) -> Result<crate::audio::AudioInfo, String> {
     tauri::async_runtime::spawn_blocking(move || crate::audio::inspect_audio(&path))
