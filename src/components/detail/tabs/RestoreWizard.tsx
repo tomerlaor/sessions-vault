@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -86,6 +87,36 @@ export default function RestoreWizard({ project, backup, onClose }: Props) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [outcome, setOutcome] = useState<RestoreOutcome | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [targetExists, setTargetExists] = useState(false);
+  const restoringRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<boolean[]>("file_exists_many", { paths: [targetDir] })
+      .then((flags) => {
+        if (!cancelled) setTargetExists(flags[0] ?? false);
+      })
+      .catch(() => {
+        if (!cancelled) setTargetExists(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [targetDir]);
+
+  // While a restore is running, Escape must not tear the wizard down —
+  // HistoryDrawer's own Escape handler already defers to this one while the
+  // wizard is open (see HistoryDrawer.tsx).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (step !== "restoring") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [step, onClose]);
 
   const handleVerify = useCallback(async () => {
     setError(null);
@@ -116,11 +147,19 @@ export default function RestoreWizard({ project, backup, onClose }: Props) {
   }, []);
 
   const handleRestore = useCallback(async () => {
+    if (restoringRef.current) return;
+    restoringRef.current = true;
     setError(null);
     setStep("restoring");
     setProgress(null);
 
     let path = zipPath;
+    // A gdrive-api backup resolves to a temp file downloaded just for this
+    // restore; it must be cleaned up once we're done with it either way. A
+    // local or gdrive-folder backup resolves to the real backup file itself,
+    // which must never be deleted.
+    const isTempZip =
+      backup.provider !== "local" && !isLocalDestination(backup.destination);
     try {
       if (!path) {
         path = await resolveZipPath(backup);
@@ -129,6 +168,7 @@ export default function RestoreWizard({ project, backup, onClose }: Props) {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStep("confirm");
+      restoringRef.current = false;
       return;
     }
 
@@ -148,6 +188,7 @@ export default function RestoreWizard({ project, backup, onClose }: Props) {
         okCount: result.okCount,
         mismatchCount:
           result.mismatchCount + result.conflictCount + result.rejectedCount,
+        errorCount: result.errorCount,
         errorMsg: null,
       });
     } catch (e) {
@@ -159,10 +200,15 @@ export default function RestoreWizard({ project, backup, onClose }: Props) {
         restoredAt: Math.floor(Date.now() / 1000),
         okCount: 0,
         mismatchCount: 0,
+        errorCount: 0,
         errorMsg: msg,
       });
     } finally {
       unlisten();
+      if (isTempZip && path) {
+        invoke("gdrive_delete_temp_download", { path }).catch(() => {});
+      }
+      restoringRef.current = false;
       setStep("result");
     }
   }, [zipPath, targetDir, backup]);
@@ -171,12 +217,14 @@ export default function RestoreWizard({ project, backup, onClose }: Props) {
     verifyReport?.files.filter((f) => f.status !== "ok") ?? [];
   const restoreGroups = outcome ? groupRestoreFilesByStatus(outcome.files) : {};
 
-  return (
+  return createPortal(
     <div
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 300,
+        // Above HistoryDrawer's own overlay (z-index 300) so the wizard
+        // always reads as the topmost layer, however it's reached.
+        zIndex: 400,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -300,9 +348,11 @@ export default function RestoreWizard({ project, backup, onClose }: Props) {
             >
               {targetDir}
             </div>
-            <div style={{ fontSize: 10, color: "var(--text-3)" }}>
-              A new folder — nothing in it will be overwritten.
-            </div>
+            {!targetExists && (
+              <div style={{ fontSize: 10, color: "var(--text-3)" }}>
+                A new folder — nothing in it will be overwritten.
+              </div>
+            )}
             <div style={{ display: "flex", gap: 6 }}>
               <button className="tb-btn" onClick={handlePickTarget}>
                 Choose folder…
@@ -439,6 +489,7 @@ export default function RestoreWizard({ project, backup, onClose }: Props) {
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

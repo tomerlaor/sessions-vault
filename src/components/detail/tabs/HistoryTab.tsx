@@ -30,6 +30,9 @@ import type {
 
 interface Props {
   project: Project;
+  /** Called whenever RestoreWizard mounts/unmounts, so an ancestor drawer can
+   * avoid closing out from under an open wizard or an in-flight restore. */
+  onRestoreWizardOpenChange?: (open: boolean) => void;
 }
 
 interface BackupResult {
@@ -90,7 +93,10 @@ const STATUS_COLOR: Record<BackupRecord["status"], string> = {
   failed: "#ff5a5a",
 };
 
-export default function HistoryTab({ project: p }: Props) {
+export default function HistoryTab({
+  project: p,
+  onRestoreWizardOpenChange,
+}: Props) {
   const [backups, setBackups] = useState<BackupRecord[]>([]);
   const [files, setFiles] = useState<ProjectFile[]>([]);
   const [rememberedStages, setRememberedStages] = useState<string[] | null>(
@@ -103,6 +109,10 @@ export default function HistoryTab({ project: p }: Props) {
   const [gdriveErr, setGdriveErr] = useState<string | null>(null);
   const [expandedMissing, setExpandedMissing] = useState<string | null>(null);
   const [restoring, setRestoring] = useState<BackupRecord | null>(null);
+
+  useEffect(() => {
+    onRestoreWizardOpenChange?.(restoring !== null);
+  }, [restoring, onRestoreWizardOpenChange]);
 
   const [pending, setPending] = useState<PendingBackup | null>(null);
   const [selectedStages, setSelectedStages] = useState<Set<string>>(new Set());
