@@ -149,7 +149,7 @@ export async function probeLocalAIServer(
     // response). We cannot tell a down server from a CORS block.
     return {
       status: "unverified",
-      message: `${label} couldn't be verified at ${base}. It may be running, but this window couldn't reach it. You can switch anyway.`,
+      message: `Couldn't reach ${label} at ${base}. Start it, or switch anyway and it'll connect when it's running.`,
     };
   } finally {
     clearTimeout(timer);
@@ -309,6 +309,30 @@ export function tabAgentOnAIConfigChange(
     return { action: "use_local" };
   }
   return { action: "keep" };
+}
+
+// Steps where the Tab Agent has not yet started the guided wizard. A
+// use_local AI_CONFIG_CHANGED_EVENT may start it from these; mid-wizard
+// steps must only update the loaded config, not post another greeting.
+export const TAB_AGENT_PRE_WIZARD_STEPS = [
+  "needs-consent",
+  "no-config",
+  "opted-out",
+  "load-error",
+] as const;
+
+export function shouldStartWizardOnLocalConfigChange(step: string): boolean {
+  return (TAB_AGENT_PRE_WIZARD_STEPS as readonly string[]).includes(step);
+}
+
+// setAIConfig dispatches AI_CONFIG_CHANGED_EVENT synchronously, so a
+// Switch-to-local click from the consent dialog is handled first by the
+// event listener (step is still needs-consent, which starts the wizard)
+// and then by the rest of handleConsentSwitchToLocal. The handler must
+// not start the wizard again. Mid-wizard events (e.g. step "section")
+// add no greeting.
+export function tabAgentGreetingsOnUseLocalEvent(step: string): number {
+  return shouldStartWizardOnLocalConfigChange(step) ? 1 : 0;
 }
 
 // What an already-open lyrics overlay should do when the AI provider

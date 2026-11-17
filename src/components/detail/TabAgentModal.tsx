@@ -16,6 +16,7 @@ import {
   isCloudProvider,
   pickLocalProvider,
   resolveTabAgentLoad,
+  shouldStartWizardOnLocalConfigChange,
   switchToLocalAIConfig,
   tabAgentOnAIConfigChange,
 } from "../../lib/lyrics-privacy";
@@ -78,6 +79,8 @@ function Bubble({ msg }: { msg: AgentMessage }) {
 
 export default function TabAgentModal({ project, onInsert, onClose }: Props) {
   const [step, setStep] = useState<Step>("loading");
+  const stepRef = useRef(step);
+  stepRef.current = step;
   const [aiCfg, setAiCfg] = useState<AIConfig | null>(null);
   const [consentProvider, setConsentProvider] = useState<AIProvider | null>(
     null,
@@ -248,14 +251,20 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
         return;
       }
       if (change.action === "use_local") {
-        applyResolvedConfig(resolveFeatureConfig(next, "tabAgent"));
+        const resolved = resolveFeatureConfig(next, "tabAgent");
+        setAiCfg(resolved);
+        // Only start the wizard from a pre-wizard step. Mid-wizard (e.g.
+        // "section") must not post another greeting or reset the flow.
+        if (shouldStartWizardOnLocalConfigChange(stepRef.current)) {
+          startWizard();
+        }
       }
     };
     window.addEventListener(AI_CONFIG_CHANGED_EVENT, onCfg);
     return () => window.removeEventListener(AI_CONFIG_CHANGED_EVENT, onCfg);
-    // applyResolvedConfig is recreated each render and only calls setState
-    // / startWizard; resubscribing on every render would drop the listener
-    // unnecessarily. project is the input the decision actually depends on.
+    // startWizard/project.lyrics are read from the render that subscribed;
+    // the current step is read via stepRef. Resubscribing every render
+    // would drop the listener unnecessarily.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project]);
 
@@ -298,9 +307,12 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
         return;
       }
       const next = switchToLocalAIConfig(current);
+      // setAIConfig broadcasts AI_CONFIG_CHANGED_EVENT synchronously
+      // while step is still needs-consent, so the listener starts the
+      // wizard and posts the opening message once. Do not start it here
+      // or the greeting would appear twice.
       await setAIConfig(next);
       setConsentProvider(null);
-      applyResolvedConfig(resolveFeatureConfig(next, "tabAgent"));
     } catch {
       setStep("load-error");
     } finally {

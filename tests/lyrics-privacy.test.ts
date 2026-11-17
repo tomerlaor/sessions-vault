@@ -18,6 +18,8 @@ import {
   revokeLyricsCloudConsent,
   revokeTabAgentCloudConsent,
   lyricsOverlayOnAIConfigChange,
+  shouldStartWizardOnLocalConfigChange,
+  tabAgentGreetingsOnUseLocalEvent,
   tabAgentOnAIConfigChange,
   tabAgentOptOutButton,
 } from "../src/lib/lyrics-privacy";
@@ -619,9 +621,9 @@ describe("probeLocalAIServer", () => {
     );
     expect(result.status).toBe("unverified");
     if (result.status === "unverified") {
-      expect(result.message).toContain("LM Studio");
-      expect(result.message).toContain("http://localhost:1234");
-      expect(result.message).toMatch(/switch anyway/i);
+      expect(result.message).toBe(
+        "Couldn't reach LM Studio at http://localhost:1234. Start it, or switch anyway and it'll connect when it's running.",
+      );
     }
   });
 });
@@ -815,5 +817,20 @@ describe("tabAgentOptOutButton", () => {
     const { label, title } = tabAgentOptOutButton({ compact: false });
     expect(label).toBe("AI off for this song");
     expect(title).toMatch(/Lyrics tab/);
+  });
+});
+
+describe("shouldStartWizardOnLocalConfigChange", () => {
+  it('a config-change event during step "section" adds no message', () => {
+    expect(shouldStartWizardOnLocalConfigChange("section")).toBe(false);
+    expect(tabAgentGreetingsOnUseLocalEvent("section")).toBe(0);
+  });
+
+  it("switch-to-local from consent posts exactly one greeting", () => {
+    // The event fires first, while the step is still needs-consent, and
+    // starts the wizard once. handleConsentSwitchToLocal must not start it
+    // again (tabAgentGreetingsOnUseLocalEvent counts only the event).
+    expect(shouldStartWizardOnLocalConfigChange("needs-consent")).toBe(true);
+    expect(tabAgentGreetingsOnUseLocalEvent("needs-consent")).toBe(1);
   });
 });
