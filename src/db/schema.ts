@@ -106,6 +106,7 @@ export const backupRestores = sqliteTable("backup_restores", {
   restoredAt: integer("restored_at").notNull(),
   okCount: integer("ok_count").notNull(),
   mismatchCount: integer("mismatch_count").notNull(),
+  errorCount: integer("error_count").notNull().default(0),
   errorMsg: text("error_msg"),
 });
 

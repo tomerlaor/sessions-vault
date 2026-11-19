@@ -1,6 +1,7 @@
 pub mod gdrive;
 pub mod local;
 pub mod manifest;
+pub mod restore;
 
 use manifest::{Manifest, ManifestFile, ManifestMissing, ManifestProject};
 use sha2::{Digest, Sha256};
@@ -50,21 +51,22 @@ pub struct StageFileInput {
 }
 
 /// Wraps a `Read` and feeds every chunk through a running SHA-256 digest, so a
-/// file can be hashed while it streams into the zip without a second read pass.
-struct HashingReader<R: Read> {
+/// file can be hashed while it streams into the zip (or out of it, during
+/// restore) without a second read pass.
+pub(crate) struct HashingReader<R: Read> {
     inner: R,
     hasher: Sha256,
 }
 
 impl<R: Read> HashingReader<R> {
-    fn new(inner: R) -> Self {
+    pub(crate) fn new(inner: R) -> Self {
         Self {
             inner,
             hasher: Sha256::new(),
         }
     }
 
-    fn finish(self) -> String {
+    pub(crate) fn finish(self) -> String {
         hex::encode(self.hasher.finalize())
     }
 }

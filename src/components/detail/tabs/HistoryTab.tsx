@@ -20,6 +20,7 @@ import {
   toStageFileInput,
   type StageFileInput,
 } from "../../../lib/backup-stages";
+import RestoreWizard from "./RestoreWizard";
 import type {
   Project,
   ProjectFile,
@@ -29,6 +30,9 @@ import type {
 
 interface Props {
   project: Project;
+  /** Called whenever RestoreWizard mounts/unmounts, so an ancestor drawer can
+   * avoid closing out from under an open wizard or an in-flight restore. */
+  onRestoreWizardOpenChange?: (open: boolean) => void;
 }
 
 interface BackupResult {
@@ -89,7 +93,10 @@ const STATUS_COLOR: Record<BackupRecord["status"], string> = {
   failed: "#ff5a5a",
 };
 
-export default function HistoryTab({ project: p }: Props) {
+export default function HistoryTab({
+  project: p,
+  onRestoreWizardOpenChange,
+}: Props) {
   const [backups, setBackups] = useState<BackupRecord[]>([]);
   const [files, setFiles] = useState<ProjectFile[]>([]);
   const [rememberedStages, setRememberedStages] = useState<string[] | null>(
@@ -101,6 +108,11 @@ export default function HistoryTab({ project: p }: Props) {
   const [localErr, setLocalErr] = useState<string | null>(null);
   const [gdriveErr, setGdriveErr] = useState<string | null>(null);
   const [expandedMissing, setExpandedMissing] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState<BackupRecord | null>(null);
+
+  useEffect(() => {
+    onRestoreWizardOpenChange?.(restoring !== null);
+  }, [restoring, onRestoreWizardOpenChange]);
 
   const [pending, setPending] = useState<PendingBackup | null>(null);
   const [selectedStages, setSelectedStages] = useState<Set<string>>(new Set());
@@ -469,6 +481,23 @@ export default function HistoryTab({ project: p }: Props) {
                       >
                         {destinationLabel(b)}
                       </div>
+                      <button
+                        className="tb-btn"
+                        style={{
+                          fontSize: 10,
+                          padding: "2px 6px",
+                          alignSelf: "flex-start",
+                          marginTop: 2,
+                        }}
+                        onClick={() => {
+                          // Tell the drawer synchronously, so there's no frame
+                          // where Escape can still close it before the effect runs.
+                          onRestoreWizardOpenChange?.(true);
+                          setRestoring(b);
+                        }}
+                      >
+                        Restore…
+                      </button>
                     </div>
                   )}
 
@@ -514,6 +543,14 @@ export default function HistoryTab({ project: p }: Props) {
             })}
           </div>
         </>
+      )}
+
+      {restoring && (
+        <RestoreWizard
+          project={p}
+          backup={restoring}
+          onClose={() => setRestoring(null)}
+        />
       )}
     </div>
   );
