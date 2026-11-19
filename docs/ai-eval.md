@@ -11,6 +11,52 @@ production prompt builders and model calls, `n` times each, and writes
 results, only fixtures/code). Pass `--rubric` to also write a blind CSV for
 human scoring.
 
+## Reasoning (OpenRouter)
+
+Some OpenRouter models (e.g. Anthropic's Claude Haiku 5.5) use adaptive
+reasoning by default. The lyrics calls' token caps are small (80 tokens for
+the inline stream, 120 for next_word, 300 for popup, 60 for the style
+summary), and a reasoning model can spend the _entire_ cap thinking and
+return no text — the stream ends empty, next_word's `generateObject` (and
+its `generateText` fallback) both come back empty, and the call errors out
+or silently fails. A diagnosis run confirmed reasoning can consume the
+entire token cap and return no text.
+
+By default this app now sends `reasoning:{effort:"none"}` on every lyrics
+call (stream, next_word, popup, the decisions generators, and the style
+summary) for any OpenRouter model whose catalog entry supports it —
+`AIConfig.lyricsReasoning` defaults to `"off"` when unset. This is **not**
+applied to the Tab Agent, tab structure generation, or `testAIConnection`,
+which keep the provider's own default reasoning behavior. There's no
+Settings UI for this yet; `"off"` is simply the default.
+
+A model's catalog entry decides whether `effort:"none"` is safe to send:
+`mandatory:true` models (OpenRouter docs: "do not send `effort: "none"` —
+the model rejects it") get nothing, and reasoning is skipped (silently) for
+any model with no reasoning metadata at all. The catalog fetch never blocks
+a request — a small built-in seed covers `anthropic/claude-*-5.5` for the
+window before the catalog resolves, and the fetch warms in the background.
+A caller-supplied `reasoning` field (if one is ever threaded in) is never
+overwritten.
+
+Use `--reasoning` on the CLI to override this for experiments:
+
+```
+--reasoning off       turn reasoning off (the default) — reasoning:{effort:"none"}
+--reasoning default   send nothing — the provider's own default reasoning behavior
+--reasoning minimal|low|medium|high
+                      send reasoning:{effort:<level>}, only when the model's
+                      catalog entry lists that effort as supported
+```
+
+```bash
+# Reproduce the empty/length errors Haiku 5.5 produces with reasoning on:
+npm run ai -- eval --model anthropic/claude-haiku-5.5 --n 3 --rubric --reasoning default
+
+# The fixed, default behavior:
+npm run ai -- eval --model anthropic/claude-haiku-5.5 --n 3 --rubric
+```
+
 ## Decisions models
 
 Some OpenRouter models (e.g. `typesafe/jev-1.14`, `typesafe/jev-router`,

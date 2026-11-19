@@ -224,7 +224,16 @@ export function resolveFeatureConfig(
   return override ? { ...cfg, model: override } : cfg;
 }
 
-function buildProviderModel(cfg: AIConfig, model: string) {
+// Only the lyrics paths and the style summary opt in — see buildProvider.
+interface BuildProviderOptions {
+  applyLyricsReasoning?: boolean;
+}
+
+function buildProviderModel(
+  cfg: AIConfig,
+  model: string,
+  opts?: BuildProviderOptions,
+) {
   switch (cfg.provider) {
     case "openai":
       return createOpenAI({ apiKey: cfg.apiKey })(model);
@@ -239,7 +248,12 @@ function buildProviderModel(cfg: AIConfig, model: string) {
         headers: { "X-Title": "Sessions" },
         // OpenRouter's stable API is chat completions, not the Responses API
         // that createOpenAI(...)(model) targets by default.
-        fetch: createOpenRouterFetch(openRouterDataCollection(cfg)),
+        fetch: createOpenRouterFetch({
+          dataCollection: openRouterDataCollection(cfg),
+          reasoning: opts?.applyLyricsReasoning
+            ? (cfg.lyricsReasoning ?? "off")
+            : undefined,
+        }),
       }).chat(model);
 
     case "ollama":
@@ -261,9 +275,17 @@ function buildProviderModel(cfg: AIConfig, model: string) {
 // middleware, so every one of the 7 call sites below is observed the same
 // way regardless of provider. There is no persistence here — a trace with
 // no `store` just records attempts/usage onto `trace.span` in memory.
-function buildProvider(cfg: AIConfig, trace?: TraceContext) {
+// `opts.applyLyricsReasoning` opts an OpenRouter call site into
+// `cfg.lyricsReasoning` (default "off") — lyrics stream/next_word/popup,
+// the decisions generators, and the style summary; the Tab Agent, tab
+// structure, and testAIConnection omit it and keep the provider default.
+function buildProvider(
+  cfg: AIConfig,
+  trace?: TraceContext,
+  opts?: BuildProviderOptions,
+) {
   const model = cfg.model || DEFAULT_MODELS[cfg.provider];
-  const base = buildProviderModel(cfg, model);
+  const base = buildProviderModel(cfg, model, opts);
   if (!trace) return base;
 
   trace.span.provider = cfg.provider;
@@ -852,7 +874,9 @@ async function generateOneLyricCandidate(
   signal: AbortSignal | undefined,
   trace: TraceContext,
 ): Promise<CandidateResult> {
-  const provider = buildProvider(generatorCfg, trace);
+  const provider = buildProvider(generatorCfg, trace, {
+    applyLyricsReasoning: true,
+  });
   const result = await generateText({
     model: provider,
     system,
@@ -993,7 +1017,7 @@ export async function* streamLyricsSuggestion(
     );
     return;
   }
-  const provider = buildProvider(cfg, trace);
+  const provider = buildProvider(cfg, trace, { applyLyricsReasoning: true });
   const t0 = Date.now();
   let ttftMs: number | null = null;
   try {
@@ -1059,7 +1083,9 @@ async function generateNextWordOptionsViaDecisions(
   try {
     const generatorCfg = buildGeneratorConfig(cfg);
     const t0 = Date.now();
-    const provider = buildProvider(generatorCfg, trace);
+    const provider = buildProvider(generatorCfg, trace, {
+      applyLyricsReasoning: true,
+    });
     const result = await generateObjectLenient({
       provider,
       schema: nextWordOptionsSchema,
@@ -1149,7 +1175,7 @@ export async function generateNextWordOptions(
     );
   }
   try {
-    const provider = buildProvider(cfg, trace);
+    const provider = buildProvider(cfg, trace, { applyLyricsReasoning: true });
     const t0 = Date.now();
     const result = await generateObjectLenient({
       provider,
@@ -1209,7 +1235,9 @@ async function generatePopupSuggestionsViaDecisions(
   try {
     const generatorCfg = buildGeneratorConfig(cfg);
     const t0 = Date.now();
-    const provider = buildProvider(generatorCfg, trace);
+    const provider = buildProvider(generatorCfg, trace, {
+      applyLyricsReasoning: true,
+    });
     const result = await generateObjectLenient({
       provider,
       schema: popupSuggestionsSchema,
@@ -1271,7 +1299,7 @@ export async function generatePopupSuggestions(
     );
   }
   try {
-    const provider = buildProvider(cfg, trace);
+    const provider = buildProvider(cfg, trace, { applyLyricsReasoning: true });
     const t0 = Date.now();
     const result = await generateObjectLenient({
       provider,
@@ -1311,7 +1339,9 @@ export async function generateStyleSummary(
   const trace = resolveTrace(options?.trace, { operation: "style_summary" });
   // Decisions models can't write text — fall back to the generator model.
   const effectiveCfg = await ensureTextCapableConfig(cfg);
-  const provider = buildProvider(effectiveCfg, trace);
+  const provider = buildProvider(effectiveCfg, trace, {
+    applyLyricsReasoning: true,
+  });
   const t0 = Date.now();
   const prompt = `Analyse the following song lyric lines written by a musician. Write a 1-2 sentence description of their lyric writing style — focus on rhyme scheme, line length, imagery, tone, and vocabulary register. Be concise and specific.\n\nLines:\n${recentAccepted.map((t, i) => `${i + 1}. ${t}`).join("\n")}\n\nDescription:`;
   await annotateTrace(trace, {

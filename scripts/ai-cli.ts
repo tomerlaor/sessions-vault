@@ -26,6 +26,7 @@ import type {
   Instrument,
   LyricSuggestionMode,
   LyricsDecisionsMode,
+  LyricsReasoningSetting,
 } from "../src/types";
 import { loadFixtures, summarizeFixtures } from "./lyrics-eval/fixtures";
 import { buildMarkdownReport } from "./lyrics-eval/report";
@@ -57,6 +58,16 @@ Connection (all commands)
   --base-url <url>         for ollama / lmstudio
   API key is read from OPENROUTER_API_KEY / OPENAI_API_KEY / ANTHROPIC_API_KEY.
   (Keys are taken from the environment only, so they don't end up in shell history.)
+
+Reasoning (OpenRouter, lyrics calls only — stream, next_word, popup,
+decisions generators, style summary; never the Tab Agent or ping)
+  --reasoning <r>          off (default) | default | minimal | low | medium | high
+                           "off" sends reasoning:{effort:"none"} (when the model's
+                           catalog entry supports it — never sent to a mandatory-
+                           reasoning model). "default" sends nothing, leaving the
+                           provider's own default reasoning behavior in place. The
+                           named efforts are for experiments and are sent only when
+                           the catalog lists them as supported.
 
 Decisions models (OpenRouter only — e.g. typesafe/jev-1.14, see docs/ai-eval.md)
   A decisions model answers typed questions instead of writing text, so every
@@ -95,6 +106,7 @@ Examples
   npm run ai -- lyrics --lyrics "I walk alone\\nthrough the empty street" --mode next_line --model <id>
   npm run ai -- eval --model anthropic/claude-haiku-4.5 --n 3 --rubric
   OPENROUTER_API_KEY=sk-or-... npm run ai -- eval --model typesafe/jev-1.14 --generator anthropic/claude-haiku-4.5 --n 3 --rubric
+  npm run ai -- eval --model anthropic/claude-haiku-5.5 --n 3 --rubric --reasoning default
 `;
 
 const { values, positionals } = parseArgs({
@@ -121,6 +133,7 @@ const { values, positionals } = parseArgs({
     generator: { type: "string", default: "anthropic/claude-haiku-4.5" },
     candidates: { type: "string", default: "4" },
     decisions: { type: "string", default: "auto" },
+    reasoning: { type: "string", default: "off" },
     help: { type: "boolean", short: "h" },
   },
 });
@@ -130,7 +143,28 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
-function buildConfig(): AIConfig {
+// --reasoning on the CLI uses "default" (readable on a command line) for
+// what AIConfig.lyricsReasoning calls "provider-default"; everything else
+// maps straight through.
+const REASONING_FLAG_VALUES = [
+  "off",
+  "default",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+] as const;
+
+export function resolveLyricsReasoning(flag: string): LyricsReasoningSetting {
+  if (!(REASONING_FLAG_VALUES as readonly string[]).includes(flag)) {
+    fail(`--reasoning must be one of: ${REASONING_FLAG_VALUES.join(", ")}`);
+  }
+  return flag === "default"
+    ? "provider-default"
+    : (flag as LyricsReasoningSetting);
+}
+
+export function buildConfig(): AIConfig {
   const provider = values.provider as AIProvider;
   const local = provider === "ollama" || provider === "lmstudio";
   const keyVar = KEY_ENV[provider];
@@ -152,6 +186,7 @@ function buildConfig(): AIConfig {
     lyricsGeneratorModel: values.generator,
     lyricsCandidateCount: candidates,
     lyricsDecisionsMode: decisions as LyricsDecisionsMode,
+    lyricsReasoning: resolveLyricsReasoning(values.reasoning),
   };
 }
 

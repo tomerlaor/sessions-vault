@@ -220,7 +220,10 @@ export async function requestStreamSuggestion(
       accumulated += chunk;
       params.onToken(accumulated);
     }
-    params.cache.set(key, accumulated);
+    // An empty result (e.g. the model spent its whole token cap on
+    // reasoning and emitted no text) must not be cached as "ok" — that
+    // would make a later retry replay the same empty string forever.
+    if (accumulated) params.cache.set(key, accumulated);
     return { status: "ok", value: accumulated };
   } catch (err) {
     if (signal.aborted) return { status: "aborted" };
