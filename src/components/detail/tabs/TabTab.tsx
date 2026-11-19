@@ -6,6 +6,7 @@ import TabExpandedModal from "./TabExpandedModal";
 import { useTabGrid } from "../../../hooks/useTabGrid";
 import type { Project, TabPart, Instrument, TabGrid } from "../../../types";
 import { defaultGrid } from "../../../lib/tab-grid";
+import { tabAgentOptOutButton } from "../../../lib/lyrics-privacy";
 
 function parseParts(raw: string | null): TabPart[] {
   try {
@@ -182,9 +183,19 @@ export default function TabTab({ project: p, onUpdate }: Props) {
           <div className="tab-add-row">
             <button
               className="tb-btn primary"
-              onClick={() => setAgentOpen(true)}
+              disabled={p.aiOptOut}
+              title={
+                p.aiOptOut
+                  ? tabAgentOptOutButton({ compact: false }).title
+                  : undefined
+              }
+              onClick={() => {
+                if (!p.aiOptOut) setAgentOpen(true);
+              }}
             >
-              ✦ Generate with AI
+              {p.aiOptOut
+                ? tabAgentOptOutButton({ compact: false }).label
+                : "✦ Generate with AI"}
             </button>
           </div>
           <div className="tab-add-row" style={{ paddingTop: 0 }}>
@@ -260,10 +271,24 @@ export default function TabTab({ project: p, onUpdate }: Props) {
               </button>
               <button
                 className="tab-part-btn"
-                style={{ color: "var(--accent)" }}
-                onClick={() => setAgentOpen(true)}
+                style={
+                  p.aiOptOut
+                    ? { color: "var(--text-3)" }
+                    : { color: "var(--accent)" }
+                }
+                disabled={p.aiOptOut}
+                title={
+                  p.aiOptOut
+                    ? tabAgentOptOutButton({ compact: true }).title
+                    : undefined
+                }
+                onClick={() => {
+                  if (!p.aiOptOut) setAgentOpen(true);
+                }}
               >
-                ✦ AI
+                {p.aiOptOut
+                  ? tabAgentOptOutButton({ compact: true }).label
+                  : "✦ AI"}
               </button>
             </>
           )}

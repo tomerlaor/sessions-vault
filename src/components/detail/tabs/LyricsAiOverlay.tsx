@@ -7,6 +7,7 @@ import {
   forwardRef,
 } from "react";
 import {
+  AI_CONFIG_CHANGED_EVENT,
   getAIConfigFor,
   getAIConfigWithoutKey,
   setAIConfig,
@@ -43,8 +44,7 @@ import {
   type PopupSuggestionsResult,
 } from "../../../lib/lyrics-ai-request";
 import {
-  gateLyricsAi,
-  isLocalProvider,
+  lyricsOverlayOnAIConfigChange,
   pickLocalProvider,
   switchToLocalAIConfig,
 } from "../../../lib/lyrics-privacy";
@@ -121,7 +121,11 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
     const [consentProvider, setConsentProvider] = useState<AIProvider | null>(
       null,
     );
+    const [consentBaseUrl, setConsentBaseUrl] = useState("");
+    const [consentBusy, setConsentBusy] = useState(false);
     const [cfg, setCfg] = useState<LyricsAIConfig>(DEFAULT_CFG);
+    const cfgRef = useRef(cfg);
+    cfgRef.current = cfg;
     const [globalProfile, setGlobalProfile] = useState<string | null>(null);
     const [projectProfile, setProjectProfile] = useState<string | null>(null);
 
@@ -160,33 +164,34 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
     // The single gate before any cloud request: never read the keychain or
     // call the AI provider while opted out, disabled, or lacking consent.
     const checkAndMaybeLoad = useCallback(
-      (lyricsCfg: LyricsAIConfig) => {
-        if (project.aiOptOut || !lyricsCfg.enabled) {
-          setConsentProvider(null);
-          setAiConfig(null);
-          return;
-        }
-        getAIConfigWithoutKey().then((cfgNoKey) => {
-          const gate = gateLyricsAi(
+      (lyricsCfg: LyricsAIConfig, cfgNoKey?: AIConfig | null) => {
+        const apply = (resolved: AIConfig | null) => {
+          const change = lyricsOverlayOnAIConfigChange(
             project.aiOptOut,
             lyricsCfg,
-            cfgNoKey?.provider ?? null,
+            resolved,
           );
-          if (gate.status === "needs_consent") {
-            setConsentProvider(gate.provider);
+          if (change.action === "reconsent") {
+            setConsentProvider(change.provider);
+            setConsentBaseUrl(resolved?.baseUrl ?? "");
             setAiConfig(null);
             return;
           }
           setConsentProvider(null);
-          if (!cfgNoKey) {
+          if (change.action === "drop") {
             setAiConfig(null);
-          } else if (isLocalProvider(cfgNoKey.provider)) {
+          } else if (change.action === "use_local") {
             // Local providers need no API key — skip the keychain entirely.
-            setAiConfig(resolveFeatureConfig(cfgNoKey, "lyrics"));
+            setAiConfig(resolveFeatureConfig(resolved!, "lyrics"));
           } else {
             loadAiConfig();
           }
-        });
+        };
+        if (cfgNoKey !== undefined) {
+          apply(cfgNoKey);
+          return;
+        }
+        getAIConfigWithoutKey().then(apply);
       },
       [project.aiOptOut, loadAiConfig],
     );
@@ -202,38 +207,63 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
         setCfg(next);
         checkAndMaybeLoad(next);
       };
+      // Provider/key changes come through setAIConfig, not the lyrics
+      // config event. Re-run the gate so a Settings provider switch
+      // drops a stale loaded key the same way the Tab Agent does.
+      const onAiCfgChange = (e: Event) => {
+        const nextAi = (e as CustomEvent<AIConfig>).detail;
+        checkAndMaybeLoad(cfgRef.current, nextAi ?? null);
+      };
       window.addEventListener("lyrics-ai-config-changed", onCfgChange);
+      window.addEventListener(AI_CONFIG_CHANGED_EVENT, onAiCfgChange);
 
       return () => {
         clearTimeout(tagTimerRef.current);
         window.removeEventListener("lyrics-ai-config-changed", onCfgChange);
+        window.removeEventListener(AI_CONFIG_CHANGED_EVENT, onAiCfgChange);
       };
     }, [checkAndMaybeLoad]);
 
     const handleConsentUseCloud = useCallback(async () => {
-      const next = { ...cfg, cloudConsentAt: Date.now() };
-      await setLyricsAIConfig(next);
-      setCfg(next);
-      window.dispatchEvent(
-        new CustomEvent("lyrics-ai-config-changed", { detail: next }),
-      );
-    }, [cfg]);
+      if (!consentProvider || consentBusy) return;
+      setConsentBusy(true);
+      try {
+        const next: LyricsAIConfig = {
+          ...cfg,
+          cloudConsentAt: Date.now(),
+          cloudConsentProvider: consentProvider,
+        };
+        await setLyricsAIConfig(next);
+        setCfg(next);
+        window.dispatchEvent(
+          new CustomEvent("lyrics-ai-config-changed", { detail: next }),
+        );
+      } finally {
+        setConsentBusy(false);
+      }
+    }, [cfg, consentProvider, consentBusy]);
 
     const handleConsentSwitchToLocal = useCallback(async () => {
-      const current = (await getAIConfigWithoutKey()) ?? {
-        provider: "ollama" as AIProvider,
-        apiKey: "",
-        baseUrl: "",
-        model: "",
-      };
-      const nextAiCfg = switchToLocalAIConfig(current);
-      await setAIConfig(nextAiCfg);
-      setConsentProvider(null);
-      setAiConfig(nextAiCfg);
-      window.dispatchEvent(
-        new CustomEvent("lyrics-ai-config-changed", { detail: cfg }),
-      );
-    }, [cfg]);
+      if (consentBusy) return;
+      setConsentBusy(true);
+      try {
+        const current = (await getAIConfigWithoutKey()) ?? {
+          provider: "ollama" as AIProvider,
+          apiKey: "",
+          baseUrl: "",
+          model: "",
+        };
+        const nextAiCfg = switchToLocalAIConfig(current);
+        await setAIConfig(nextAiCfg);
+        setConsentProvider(null);
+        setAiConfig(nextAiCfg);
+        window.dispatchEvent(
+          new CustomEvent("lyrics-ai-config-changed", { detail: cfg }),
+        );
+      } finally {
+        setConsentBusy(false);
+      }
+    }, [cfg, consentBusy]);
 
     useEffect(() => {
       Promise.all([
@@ -633,8 +663,11 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
         <LyricsCloudConsentModal
           provider={consentProvider}
           localProvider={pickLocalProvider(consentProvider)}
+          localBaseUrl={consentBaseUrl}
+          busy={consentBusy}
           onUseCloud={handleConsentUseCloud}
           onSwitchToLocal={handleConsentSwitchToLocal}
+          onDismiss={() => setConsentProvider(null)}
         />
       );
     }

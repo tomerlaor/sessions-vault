@@ -1,9 +1,33 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { getAIConfigFor } from "../../db/queries/ai";
-import { generateTabStructure, chatWithTabAgent } from "../../lib/ai";
+import {
+  AI_CONFIG_CHANGED_EVENT,
+  getAIConfigFor,
+  getAIConfigWithoutKey,
+  setAIConfig,
+} from "../../db/queries/ai";
+import {
+  generateTabStructure,
+  chatWithTabAgent,
+  resolveFeatureConfig,
+} from "../../lib/ai";
 import { parseLyricsStructure } from "../../lib/lyrics-structure";
-import type { Project, TabPart, Instrument, AIConfig } from "../../types";
+import {
+  isCloudProvider,
+  pickLocalProvider,
+  resolveTabAgentLoad,
+  shouldStartWizardOnLocalConfigChange,
+  switchToLocalAIConfig,
+  tabAgentOnAIConfigChange,
+} from "../../lib/lyrics-privacy";
+import TabAgentCloudConsentModal from "../shared/TabAgentCloudConsentModal";
+import type {
+  Project,
+  TabPart,
+  Instrument,
+  AIConfig,
+  AIProvider,
+} from "../../types";
 
 interface Props {
   project: Project;
@@ -13,7 +37,10 @@ interface Props {
 
 type Step =
   | "loading"
+  | "opted-out"
   | "no-config"
+  | "load-error"
+  | "needs-consent"
   | "confirm"
   | "section"
   | "instruments"
@@ -52,7 +79,14 @@ function Bubble({ msg }: { msg: AgentMessage }) {
 
 export default function TabAgentModal({ project, onInsert, onClose }: Props) {
   const [step, setStep] = useState<Step>("loading");
+  const stepRef = useRef(step);
+  stepRef.current = step;
   const [aiCfg, setAiCfg] = useState<AIConfig | null>(null);
+  const [consentProvider, setConsentProvider] = useState<AIProvider | null>(
+    null,
+  );
+  const [consentBaseUrl, setConsentBaseUrl] = useState("");
+  const [consentBusy, setConsentBusy] = useState(false);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [wizard, setWizard] = useState<WizardState>({
     sectionName: "",
@@ -70,7 +104,6 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
-  const initialized = useRef(false);
 
   const addAgent = (text: string) =>
     setMessages((m) => [...m, { role: "agent", text }]);
@@ -85,6 +118,9 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // While the consent modal is up, let it handle Esc via onDismiss —
+      // it calls onClose itself, so handling it here too would double-fire.
+      if (step === "needs-consent") return;
       if (e.key === "Escape") {
         // Consumed here; the app-level Esc (leave project view) must skip it.
         // Capture phase so this runs before App's bubble-phase window listener.
@@ -94,47 +130,195 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [onClose]);
+  }, [onClose, step]);
 
+  // Begins the guided wizard once a usable AIConfig is in hand — called
+  // from the initial mount load and from the consent modal's "Use cloud" /
+  // "Switch to local" actions.
+  const startWizard = () => {
+    const sections = parseLyricsStructure(project.lyrics);
+    setLyricsHint(sections);
+
+    if (sections.length > 0) {
+      addAgent(
+        `Here is the song structure I identified:\n` +
+          sections
+            .map((s) => `• ${s.name}${s.chords ? ` — ${s.chords}` : ""}`)
+            .join("\n") +
+          `\n\nShall I proceed with creating the tab structure?`,
+      );
+      setStep("confirm");
+    } else {
+      addAgent(
+        "Let's build a tab structure. What's the name of this section? (e.g. Verse, Chorus, Bridge)",
+      );
+      setStep("section");
+    }
+  };
+
+  const applyResolvedConfig = (cfg: AIConfig) => {
+    if (!cfg.apiKey && isCloudProvider(cfg.provider)) {
+      setStep("no-config");
+      return;
+    }
+    setAiCfg(cfg);
+    startWizard();
+  };
+
+  // Mirrors LyricsAiOverlay.checkAndMaybeLoad: never read the keychain or
+  // call the AI provider while opted out or lacking cloud consent.
   useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
-    getAIConfigFor("tabAgent").then((cfg) => {
-      if (
-        !cfg?.apiKey &&
-        (cfg?.provider === "openai" ||
-          cfg?.provider === "anthropic" ||
-          cfg?.provider === "openrouter")
-      ) {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        if (project.aiOptOut) {
+          if (!cancelled) setStep("opted-out");
+          return;
+        }
+
+        const cfgNoKey = await getAIConfigWithoutKey();
+        if (cancelled) return;
+        const decision = resolveTabAgentLoad(project, cfgNoKey);
+
+        if (decision.kind === "opted_out") {
+          if (!cancelled) setStep("opted-out");
+          return;
+        }
+        if (decision.kind === "needs_consent") {
+          if (!cancelled) {
+            setConsentProvider(decision.provider);
+            setConsentBaseUrl(cfgNoKey?.baseUrl ?? "");
+            setStep("needs-consent");
+          }
+          return;
+        }
+        if (decision.kind === "no_config") {
+          if (!cancelled) setStep("no-config");
+          return;
+        }
+        if (!decision.readKeychain) {
+          // Local providers need no API key — skip the keychain entirely.
+          // (decision.kind === "ok" only when cfgNoKey is non-null.)
+          if (!cancelled) {
+            applyResolvedConfig(resolveFeatureConfig(cfgNoKey!, "tabAgent"));
+          }
+          return;
+        }
+        const cfg = await getAIConfigFor("tabAgent");
+        if (cancelled) return;
+        if (!cfg) {
+          setStep("no-config");
+          return;
+        }
+        applyResolvedConfig(cfg);
+      } catch {
+        // Never leave the modal stuck on "Analysing your project…".
+        if (!cancelled) setStep("load-error");
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+    // Mount-only: the modal remounts on every open, and the cancelled flag
+    // ignores late results after unmount, including StrictMode's double-invoke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // If Settings revokes Tab Agent consent (or switches provider) while this
+  // modal is already open, drop the loaded config immediately so no further
+  // cloud request can go out with a stale key.
+  useEffect(() => {
+    const onCfg = (e: Event) => {
+      const next = (e as CustomEvent<AIConfig>).detail;
+      const change = tabAgentOnAIConfigChange(project, next);
+      if (change.action === "reconsent") {
+        setAiCfg(null);
+        setConsentProvider(change.provider);
+        setConsentBaseUrl(next?.baseUrl ?? "");
+        setStep("needs-consent");
+        return;
+      }
+      if (change.action === "opted_out") {
+        setAiCfg(null);
+        setStep("opted-out");
+        return;
+      }
+      if (change.action === "no_config") {
+        setAiCfg(null);
         setStep("no-config");
         return;
       }
+      if (change.action === "use_local") {
+        const resolved = resolveFeatureConfig(next, "tabAgent");
+        setAiCfg(resolved);
+        // Only start the wizard from a pre-wizard step. Mid-wizard (e.g.
+        // "section") must not post another greeting or reset the flow.
+        if (shouldStartWizardOnLocalConfigChange(stepRef.current)) {
+          startWizard();
+        }
+      }
+    };
+    window.addEventListener(AI_CONFIG_CHANGED_EVENT, onCfg);
+    return () => window.removeEventListener(AI_CONFIG_CHANGED_EVENT, onCfg);
+    // startWizard/project.lyrics are read from the render that subscribed;
+    // the current step is read via stepRef. Resubscribing every render
+    // would drop the listener unnecessarily.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project]);
+
+  const handleConsentUseCloud = async () => {
+    if (consentBusy) return;
+    setConsentBusy(true);
+    try {
+      const current = await getAIConfigWithoutKey();
+      if (!current) {
+        setStep("no-config");
+        return;
+      }
+      const next: AIConfig = {
+        ...current,
+        tabAgentCloudConsentAt: Date.now(),
+        tabAgentCloudConsentProvider: current.provider,
+      };
+      await setAIConfig(next);
+      setConsentProvider(null);
+      const cfg = await getAIConfigFor("tabAgent");
       if (!cfg) {
         setStep("no-config");
         return;
       }
-      setAiCfg(cfg);
+      applyResolvedConfig(cfg);
+    } catch {
+      setStep("load-error");
+    } finally {
+      setConsentBusy(false);
+    }
+  };
 
-      const sections = parseLyricsStructure(project.lyrics);
-      setLyricsHint(sections);
-
-      if (sections.length > 0) {
-        addAgent(
-          `Here is the song structure I identified:\n` +
-            sections
-              .map((s) => `• ${s.name}${s.chords ? ` — ${s.chords}` : ""}`)
-              .join("\n") +
-            `\n\nShall I proceed with creating the tab structure?`,
-        );
-        setStep("confirm");
-      } else {
-        addAgent(
-          "Let's build a tab structure. What's the name of this section? (e.g. Verse, Chorus, Bridge)",
-        );
-        setStep("section");
+  const handleConsentSwitchToLocal = async () => {
+    if (consentBusy) return;
+    setConsentBusy(true);
+    try {
+      const current = await getAIConfigWithoutKey();
+      if (!current) {
+        setStep("no-config");
+        return;
       }
-    });
-  }, [project.lyrics]);
+      const next = switchToLocalAIConfig(current);
+      // setAIConfig broadcasts AI_CONFIG_CHANGED_EVENT synchronously
+      // while step is still needs-consent, so the listener starts the
+      // wizard and posts the opening message once. Do not start it here
+      // or the greeting would appear twice.
+      await setAIConfig(next);
+      setConsentProvider(null);
+    } catch {
+      setStep("load-error");
+    } finally {
+      setConsentBusy(false);
+    }
+  };
 
   const goToInstruments = (sectionName: string, chords: string) => {
     const next = { ...wizard, sectionName, chords };
@@ -210,7 +394,7 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
   };
 
   const handleGenerate = async () => {
-    if (!aiCfg) return;
+    if (!aiCfg || project.aiOptOut) return;
     setStep("generating");
     addAgent("Generating your tab structure…");
     try {
@@ -246,7 +430,7 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
 
   const sendFreeformMessage = async () => {
     const text = chatInput.trim();
-    if (!text || !aiCfg || chatSending) return;
+    if (!text || !aiCfg || chatSending || project.aiOptOut) return;
     setChatInput("");
     addUser(text);
     setChatSending(true);
@@ -285,7 +469,19 @@ If the user asks a question rather than requesting generation, answer concisely.
   };
 
   const hasStepControls =
-    step !== "loading" && step !== "no-config" && step !== "generating";
+    step !== "loading" &&
+    step !== "opted-out" &&
+    step !== "no-config" &&
+    step !== "load-error" &&
+    step !== "needs-consent" &&
+    step !== "generating";
+  const composeDisabled =
+    step === "loading" ||
+    step === "opted-out" ||
+    step === "no-config" ||
+    step === "load-error" ||
+    step === "needs-consent" ||
+    step === "generating";
 
   return createPortal(
     <div
@@ -312,6 +508,26 @@ If the user asks a question rather than requesting generation, answer concisely.
             <div className="agent-thinking">Analysing your project…</div>
           )}
 
+          {step === "opted-out" && (
+            <div className="agent-bubble agent">
+              <span className="agent-avatar">✦</span>
+              <div className="agent-bubble-text">
+                AI off for this song. Turn it back on from the Lyrics tab to use
+                the Tab Agent.
+              </div>
+            </div>
+          )}
+
+          {step === "needs-consent" && (
+            <div className="agent-bubble agent">
+              <span className="agent-avatar">✦</span>
+              <div className="agent-bubble-text">
+                The Tab Agent is set to use a cloud AI provider. Choose how to
+                proceed in the dialog.
+              </div>
+            </div>
+          )}
+
           {step === "no-config" && (
             <div className="agent-bubble agent">
               <span className="agent-avatar">✦</span>
@@ -319,6 +535,16 @@ If the user asks a question rather than requesting generation, answer concisely.
                 No AI provider configured yet. Open{" "}
                 <b>Settings → AI Assistant</b> to add your API key or local
                 runner URL, then come back.
+              </div>
+            </div>
+          )}
+
+          {step === "load-error" && (
+            <div className="agent-bubble agent">
+              <span className="agent-avatar">✦</span>
+              <div className="agent-bubble-text">
+                Couldn't load AI settings. Open <b>Settings → AI Assistant</b>{" "}
+                and try again.
               </div>
             </div>
           )}
@@ -459,12 +685,7 @@ If the user asks a question rather than requesting generation, answer concisely.
             className="agent-text-input"
             placeholder="Ask anything… (e.g. 'add a bridge section with funk feel')"
             value={chatInput}
-            disabled={
-              chatSending ||
-              step === "loading" ||
-              step === "no-config" ||
-              step === "generating"
-            }
+            disabled={chatSending || composeDisabled}
             onChange={(e) => setChatInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -475,19 +696,25 @@ If the user asks a question rather than requesting generation, answer concisely.
           />
           <button
             className="agent-send-btn"
-            disabled={
-              !chatInput.trim() ||
-              chatSending ||
-              step === "loading" ||
-              step === "no-config" ||
-              step === "generating"
-            }
+            disabled={!chatInput.trim() || chatSending || composeDisabled}
             onClick={sendFreeformMessage}
           >
             {chatSending ? "…" : "↑"}
           </button>
         </div>
       </div>
+
+      {step === "needs-consent" && consentProvider && (
+        <TabAgentCloudConsentModal
+          provider={consentProvider}
+          localProvider={pickLocalProvider(consentProvider)}
+          localBaseUrl={consentBaseUrl}
+          busy={consentBusy}
+          onUseCloud={handleConsentUseCloud}
+          onSwitchToLocal={handleConsentSwitchToLocal}
+          onDismiss={onClose}
+        />
+      )}
     </div>,
     document.body,
   );

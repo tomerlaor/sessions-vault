@@ -36,8 +36,12 @@ import {
 import {
   needsCloudConsent,
   pickLocalProvider,
+  revokeLyricsCloudConsent,
+  revokeTabAgentCloudConsent,
+  switchAIProvider,
   switchToLocalAIConfig,
 } from "../../lib/lyrics-privacy";
+import CloudConsentSection from "./CloudConsentSection";
 import type {
   LocalConfig,
   AIConfig,
@@ -259,7 +263,11 @@ export default function SettingsModal({ onClose }: Props) {
     async (next: LyricsAIConfig) => {
       if (
         next.enabled &&
-        needsCloudConsent(aiCfg.provider, next.cloudConsentAt)
+        needsCloudConsent(
+          aiCfg.provider,
+          next.cloudConsentAt,
+          next.cloudConsentProvider,
+        )
       ) {
         setPendingLyricsCfg(next);
         return;
@@ -274,9 +282,10 @@ export default function SettingsModal({ onClose }: Props) {
     await commitLyricsConfig({
       ...pendingLyricsCfg,
       cloudConsentAt: Date.now(),
+      cloudConsentProvider: aiCfg.provider,
     });
     setPendingLyricsCfg(null);
-  }, [pendingLyricsCfg, commitLyricsConfig]);
+  }, [pendingLyricsCfg, commitLyricsConfig, aiCfg.provider]);
 
   const handleConsentSwitchToLocal = useCallback(async () => {
     if (!pendingLyricsCfg) return;
@@ -285,6 +294,14 @@ export default function SettingsModal({ onClose }: Props) {
     await commitLyricsConfig(pendingLyricsCfg);
     setPendingLyricsCfg(null);
   }, [pendingLyricsCfg, aiCfg, handleSaveAI, commitLyricsConfig]);
+
+  const handleRevokeLyricsConsent = useCallback(async () => {
+    await commitLyricsConfig(revokeLyricsCloudConsent(lyricsAICfg));
+  }, [lyricsAICfg, commitLyricsConfig]);
+
+  const handleRevokeTabAgentConsent = useCallback(async () => {
+    await handleSaveAI(revokeTabAgentCloudConsent(aiCfg));
+  }, [aiCfg, handleSaveAI]);
 
   const handleClearGlobalMemory = useCallback(async () => {
     await clearStyleMemory(null);
@@ -724,17 +741,7 @@ export default function SettingsModal({ onClose }: Props) {
                         }
                       : {}
                   }
-                  onClick={() =>
-                    handleSaveAI({
-                      ...aiCfg,
-                      provider: p.id,
-                      // Keys are stored per provider; don't carry the previous one over.
-                      apiKey: "",
-                      model: "",
-                      lyricsModel: "",
-                      tabAgentModel: "",
-                    })
-                  }
+                  onClick={() => handleSaveAI(switchAIProvider(aiCfg, p.id))}
                 >
                   {p.label}
                 </button>
@@ -1038,6 +1045,23 @@ export default function SettingsModal({ onClose }: Props) {
                 )}
               </div>
             </div>
+
+            <div
+              style={{
+                height: 1,
+                background: "var(--line)",
+                margin: "14px 0 10px",
+              }}
+            />
+
+            <CloudConsentSection
+              lyricsProvider={lyricsAICfg.cloudConsentProvider}
+              lyricsGrantedAt={lyricsAICfg.cloudConsentAt}
+              tabAgentProvider={aiCfg.tabAgentCloudConsentProvider}
+              tabAgentGrantedAt={aiCfg.tabAgentCloudConsentAt}
+              onRevokeLyrics={handleRevokeLyricsConsent}
+              onRevokeTabAgent={handleRevokeTabAgentConsent}
+            />
           </section>
 
           <div style={{ height: 1, background: "var(--line)" }} />
@@ -1062,8 +1086,10 @@ export default function SettingsModal({ onClose }: Props) {
         <LyricsCloudConsentModal
           provider={aiCfg.provider}
           localProvider={pickLocalProvider(aiCfg.provider)}
+          localBaseUrl={aiCfg.baseUrl}
           onUseCloud={handleConsentUseCloud}
           onSwitchToLocal={handleConsentSwitchToLocal}
+          onDismiss={() => setPendingLyricsCfg(null)}
         />
       )}
     </div>
