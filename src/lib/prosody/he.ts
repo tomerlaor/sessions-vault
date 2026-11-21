@@ -16,13 +16,9 @@
 //   - a vav carrying only a dagesh (no other vowel point) is read as shuruk
 //     (the vowel "u"), not a doubled consonant.
 // Syllables (unpointed text): there's no reliable algorithm without niqud.
-// We approximate from the written letters: a table of common one-syllable
-// function words, a table of fixed-syllable-count suffixes (plural/dual/
-// possessive endings), and — for whatever stem is left — a letter-based
-// estimate that discounts matres lectionis (ו/י used as vowel markers
-// rather than consonants) and folds one remaining letter in as a coda.
-// See estimateStemSyllables below for the details. Real counts can still
-// differ, especially for loanwords and very short words.
+// We approximate with round(letterCount / 2), which tracks typical CV
+// Hebrew syllable shape closely enough for line-length comparison. Real
+// counts can still differ, especially for loanwords and very short words.
 //
 // Rhyme: rhymeKey strips niqud and prefixes/suffixes down to the final
 // letters, with a small table of common Hebrew endings (plural ים/ות,
@@ -112,157 +108,15 @@ function countPointedSyllables(word: string): number {
   return Math.max(1, count);
 }
 
-// Unpointed text: without niqud there is no reliable nucleus count, but a
-// flat letters/2 estimate is worse than it needs to be — it ignores matres
-// lectionis (ו/י marking a vowel rather than a consonant) entirely, so
-// words written with vowel letters (ktiv male) and words written without
-// them (ktiv chaser) get the same per-letter rate even though the first
-// kind needs fewer syllables per letter than the second. We approximate
-// instead by:
-//   1. a lookup table of common one-syllable function words/prefixes,
-//      which are short and frequent enough that a general rule tends to
-//      miscount them (e.g. "של" is one syllable, not the two a flat
-//      per-letter count would give it);
-//   2. stripping a recognized final suffix (plural ים/ות, the dual/pair
-//      ending יים, or a possessive/verb ending like תי/נו/כם) and scoring
-//      it at its own fixed syllable count, then estimating the stem
-//      separately — this is the single biggest source of improvement,
-//      since these endings are extremely common in sung Hebrew and have a
-//      predictable syllable count regardless of the root;
-//   3. for what's left, treating every letter as a syllable nucleus
-//      except the ones that are almost always silent vowel markers
-//      (a mater ו/י that isn't word-initial, a doubled וו/יי pair that
-//      counts once, or a final א/ה) — and only then, when the stem has no
-//      such marker at all (fully consonantal, "ktiv chaser" spelling),
-//      folding the last letter in as the coda of the preceding syllable
-//      rather than a nucleus of its own, since an all-consonant stem is
-//      exactly the case the old flat estimate undercounted.
-// Real counts can still differ — a mater letter is sometimes a genuine
-// glide consonant rather than a silent vowel marker (e.g. the "י" in
-// "עין" starts its own syllable, "a-yin") — see he-syllables.test.ts for
-// where this still misses by one; pointed text still uses niqud.
-const ONE_SYLLABLE_WORDS = new Set([
-  "של",
-  "על",
-  "אל",
-  "עם",
-  "גם",
-  "רק",
-  "כל",
-  "לא",
-  "מה",
-  "זה",
-  "זו",
-  "הוא",
-  "היא",
-  "את",
-  "עד",
-  "אם",
-  "או",
-  "כי",
-  "פה",
-  "שם",
-  "אז",
-  "לו",
-  "בו",
-  "בה",
-  "לה",
-  "בי",
-  "לי",
-  "כן",
-  "פן",
-  "יש",
-  "אין",
-  "עוד",
-  "כך",
-]);
-
-// Longest-match-first; each entry is [suffix letters, syllables it adds].
-// The dual/pair ending (עיניים, ידיים, רגליים, חיים) is spelled with an
-// extra "י" before the ordinary ים, but that extra letter is the fused
-// final consonant of the stem (e.g. "חי" + "ים" -> "חיים"), not a second
-// suffix syllable — so it's deliberately *not* matched as its own [יים, 2]
-// entry. Falling through to the ordinary ["ים", 1] rule below leaves that
-// letter in the stem, where estimateStemSyllables' mater handling already
-// accounts for it; special-casing יים to a flat +2 double-counted it.
-const SYLLABLE_SUFFIXES: [string, number][] = [
-  ["ים", 1],
-  ["ות", 1],
-  ["תי", 1],
-  ["נו", 1],
-  ["כם", 1],
-  ["כן", 1],
-  ["הם", 1],
-  ["הן", 1],
-  ["תם", 1],
-  ["תן", 1],
-  ["ני", 1],
-  ["נה", 1],
-];
-
-function isLoneMater(letters: string[], i: number): boolean {
-  const ch = letters[i];
-  return (ch === VAV || ch === "י") && i > 0 && letters[i - 1] !== ch;
-}
-
-function isDoubledMaterPair(letters: string[], i: number): boolean {
-  const ch = letters[i];
-  return (ch === VAV || ch === "י") && i > 0 && letters[i - 1] === ch;
-}
-
-// Estimates a stem (a word, or a word with a recognized suffix already
-// stripped off) that carries no niqud.
-function estimateStemSyllables(letters: string[]): number {
-  const n = letters.length;
-  if (n === 0) return 0;
-  if (n === 1) return 1;
-
-  let materDiscount = 0;
-  for (let i = 0; i < n; i++) {
-    if (isDoubledMaterPair(letters, i)) {
-      materDiscount++; // the pair (וו/יי) is one nucleus, not two
-    } else if (isLoneMater(letters, i)) {
-      materDiscount++;
-    } else if (i === n - 1 && (letters[i] === "א" || letters[i] === "ה")) {
-      materDiscount++; // trailing silent aleph/heh
-    }
-  }
-
-  let nuclei = n - materDiscount;
-  // One of the remaining letters is almost always a closing coda rather
-  // than its own nucleus — e.g. "בחדר" ("ba-che-der", 3 syllables from 4
-  // consonant letters) or "חוזר" ("cho-zer", 2 syllables from 3 letters
-  // left after its one mater). That correction only holds once there are
-  // enough letters left to have a coda in the first place: a stem with no
-  // mater needs at least two letters left (so a single CV word like "יד"
-  // isn't folded down to zero), and a stem that already spent exactly one
-  // letter on a mater needs at least three (so "עין" — one mater, two
-  // letters left, both still real nuclei, "a-yin" — isn't over-folded).
-  // Two or more matres already account for enough of the word's vowels
-  // that a further coda correction tends to overcorrect (see
-  // he-syllables.test.ts).
-  if (materDiscount === 0 && nuclei >= 2) {
-    nuclei -= 1;
-  } else if (materDiscount === 1 && nuclei >= 3) {
-    nuclei -= 1;
-  }
-  return Math.max(1, nuclei);
-}
-
+// Unpointed text: without niqud there is no reliable nucleus count.
+// Counting every letter (or every mater) overcounts badly (the same
+// four-word line the pointed path scores at ~10 became 15). A simple
+// letters/2 estimate tracks typical CV Hebrew syllable shape closely
+// enough for line-length comparison; pointed text still uses niqud.
 function countUnpointedSyllables(word: string): number {
   const letters = word.match(HEBREW_LETTER_G) ?? [];
-  const bare = letters.join("");
   if (letters.length === 0) return 0;
-  if (ONE_SYLLABLE_WORDS.has(bare)) return 1;
-
-  for (const [suffix, syllables] of SYLLABLE_SUFFIXES) {
-    if (bare.length > suffix.length && bare.endsWith(suffix)) {
-      const stem = bare.slice(0, -suffix.length).split("");
-      return estimateStemSyllables(stem) + syllables;
-    }
-  }
-
-  return estimateStemSyllables(letters);
+  return Math.max(1, Math.round(letters.length / 2));
 }
 
 function countSyllablesWord(word: string): number {

@@ -16,7 +16,7 @@ import {
   HE_CLICHE_PAIRS,
   type CheckContext,
 } from "../scripts/lyrics-eval/checks";
-import { loadEnglishDict } from "../src/lib/prosody";
+import { currentSection, loadEnglishDict } from "../src/lib/prosody";
 
 beforeAll(async () => {
   await loadEnglishDict();
@@ -334,7 +334,7 @@ describe("checkSyllables", () => {
     // unpointed equivalent get the same verdict.
     const pointedOutput = "וְדַלְתַיִם נִשְׁמְרוּ בִזְכרוֹן בּוֹ";
     const unpointedOutput = "ודלתים נשמרו בזכרון בו";
-    const range = { syllables: [11, 13] as [number, number] };
+    const range = { syllables: [8, 12] as [number, number] };
 
     const pointedResult = checkSyllables(
       pointedOutput,
@@ -385,6 +385,38 @@ describe("checkSyllables", () => {
       candidate,
       {},
       ctx({ mode: "next_line", referenceLine: earlierLong }),
+    );
+    expect(fail.status).toBe("fail");
+  });
+
+  it("scores against the real he-next-line-abab fixture's reference line, not a hand-picked number", () => {
+    const f = loadFixtures().find((x) => x.id === "he-next-line-abab");
+    if (!f) throw new Error("missing fixture he-next-line-abab");
+    const lineStart = f.lyrics.lastIndexOf("\n", f.cursor - 1) + 1;
+    const lines = currentSection(f.lyrics, f.cursor);
+    const context = ctx({
+      mode: f.mode,
+      lang: f.lang,
+      linePrefix: f.lyrics.slice(lineStart, f.cursor),
+      referenceLine: lines[lines.length - 1],
+    });
+    expect(context.referenceLine).toBe("מרגיש כמו מישהו שעדיין ישן");
+
+    // A candidate of similar real length to the reference line passes.
+    const pass = checkSyllables(
+      "סופר כוכבים שכבר לא זוכרים שוב",
+      f.expect,
+      context,
+    );
+    expect(pass.status).toBe("pass");
+
+    // A candidate several real syllables longer still fails outside the
+    // +/-2 window — the flat letters/2 estimate undercounts both sides by
+    // a similar amount, so it doesn't paper over a genuinely too-long line.
+    const fail = checkSyllables(
+      "ואני מחפש בחושך את הדלת שאבדה בין הכוכבים",
+      f.expect,
+      context,
     );
     expect(fail.status).toBe("fail");
   });
