@@ -171,19 +171,34 @@ describe("checkFormat", () => {
     expect(checkFormat("אמרתי: לא", ctx({ lang: "he" })).status).toBe("pass");
   });
 
-  it("fails when a completion is glued to the prefix with no space", () => {
+  it("no longer fails a completion glued to the prefix with no space (#102)", () => {
+    // Pre-fix this failed with detail "glued to prefix". The app now runs
+    // every completion through the same smartJoinCompletion the eval's
+    // joinCompletion() delegates to (src/lib/lyrics-join.ts), which adds
+    // the missing space before insertion ("I walk" + "away" -> "I walk
+    // away") — so raw adjacency alone is no longer treated as a defect.
     const result = checkFormat(
       "away",
       ctx({ mode: "completion", linePrefix: "I walk" }),
     );
-    expect(result.status).toBe("fail");
-    expect(result.detail).toBe("glued to prefix");
+    expect(result.status).toBe("pass");
   });
 
   it("passes a completion separated from the prefix by whitespace", () => {
     const result = checkFormat(
       "away",
       ctx({ mode: "completion", linePrefix: "I walk " }),
+    );
+    expect(result.status).toBe("pass");
+  });
+
+  it("passes a valid glued mid-word completion ('tomor' + 'row')", () => {
+    // This is the case the old blanket "glued to prefix" rule got wrong:
+    // "row" must stay glued to "tomor" to read as "tomorrow", so it should
+    // never have failed format scoring in the first place.
+    const result = checkFormat(
+      "row",
+      ctx({ mode: "completion", linePrefix: "tomor" }),
     );
     expect(result.status).toBe("pass");
   });
@@ -398,6 +413,10 @@ describe("joinCompletion", () => {
 
   it("adds a space between glued Hebrew words", () => {
     expect(joinCompletion("הלכתי", "לבד")).toBe("הלכתי לבד");
+  });
+
+  it("keeps a valid mid-word completion glued (delegates to smartJoinCompletion)", () => {
+    expect(joinCompletion("tomor", "row")).toBe("tomorrow");
   });
 
   it("returns the other side unchanged when one side is empty", () => {
