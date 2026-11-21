@@ -28,8 +28,8 @@ import {
   buildLyricsPopupPrompt,
   buildNextWordOptionsPrompt,
   determineSuggestionMode,
-  normalizeNextWord,
   normalizeNextWordOptions,
+  sanitizePopupSuggestions,
 } from "../../../lib/lyrics-ai";
 import { smartJoinCompletion } from "../../../lib/lyrics-join";
 import { sanitizeLyricsOutput } from "../../../lib/lyrics-sanitize";
@@ -438,13 +438,9 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               return;
             }
             setPopupItems(
-              result.value.suggestions.map((s) =>
-                s.mode === "next_word"
-                  ? {
-                      ...s,
-                      text: normalizeNextWord(s.text, lineTextBeforeCursor),
-                    }
-                  : s,
+              sanitizePopupSuggestions(
+                result.value.suggestions,
+                lineTextBeforeCursor,
               ),
             );
             setStatus("ready");
@@ -489,15 +485,23 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               setStatus("idle");
               return;
             }
-            if (result.value) {
-              // Shared with the eval runner (scripts/lyrics-eval/runner.ts)
-              // so what's shown/inserted here is what gets scored there.
-              const suggestion = sanitizeLyricsOutput(result.value, mode);
+            // Shared with the eval runner (scripts/lyrics-eval/runner.ts) so
+            // what's shown/inserted here is what gets scored there.
+            const suggestion = result.value
+              ? sanitizeLyricsOutput(result.value, mode)
+              : "";
+            if (suggestion) {
               setGhostText(suggestion);
               setCurrentSuggestion(suggestion);
               setStatus("ready");
               lastSignatureRef.current = signature;
             } else {
+              // A reply that sanitizes down to nothing (e.g. just a stray
+              // quote/fence) isn't a real suggestion — go idle rather than
+              // "ready" with nothing to show, and don't record the
+              // signature so a retry on the same input can still run.
+              setGhostText("");
+              setCurrentSuggestion(null);
               setStatus("idle");
             }
           } catch (err) {

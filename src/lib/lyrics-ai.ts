@@ -7,6 +7,11 @@ import {
   nextLineTargets,
   type ProsodyLang,
 } from "./prosody";
+import {
+  CURSOR_MARKER,
+  sanitizeLyricsOutput,
+  type SanitizeMode,
+} from "./lyrics-sanitize";
 
 // Warms the English dictionary on first use of this module so later calls
 // get dictionary-backed rhymes/syllables; every nextLineTargets() call
@@ -97,10 +102,17 @@ function stripTrailingPunct(word: string): string {
 function impliedRhymeTarget(draft: string, cursor: number): string | undefined {
   const formal = nextLineTargets(draft, cursor).rhymeWith;
   if (formal) return formal;
+  // nextLineTargets() already runs the real AABB/ABAB/free-verse scheme
+  // detection (src/lib/prosody/scheme.ts's detectScheme) and only comes up
+  // empty-handed when there isn't enough evidence for either pattern — one
+  // prior line (can't detect any scheme from a single data point) or two+
+  // prior lines that genuinely don't rhyme with each other (free verse).
+  // Forcing a rhyme target in the free-verse case is exactly the bug this
+  // fixes: only the single-prior-line case still gets the "obvious partner"
+  // fallback; two or more non-rhyming prior lines mean no target at all.
   const lines = currentSection(draft, cursor);
-  const line = lines[lines.length - 1];
-  if (!line) return undefined;
-  return stripTrailingPunct(lastWord(line)) || undefined;
+  if (lines.length !== 1) return undefined;
+  return stripTrailingPunct(lastWord(lines[0])) || undefined;
 }
 
 function buildStyleContext(
@@ -171,8 +183,6 @@ function buildSongContext(
 
 // ─── Cursor + section context (R6 / #79) ────────────────────────────────────
 
-const CURSOR_MARKER = "⟨CURSOR⟩";
-
 function clampIndex(n: number, len: number): number {
   return Math.max(0, Math.min(n, len));
 }
@@ -181,22 +191,103 @@ function isHeaderLine(line: string): boolean {
   return /^\s*(?:\[[^\]]*]|#{1,6}\s+\S.*)\s*$/.test(line);
 }
 
+// A user could have literally typed the marker text; strip it before
+// inserting the real one so the model never sees two and can't mistake an
+// echoed one for the actual cursor position.
+function stripUserTypedCursorMarker(s: string): string {
+  return s.split(CURSOR_MARKER).join("");
+}
+
+// Joins the cleaned text before/after the cursor with the marker, adding a
+// space on either side only where the ORIGINAL (pre-clean) text actually had
+// one — so "wor|ld" (no surrounding space) stays "wor⟨CURSOR⟩ld" while
+// "ooh |yeah" (a space right before the cursor) keeps that space.
+function joinAroundMarker(
+  before: string,
+  after: string,
+  spaceBefore: boolean,
+  spaceAfter: boolean,
+): string {
+  const sepBefore = before && spaceBefore ? " " : "";
+  const sepAfter = after && spaceAfter ? " " : "";
+  return `${before}${sepBefore}${CURSOR_MARKER}${sepAfter}${after}`;
+}
+
 // The lyrics block sent to the model: a ⟨CURSOR⟩ marker dropped in at the
 // cursor (so the model sees what comes before AND after it), chord tokens
 // and parenthetical remarks stripped line-by-line via the R4 cleaner
 // (cleanLine), and [Section] headers kept verbatim rather than stripped.
+//
+// The cursor's own line is cleaned in two independent halves (before/after
+// the cursor) rather than cleaned whole after the marker is spliced in —
+// cleanLine's chord/remark stripping matches whole "(...)"/"[...]" tokens,
+// so cleaning the combined line would delete the marker along with an
+// ad-lib or chord it happened to land inside, e.g. "I walk alone (ooh
+// |yeah) tonight" (cursor at `|`) sent the model no marker at all.
 function buildCursorMarkedLyrics(lyrics: string, cursor: number): string {
   const at = clampIndex(cursor, lyrics.length);
-  const marked = lyrics.slice(0, at) + CURSOR_MARKER + lyrics.slice(at);
-  return marked
-    .split("\n")
-    .map((line) => (isHeaderLine(line) ? line.trim() : cleanLine(line)))
+  const rawLines = lyrics.split("\n");
+
+  let offset = 0;
+  let cursorLineIndex = rawLines.length - 1;
+  let posInLine = rawLines[cursorLineIndex]?.length ?? 0;
+  for (let i = 0; i < rawLines.length; i++) {
+    const lineLen = rawLines[i].length;
+    if (at <= offset + lineLen) {
+      cursorLineIndex = i;
+      posInLine = at - offset;
+      break;
+    }
+    offset += lineLen + 1;
+  }
+
+  return rawLines
+    .map((line, i) => {
+      if (i !== cursorLineIndex) {
+        return isHeaderLine(line)
+          ? line.trim()
+          : cleanLine(stripUserTypedCursorMarker(line));
+      }
+      if (isHeaderLine(line)) {
+        const cleanedLine = stripUserTypedCursorMarker(line);
+        const clampedPos = clampIndex(posInLine, cleanedLine.length);
+        return (
+          cleanedLine.slice(0, clampedPos) +
+          CURSOR_MARKER +
+          cleanedLine.slice(clampedPos)
+        ).trim();
+      }
+      const rawBefore = line.slice(0, posInLine);
+      const rawAfter = line.slice(posInLine);
+      const before = cleanLine(stripUserTypedCursorMarker(rawBefore));
+      const after = cleanLine(stripUserTypedCursorMarker(rawAfter));
+      const spaceBefore = rawBefore.length === 0 || /\s$/.test(rawBefore);
+      const spaceAfter = rawAfter.length === 0 || /^\s/.test(rawAfter);
+      return joinAroundMarker(before, after, spaceBefore, spaceAfter);
+    })
     .join("\n");
+}
+
+const SECTION_NAME_MAX_LEN = 40;
+
+// A [Section] name is writer-controlled text embedded directly into the
+// prompt (sectionContextLine) — strip control characters and brackets and
+// cap its length so it can't inject prompt structure or balloon the prompt.
+function sanitizeSectionName(name: string): string {
+  const cleaned = name
+    // eslint-disable-next-line no-control-regex -- stripping control chars is the point
+    .replace(/[\x00-\x1F\x7F]/g, " ")
+    .replace(/[[\]]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.length > SECTION_NAME_MAX_LEN
+    ? cleaned.slice(0, SECTION_NAME_MAX_LEN).trim()
+    : cleaned;
 }
 
 function headerName(line: string): string | null {
   const m = /^\s*\[([^\]]*)]\s*$/.exec(line.trim());
-  return m ? m[1].trim() : null;
+  return m ? sanitizeSectionName(m[1]) : null;
 }
 
 function lineIndexAtOffset(lines: string[], offset: number): number {
@@ -796,6 +887,24 @@ export function normalizeNextWordOptions(
     ...cleaned.filter((o) => o.kind === "rhyme"),
   ];
   return ordered.slice(0, 5);
+}
+
+// Cleans every popup suggestion for display the same way the ghost-text
+// (inline) path does: next_word items via normalizeNextWord, every other
+// mode (completion/next_line/alternative) via the shared sanitizer — so a
+// labeled/quoted/fenced reply doesn't reach the popup list unsanitized the
+// way the inline path's result already is. Drops anything that sanitizes
+// down to nothing rather than showing an empty suggestion.
+export function sanitizePopupSuggestions<
+  T extends { mode: LyricSuggestionMode; text: string },
+>(suggestions: T[], textBeforeCursor: string): T[] {
+  return suggestions
+    .map((s) =>
+      s.mode === "next_word"
+        ? { ...s, text: normalizeNextWord(s.text, textBeforeCursor) }
+        : { ...s, text: sanitizeLyricsOutput(s.text, s.mode as SanitizeMode) },
+    )
+    .filter((s) => s.text.trim().length > 0);
 }
 
 export function determineSuggestionMode(

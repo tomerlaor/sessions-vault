@@ -89,6 +89,11 @@ export interface EvalStats {
     eligibleTrials: number;
     rate: number | null;
   };
+  // Diagnostic (see TrialOutcome.formatRaw) — the model's raw-reply format
+  // pass rate, i.e. whether it followed the "bare line" instruction on its
+  // own, before the shared sanitizer cleans anything up. Never affects
+  // overallTrialPassRate (that uses the sanitized `checks.format`).
+  formatRaw: PassFailSkip;
 }
 
 export interface PickerAccuracy {
@@ -232,6 +237,7 @@ export function computeStats(run: EvalRunResult): EvalStats {
   let passedTrials = 0;
   let omittedLeadingSpaceCount = 0;
   let omittedLeadingSpaceEligible = 0;
+  const formatRaw = emptyPFS();
 
   for (const c of run.cases) {
     byMode[c.mode] ??= emptyPFS();
@@ -250,6 +256,7 @@ export function computeStats(run: EvalRunResult): EvalStats {
         omittedLeadingSpaceEligible++;
         if (trial.omittedLeadingSpace) omittedLeadingSpaceCount++;
       }
+      if (trial.formatRaw) addResult(formatRaw, trial.formatRaw.status);
 
       const passed = trialPassed(trial);
       if (passed) passedTrials++;
@@ -338,6 +345,7 @@ export function computeStats(run: EvalRunResult): EvalStats {
           ? omittedLeadingSpaceCount / omittedLeadingSpaceEligible
           : null,
     },
+    formatRaw,
   };
 }
 
@@ -366,12 +374,19 @@ export function buildMarkdownReport(run: EvalRunResult): string {
     `- Provider: \`${run.meta.provider}\` · Model: \`${run.meta.model}\`${isDecisions ? ` (decisions) · Generator: \`${run.meta.generatorModel}\`` : ""}`,
   );
   lines.push(
-    `- Generated: ${run.meta.generatedAt} · Fixtures: ${run.meta.fixtureCount} · n per case: ${run.meta.n}`,
+    `- Generated: ${run.meta.generatedAt} · Fixtures: ${run.meta.fixtureCount} · n per case: ${run.meta.n}` +
+      (run.meta.promptVersion
+        ? ` · Prompt version: \`${run.meta.promptVersion}\``
+        : ""),
   );
   lines.push(
     `- Total trials: ${stats.totalTrials} (errors: ${stats.errorCount} (length/reasoning: ${stats.errorKinds.lengthOrReasoning}, other: ${stats.errorKinds.other}))`,
   );
   lines.push(`- **Overall pass rate: ${pct(stats.overallTrialPassRate)}**`);
+  lines.push(
+    `- Raw (pre-sanitize) format pass rate (diagnostic, does not affect pass rate): ` +
+      `${stats.formatRaw.pass}/${stats.formatRaw.pass + stats.formatRaw.fail} (${pct(passRate(stats.formatRaw))})`,
+  );
   lines.push(
     `- Model omitted leading space (diagnostic, does not affect pass rate): ` +
       `${stats.omittedLeadingSpace.count}/${stats.omittedLeadingSpace.eligibleTrials} completion trials (${pct(stats.omittedLeadingSpace.rate)})`,

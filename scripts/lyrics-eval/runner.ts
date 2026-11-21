@@ -16,6 +16,7 @@ import {
   buildNextWordOptionsPrompt,
   normalizeNextWord,
   normalizeNextWordOptions,
+  PROMPT_VERSION,
   type LyricsSuggestionInput,
   type NextWordOption,
 } from "../../src/lib/lyrics-ai";
@@ -70,6 +71,13 @@ export interface TrialOutcome {
   // affects `checks` or the pass rate. Undefined for non-completion modes
   // and error trials, where the raw-adjacency signal doesn't apply.
   omittedLeadingSpace?: boolean;
+  // Format, scored against the model's RAW (unsanitized) reply — a
+  // diagnostic alongside `checks.format` (which scores the sanitized text
+  // and so measures what the writer actually sees, not whether the model
+  // followed the "bare line" instruction on its own). Never affects the
+  // pass rate. Undefined for next_word (no single raw string to score) and
+  // error trials.
+  formatRaw?: CheckResult;
   // Present only when `model` is an OpenRouter decisions model — see
   // src/lib/ai.ts's "generate, then decide" pipeline.
   generator?: LyricsGeneratorStageMetrics;
@@ -96,6 +104,9 @@ export interface EvalRunResult {
     // Set only when `model` was run as a decisions model (ranker); the
     // generator produced the actual candidate text it ranked.
     generatorModel?: string;
+    // src/lib/lyrics-ai.ts's PROMPT_VERSION at run time, so a saved report
+    // can be matched back to the prompt wording that produced it.
+    promptVersion?: string;
   };
   cases: CaseResult[];
 }
@@ -429,6 +440,7 @@ export async function runTrial(
       candidates: scored?.candidates,
       pickedIndex: scored?.pickedIndex,
       omittedLeadingSpace: checkOmittedLeadingSpace(output, ctx),
+      formatRaw: checkFormat(output, ctx, fixture.expect),
       checks: {
         format: checkFormat(sanitized, ctx, fixture.expect),
         syllables: checkSyllables(sanitized, fixture.expect, ctx),
@@ -489,6 +501,7 @@ export async function runEval(
       generatedAt: new Date().toISOString(),
       fixtureCount: fixtures.length,
       generatorModel: decisions ? cfg.lyricsGeneratorModel : undefined,
+      promptVersion: PROMPT_VERSION,
     },
     cases,
   };

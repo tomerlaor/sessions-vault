@@ -5,6 +5,7 @@
 ### Bug Fixes
 
 * Existing users will be asked for AI cloud consent once more, because consent is now tied to the current provider (lyrics helper and Tab Agent).
+* rewrite the lyrics AI prompts with cursor/section context and explicit rhyme/syllable targets (R6, #79), and fix the shared output sanitizer: wrapping-quote stripping now only removes a genuinely matched quote pair (never an apostrophe), the cursor marker survives ad-libs/chords and strips an echoed marker, popup suggestions are sanitized like ghost text, and the implied rhyme target respects AABB/ABAB/free-verse instead of always targeting the previous line.
 
 ## [0.2.0](https://github.com/tomerlaor/sessions-vault/compare/v0.1.0...v0.2.0) (2026-05-30)
 
