@@ -2,6 +2,7 @@ import type { LyricSuggestionMode } from "../types";
 import {
   cleanLine,
   countSyllables,
+  currentSection,
   loadEnglishDict,
   nextLineTargets,
   type ProsodyLang,
@@ -78,6 +79,28 @@ function draftBeforeCurrentLine(
   const lineStart = lyrics.lastIndexOf("\n", selectionStart - 1) + 1;
   const draft = lyrics.slice(0, lineStart).replace(/\n+$/, "");
   return { draft, cursor: draft.length };
+}
+
+function stripTrailingPunct(word: string): string {
+  return word.replace(/[^\p{L}\p{N}'’-]+$/u, "");
+}
+
+// The line being finished right now (next_word/completion) needs a concrete
+// rhyme target, not just "whatever scheme the song has settled into so
+// far". nextLineTargets() only names one once two lines have actually
+// rhymed (AABB) or a third confirms the alternation (ABAB) — exactly the
+// evidence a *future, unwritten* line should wait for. But the line
+// currently being typed already has a real line directly above it in the
+// section, which is the obvious rhyme partner regardless of whether an
+// established scheme has formed yet (#79 / R6 fix — next_word and Hebrew
+// completion lost this when no scheme was detected).
+function impliedRhymeTarget(draft: string, cursor: number): string | undefined {
+  const formal = nextLineTargets(draft, cursor).rhymeWith;
+  if (formal) return formal;
+  const lines = currentSection(draft, cursor);
+  const line = lines[lines.length - 1];
+  if (!line) return undefined;
+  return stripTrailingPunct(lastWord(line)) || undefined;
 }
 
 function buildStyleContext(
@@ -426,11 +449,12 @@ function buildInlineUserPrompt(
           : `Add about ${remaining[0]}-${remaining[1]} more syllables to finish the line.`,
       );
     }
-    if (targets.rhymeWith) {
+    const rhymeWith = impliedRhymeTarget(draft, cursor);
+    if (rhymeWith) {
       lines.push(
         hebrew
-          ? `המילה האחרונה בשורה המושלמת צריכה להתחרז עם: "${targets.rhymeWith}"`
-          : `The finished line's last word should rhyme with: "${targets.rhymeWith}"`,
+          ? `המילה האחרונה בשורה המושלמת צריכה להתחרז עם: "${rhymeWith}"`
+          : `The finished line's last word should rhyme with: "${rhymeWith}"`,
       );
     }
   } else if (input.mode === "next_line") {
@@ -692,7 +716,7 @@ export function buildNextWordOptionsPrompt(
     input.lyrics,
     input.selectionStart,
   );
-  const rhyme = nextLineTargets(draft, cursor).rhymeWith;
+  const rhyme = impliedRhymeTarget(draft, cursor);
 
   const system = (
     hebrew

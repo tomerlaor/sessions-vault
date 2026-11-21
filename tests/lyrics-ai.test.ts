@@ -402,15 +402,15 @@ describe("next_word options", () => {
     expect(prompt).toContain("Current line up to the cursor");
   });
 
-  it("asks for at least three options, with no rhyme hint from a single prior line", () => {
-    // Only one complete lyric line exists before the in-progress one, which
-    // isn't enough to infer any scheme (AABB needs two lines to show a
-    // rhyme at all) — unlike the old extractRhymeContext, which guessed a
-    // rhyme target unconditionally, nextLineTargets correctly omits the
-    // hint here and falls back to the generic kind="rhyme" instruction.
+  it("asks for at least three options, with an explicit rhyme target from the single prior line", () => {
+    // Only one complete lyric line exists before the in-progress one — not
+    // enough for nextLineTargets to infer a scheme (AABB needs two lines to
+    // show a rhyme at all) — but the line directly above is still the
+    // obvious rhyme partner for the line being typed, so next_word must
+    // name it explicitly rather than leave the model guessing (#79 / R6 fix).
     const { system } = buildNextWordOptionsPrompt(input);
     expect(system).toContain("never fewer than 3");
-    expect(system).not.toContain("must rhyme with");
+    expect(system).toContain('must rhyme with "alone"');
     expect(system).toContain('kind="rhyme"');
   });
 
@@ -774,6 +774,49 @@ describe("R6: explicit rhyme target in the task text when a scheme is establishe
       mode: "next_line",
     });
     expect(prompt).toContain('rhymes with: "door"');
+  });
+});
+
+describe("fix: completion falls back to the line above when no scheme is established", () => {
+  it("single prior line — not enough for a scheme, but still an obvious target", () => {
+    const lyrics = "Under the bridge where the shadows stay\nI ";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "I",
+      textBeforeCursor: "I ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain('rhyme with: "stay"');
+  });
+
+  it("Hebrew: prior lines in the section don't rhyme with each other, so no AABB/ABAB is detected — still targets the immediately preceding line", () => {
+    const lyrics =
+      "[פזמון]\nהיית האור היחיד בעיר שכבתה\nואני הייתי רק ילד רודף ניצוץ\nעכשיו הרחובות שקטים ואני נושא את הסימן\nשל כל";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "של כל",
+      textBeforeCursor: "של כל",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain('להתחרז עם: "הסימן"');
   });
 });
 
