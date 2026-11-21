@@ -32,6 +32,7 @@ import {
   normalizeNextWordOptions,
 } from "../../../lib/lyrics-ai";
 import { smartJoinCompletion } from "../../../lib/lyrics-join";
+import { sanitizeLyricsOutput } from "../../../lib/lyrics-sanitize";
 import {
   LruCache,
   createDebouncer,
@@ -489,7 +490,11 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               return;
             }
             if (result.value) {
-              setCurrentSuggestion(result.value);
+              // Shared with the eval runner (scripts/lyrics-eval/runner.ts)
+              // so what's shown/inserted here is what gets scored there.
+              const suggestion = sanitizeLyricsOutput(result.value, mode);
+              setGhostText(suggestion);
+              setCurrentSuggestion(suggestion);
               setStatus("ready");
               lastSignatureRef.current = signature;
             } else {

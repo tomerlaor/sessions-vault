@@ -22,6 +22,7 @@ import {
 import type { AIConfig } from "../../src/types";
 import { rawTextFromObjectError } from "../../src/lib/parse-ai-json";
 import { currentSection, loadEnglishDict } from "../../src/lib/prosody";
+import { sanitizeLyricsOutput } from "../../src/lib/lyrics-sanitize";
 import {
   checkCliche,
   checkFormat,
@@ -229,7 +230,7 @@ function scoreUnrankedCandidates(
       const text =
         fixture.mode === "next_word"
           ? normalizeNextWord(raw, ctx.linePrefix)
-          : raw;
+          : sanitizeLyricsOutput(raw, fixture.mode);
       return {
         text,
         index,
@@ -410,6 +411,12 @@ export async function runTrial(
       fixture,
       ctx,
     );
+    // Score the sanitized text (same cleanup the app applies before display/
+    // insertion — see src/lib/lyrics-sanitize.ts) so the eval measures what
+    // the writer would actually see, not raw labels/quotes/header artifacts.
+    // rawOutput and the #102 omittedLeadingSpace diagnostic stay on the
+    // unsanitized stream.
+    const sanitized = sanitizeLyricsOutput(output, fixture.mode);
     return {
       rawOutput: output,
       ttftMs: metrics?.ttftMs ?? null,
@@ -423,12 +430,12 @@ export async function runTrial(
       pickedIndex: scored?.pickedIndex,
       omittedLeadingSpace: checkOmittedLeadingSpace(output, ctx),
       checks: {
-        format: checkFormat(output, ctx, fixture.expect),
-        syllables: checkSyllables(output, fixture.expect, ctx),
-        rhyme: checkRhyme(output, fixture.expect, ctx),
-        noCopy: checkNoCopy(output, fixture.lyrics),
-        language: checkLanguage(output, fixture.lang),
-        cliche: checkCliche(output, fixture.expect.rhymeWith),
+        format: checkFormat(sanitized, ctx, fixture.expect),
+        syllables: checkSyllables(sanitized, fixture.expect, ctx),
+        rhyme: checkRhyme(sanitized, fixture.expect, ctx),
+        noCopy: checkNoCopy(sanitized, fixture.lyrics),
+        language: checkLanguage(sanitized, fixture.lang),
+        cliche: checkCliche(sanitized, fixture.expect.rhymeWith),
       },
     };
   } catch (e) {
