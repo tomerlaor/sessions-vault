@@ -90,29 +90,102 @@ function stripTrailingPunct(word: string): string {
   return word.replace(/[^\p{L}\p{N}'’-]+$/u, "");
 }
 
+export interface RhymeTarget {
+  // Primary target — the one to use for a single-output mode (completion).
+  word: string;
+  // A second, equally plausible candidate line's end word. Only present for
+  // the no-scheme-yet, position-based inference at k=2 or k=3 finished
+  // lines, where the right rhyme partner is genuinely ambiguous (see
+  // freeVerseRhymeCandidates below) — next_word can hedge by offering a
+  // rhyme-tagged option for each candidate instead of committing to one.
+  altWord?: string;
+  // true only when an actual AABB/ABAB scheme was detected — "must rhyme
+  // with". false for a position-based guess with no rhyming evidence yet
+  // — "ideally rhymes with", not forced.
+  hard: boolean;
+}
+
+// No scheme has been detected yet (free verse so far) — infer a target from
+// sheer position within the first quatrain of the section, per the review's
+// §2.3 rule: writing line 2 -> L1; line 3 -> L1; line 4 -> L2; line 5+ with
+// still no rhyme anywhere -> no target at all (genuine free verse). `lines`
+// is the list of already-finished lines in the section (k = lines.length).
+// Returns up to two candidates — a 2nd candidate only exists for the
+// genuinely ambiguous k=2/k=3 cases (next_word can offer a rhyme-tagged
+// option for each; completion/next_line-style single-output callers use
+// just the first).
+function freeVerseRhymeCandidates(lines: string[]): string[] | undefined {
+  const k = lines.length;
+  const endWord = (line: string) => stripTrailingPunct(lastWord(line));
+  if (k === 1) {
+    const w = endWord(lines[0]);
+    return w ? [w] : undefined;
+  }
+  if (k === 2) {
+    const words = [endWord(lines[0]), endWord(lines[1])].filter(Boolean);
+    return words.length ? words : undefined;
+  }
+  if (k === 3) {
+    const words = [endWord(lines[1]), endWord(lines[2])].filter(Boolean);
+    return words.length ? words : undefined;
+  }
+  return undefined; // k === 0, or 4+ finished lines with no rhyme anywhere
+}
+
 // The line being finished right now (next_word/completion) needs a concrete
 // rhyme target, not just "whatever scheme the song has settled into so
-// far". nextLineTargets() only names one once two lines have actually
-// rhymed (AABB) or a third confirms the alternation (ABAB) — exactly the
-// evidence a *future, unwritten* line should wait for. But the line
-// currently being typed already has a real line directly above it in the
-// section, which is the obvious rhyme partner regardless of whether an
-// established scheme has formed yet (#79 / R6 fix — next_word and Hebrew
-// completion lost this when no scheme was detected).
-function impliedRhymeTarget(draft: string, cursor: number): string | undefined {
-  const formal = nextLineTargets(draft, cursor).rhymeWith;
-  if (formal) return formal;
-  // nextLineTargets() already runs the real AABB/ABAB/free-verse scheme
-  // detection (src/lib/prosody/scheme.ts's detectScheme) and only comes up
-  // empty-handed when there isn't enough evidence for either pattern — one
-  // prior line (can't detect any scheme from a single data point) or two+
-  // prior lines that genuinely don't rhyme with each other (free verse).
-  // Forcing a rhyme target in the free-verse case is exactly the bug this
-  // fixes: only the single-prior-line case still gets the "obvious partner"
-  // fallback; two or more non-rhyming prior lines mean no target at all.
-  const lines = currentSection(draft, cursor);
-  if (lines.length !== 1) return undefined;
-  return stripTrailingPunct(lastWord(lines[0])) || undefined;
+// far". nextLineTargets() only names one once an AABB/ABAB scheme has
+// actually been detected — exactly the evidence a *future, unwritten* line
+// should wait for. The line currently being typed can still get a useful,
+// clearly-labeled-as-inferred target from its position in the section even
+// before a scheme is established (#79 / R6 fix, revised per the §2.3
+// review: the old version forced a hard target onto genuine free verse and
+// mishandled the 3rd/4th line of an unrhymed quatrain — see scheme.ts's
+// AABB fix for the matching "last-line bias").
+function impliedRhymeTarget(
+  draft: string,
+  cursor: number,
+): RhymeTarget | undefined {
+  const formal = nextLineTargets(draft, cursor);
+  if (formal.rhymeWith) return { word: formal.rhymeWith, hard: true };
+  // A scheme WAS detected (e.g. AABB with the couplet just closed) but
+  // nextLineTargets deliberately named no target for it right now — that's
+  // a real "no target", not "no evidence yet". Only fall through to
+  // position-based inference when there's truly no scheme evidence.
+  if (formal.scheme !== "free") return undefined;
+  const candidates = freeVerseRhymeCandidates(currentSection(draft, cursor));
+  if (!candidates || candidates.length === 0) return undefined;
+  return { word: candidates[0], altWord: candidates[1], hard: false };
+}
+
+// #79: whether the text right before the cursor ends mid-clause (so the
+// completion should continue the same clause, lowercase, no new sentence)
+// or at a full sentence boundary (so it should start a fresh, capitalized
+// clause). undefined when the text doesn't end in punctuation that signals
+// either — the common case, where the model just continues the words.
+type ClausePosture = "mid-clause" | "new-clause";
+
+function clausePostureBeforeCursor(
+  textBeforeCursor: string,
+): ClausePosture | undefined {
+  const trimmed = textBeforeCursor.trimEnd();
+  if (!trimmed) return undefined;
+  // An ellipsis is a trailing-off, not a sentence end — check it before the
+  // single-period case below (amendment-79: "mid-word or mid-clause
+  // (including after a comma, dash, or ellipsis)").
+  if (trimmed.endsWith("...") || trimmed.endsWith("…")) return "mid-clause";
+  const last = trimmed[trimmed.length - 1];
+  if (",;:–—".includes(last)) return "mid-clause";
+  if (".!?".includes(last)) return "new-clause";
+  return undefined;
+}
+
+// #79: whatever already exists on the current line after the cursor (mid-
+// line editing) — the completion must lead into this, not repeat it.
+// `currentLine` is the whole line; `textBeforeCursor` is its prefix up to
+// the cursor, so the remainder is exactly what follows.
+function textAfterCursorOnLine(input: LyricsSuggestionInput): string {
+  return input.currentLine.slice(input.textBeforeCursor.length);
 }
 
 function buildStyleContext(
@@ -305,10 +378,22 @@ interface SectionPosition {
   isChorusRepeat: boolean;
 }
 
+// #79: a draft with no [Section] headers at all still has stanzas — runs
+// of lyric lines separated by a blank line. Used as the section-position
+// fallback so a headerless song still gets a sane "line N of it" instead
+// of counting from line 1 of the whole document.
+function stanzaStartAt(rawLines: string[], cursorLine: number): number {
+  for (let i = cursorLine; i >= 0; i--) {
+    if (rawLines[i].trim() === "") return i + 1;
+  }
+  return 0;
+}
+
 // Finds the nearest preceding [Section] header and how many non-blank lyric
 // lines into that section the cursor sits, so the task text can say e.g.
 // "Current section: Chorus (line 3 of it)" and flag a repeated chorus so
-// the model keeps it consistent with the one already written.
+// the model keeps it consistent with the one already written. With no
+// header at all, falls back to the blank-line-bounded stanza (#79).
 function sectionPositionAt(lyrics: string, cursor: number): SectionPosition {
   const rawLines = lyrics.split("\n");
   const at = clampIndex(cursor, lyrics.length);
@@ -323,6 +408,9 @@ function sectionPositionAt(lyrics: string, cursor: number): SectionPosition {
       sectionStart = i + 1;
       break;
     }
+  }
+  if (name === null) {
+    sectionStart = stanzaStartAt(rawLines, cursorLine);
   }
 
   let completed = 0;
@@ -355,11 +443,17 @@ function sectionContextLine(
   cursor: number,
   hebrew: boolean,
 ): string | null {
+  // An empty draft has no stanza either — the empty-draft "write an
+  // opening line" instructions (EMPTY_DRAFT_EN/HE) cover that case instead.
+  if (!lyrics.trim()) return null;
   const info = sectionPositionAt(lyrics, cursor);
-  if (!info.name) return null;
+  // #79: no [Section] header above the cursor — fall back to a generic
+  // "this verse" label (stanzaStartAt already gave lineNumber the right
+  // blank-line-bounded count) rather than saying nothing at all.
+  const name = info.name ?? (hebrew ? "הבית" : "this verse");
   const base = hebrew
-    ? `החלק הנוכחי: ${info.name} (שורה ${info.lineNumber} בחלק זה)`
-    : `Current section: ${info.name} (line ${info.lineNumber} of it)`;
+    ? `החלק הנוכחי: ${name} (שורה ${info.lineNumber} בחלק זה)`
+    : `Current section: ${name} (line ${info.lineNumber} of it)`;
   if (!info.isChorusRepeat) return base;
   return hebrew
     ? `${base}. זהו פזמון חוזר — שמור על עקביות עם הפזמון שנכתב קודם.`
@@ -424,7 +518,7 @@ function inlineTaskEn(mode: LyricsSuggestionInput["mode"]): {
       return {
         role: "You are an inline lyric completion engine. Complete what the writer has started — nothing more.",
         rules: [
-          "- Return only the words that continue from the cursor, finishing the current line. Do not repeat the prefix and do not start a new line.",
+          "- Return only the words that continue from the cursor, finishing the current line. Do not repeat the prefix, do not repeat any text that already appears after the cursor, and do not start a new line.",
           LINE_ONLY_EN,
         ],
       };
@@ -455,7 +549,7 @@ function inlineTaskHe(mode: LyricsSuggestionInput["mode"]): {
       return {
         role: "אתה מנוע השלמת מילים בשורות שיר. המשך את מה שהכותב התחיל — ולא יותר מכך.",
         rules: [
-          "- החזר רק את המילים שממשיכות מהסמן, ומסיימות את השורה הנוכחית. אל תחזור על מה שכבר נכתב ואל תתחיל שורה חדשה.",
+          "- החזר רק את המילים שממשיכות מהסמן, ומסיימות את השורה הנוכחית. אל תחזור על מה שכבר נכתב, אל תחזור על טקסט שכבר קיים אחרי הסמן, ואל תתחיל שורה חדשה.",
           LINE_ONLY_HE,
         ],
       };
@@ -533,6 +627,31 @@ function buildInlineUserPrompt(
         ? `\nהכותב הקליד: "${input.textBeforeCursor}" ← השלם מכאן, סיים את השורה הנוכחית.`
         : `\nWriter typed: "${input.textBeforeCursor}" ← continue from here, finishing the current line.`,
     );
+
+    const posture = clausePostureBeforeCursor(input.textBeforeCursor);
+    if (posture === "mid-clause") {
+      lines.push(
+        hebrew
+          ? "הטקסט מסתיים באמצע משפט (אחרי פסיק, נקודתיים או מקף) — המשך את אותו המשפט, לא משפט חדש."
+          : "The text ends mid-clause (after a comma, colon or dash) — continue the same clause; don't capitalize or start a new sentence.",
+      );
+    } else if (posture === "new-clause") {
+      lines.push(
+        hebrew
+          ? "הטקסט מסתיים בסוף משפט (אחרי נקודה, סימן קריאה או סימן שאלה) — התחל מחשבה או משפט חדש."
+          : "The text ends a full sentence (after . ! or ?) — start a new clause, capitalized as a new sentence normally would be.",
+      );
+    }
+
+    const afterCursor = textAfterCursorOnLine(input).trim();
+    if (afterCursor) {
+      lines.push(
+        hebrew
+          ? `אחרי הסמן כתוב כבר: "${afterCursor}" — אל תחזור על זה; ההשלמה צריכה להוביל לקטע הזה, לא לשכפל אותו.`
+          : `Already written after the cursor: "${afterCursor}" — don't repeat it; your completion must lead into it, not duplicate it.`,
+      );
+    }
+
     if (remaining) {
       lines.push(
         hebrew
@@ -540,12 +659,16 @@ function buildInlineUserPrompt(
           : `Add about ${remaining[0]}-${remaining[1]} more syllables to finish the line.`,
       );
     }
-    const rhymeWith = impliedRhymeTarget(draft, cursor);
-    if (rhymeWith) {
+    const rhymeTarget = impliedRhymeTarget(draft, cursor);
+    if (rhymeTarget) {
       lines.push(
         hebrew
-          ? `המילה האחרונה בשורה המושלמת צריכה להתחרז עם: "${rhymeWith}"`
-          : `The finished line's last word should rhyme with: "${rhymeWith}"`,
+          ? rhymeTarget.hard
+            ? `המילה האחרונה בשורה המושלמת חייבת להתחרז עם: "${rhymeTarget.word}"`
+            : `רצוי (לא חובה) שהמילה האחרונה בשורה המושלמת תתחרז עם: "${rhymeTarget.word}"`
+          : rhymeTarget.hard
+            ? `The finished line's last word must rhyme with: "${rhymeTarget.word}"`
+            : `The finished line's last word should ideally rhyme with: "${rhymeTarget.word}" — a soft suggestion, don't force it.`,
       );
     }
   } else if (input.mode === "next_line") {
@@ -673,7 +796,7 @@ const MODE_INSTRUCTIONS_HE: Record<LyricSuggestionMode, string> = {
 // Stamped on every span's promptVersion (T1, #89) so later prompt rewrites
 // are comparable by version in the eval report. Bump this — and only
 // this — when prompt wording changes; it is not tied to app releases.
-export const PROMPT_VERSION = "2026-11-21.1";
+export const PROMPT_VERSION = "2026-11-21.2";
 
 // Stable id for a span's promptId, e.g. "lyrics.inline.next_line.he". Mirrors
 // the (mode, language) pair buildLyricsSuggestionPrompt already branches on,
@@ -799,6 +922,35 @@ export interface NextWordOption {
 
 // next_word returns several candidates: natural continuations plus at least one
 // word that rhymes with the end of the line above.
+// The rhyme-related next_word rule: a hard "must rhyme" instruction when an
+// actual scheme was detected, a soft "ideally rhymes" one when it's only a
+// position-based guess, two soft rhyme-tagged options when that guess is
+// genuinely ambiguous between two candidate lines (#79 / R6 §2.3), or the
+// generic fallback when there's no evidence to name anything.
+function nextWordRhymeInstruction(
+  rhyme: RhymeTarget | undefined,
+  hebrew: boolean,
+): string {
+  if (!rhyme) {
+    return hebrew
+      ? '- סמן kind="rhyme" רק לאפשרות שמתחרזת עם סוף שורה קודמת בשיר.'
+      : '- Mark kind="rhyme" only for an option that rhymes with the end of an earlier line in the song.';
+  }
+  if (rhyme.hard) {
+    return hebrew
+      ? `- לפחות אפשרות אחת חייבת להתחרז עם "${rhyme.word}" (המילה האחרונה בשורה שמעל), כדי שהכותב יוכל לסגור את השורה בחריזה. סמן אותה kind="rhyme".`
+      : `- At least one option must rhyme with "${rhyme.word}" (the last word of the line above) so the writer can land the line on a rhyme. Mark it kind="rhyme".`;
+  }
+  if (rhyme.altWord) {
+    return hebrew
+      ? `- סכמת החריזה עדיין לא ברורה: הצע שתי אפשרויות מסוג kind="rhyme" — אחת שמתחרזת (רצוי, לא חובה) עם "${rhyme.word}", ואחרת שמתחרזת (רצוי, לא חובה) עם "${rhyme.altWord}" — כך שהכותב יוכל לבחור את הסכמה.`
+      : `- The rhyme scheme isn't settled yet: offer two options tagged kind="rhyme" — one that ideally rhymes with "${rhyme.word}", and another that ideally rhymes with "${rhyme.altWord}", so the writer can pick the scheme.`;
+  }
+  return hebrew
+    ? `- רצוי (לא חובה) שאחת האפשרויות תתחרז עם "${rhyme.word}" — סמן אותה kind="rhyme".`
+    : `- One option should ideally rhyme with "${rhyme.word}" — a soft suggestion, not a requirement. Mark it kind="rhyme".`;
+}
+
 export function buildNextWordOptionsPrompt(
   input: Omit<LyricsSuggestionInput, "mode">,
 ): { system: string; prompt: string } {
@@ -808,6 +960,7 @@ export function buildNextWordOptionsPrompt(
     input.selectionStart,
   );
   const rhyme = impliedRhymeTarget(draft, cursor);
+  const rhymeInstruction = nextWordRhymeInstruction(rhyme, hebrew);
 
   const system = (
     hebrew
@@ -815,9 +968,7 @@ export function buildNextWordOptionsPrompt(
           "אתה שותף לכתיבת שיר שמציע מהי המילה הבאה. קיבלת את כל מילות השיר; הצע כמה מועמדות למילה הבאה.",
           "כללים:",
           "- החזר 4 אפשרויות (אף פעם לא פחות מ-3). כל אפשרות היא מילה אחת, שתיים לכל היותר, בלי פיסוק.",
-          rhyme
-            ? `- לפחות אפשרות אחת חייבת להתחרז עם "${rhyme}" (המילה האחרונה בשורה שמעל), כדי שהכותב יוכל לסגור את השורה בחריזה. סמן אותה kind="rhyme".`
-            : '- סמן kind="rhyme" רק לאפשרות שמתחרזת עם סוף שורה קודמת בשיר.',
+          rhymeInstruction,
           '- שאר האפשרויות הן המשכים טבעיים של מה שהוקלד (kind="continuation"), שונים זה מזה במשמעות או בדימוי — לא מילים נרדפות.',
           "- התאם את המקצב, משקל ההברות, והרישום הרגשי לשורות הסביבות.",
           "- חשוב: מילים בעברית תקנית, עם התאמה דקדוקית נכונה למה שהוקלד.",
@@ -827,9 +978,7 @@ export function buildNextWordOptionsPrompt(
           "You are a lyric co-writer suggesting what word comes next. You are given the entire song; offer several candidate next words.",
           "Rules:",
           "- Return 4 options (never fewer than 3). Each option is one word, two at most, with no punctuation.",
-          rhyme
-            ? `- At least one option must rhyme with "${rhyme}" (the last word of the line above) so the writer can land the line on a rhyme. Mark it kind="rhyme".`
-            : '- Mark kind="rhyme" only for an option that rhymes with the end of an earlier line in the song.',
+          rhymeInstruction,
           '- The other options are natural continuations of what was typed (kind="continuation"), meaningfully different from each other in meaning or imagery — not synonyms.',
           "- Match the rhythm, syllable weight, and emotional register of the surrounding lines.",
           "- No commentary, no extra text.",

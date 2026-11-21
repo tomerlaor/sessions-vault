@@ -241,15 +241,19 @@ describe("song context", () => {
 });
 
 describe("next_line must yield a complete line", () => {
-  // Two lines that actually rhyme (rain/lane) so nextLineTargets() has
-  // enough signal to produce a rhyme hint — unlike the old
-  // extractRhymeContext, the real engine only hints a rhyme when the
-  // existing lines actually show one.
-  const lyricsWithRhyme = "I walk through the rain\nAlone down the lane\n";
+  // Three lines so nextLineTargets() has enough signal to produce a rhyme
+  // hint for the 4th: rain/lane (lines 1-2) rhyme and close a couplet, so
+  // "cold" (line 3) is the odd-one-out awaiting its own partner — the
+  // couplet-parity rule (R6 §2.3) still names it as a hard target for the
+  // line being written. Unlike the old extractRhymeContext, the real
+  // engine only hints a rhyme when the existing lines actually show a
+  // scheme.
+  const lyricsWithRhyme =
+    "I walk through the rain\nAlone down the lane\nNow the night is cold\n";
   const input = {
     lyrics: lyricsWithRhyme,
-    currentLine: "Alone down the lane",
-    textBeforeCursor: "Alone down the lane",
+    currentLine: "Now the night is cold",
+    textBeforeCursor: "Now the night is cold",
     selectionStart: lyricsWithRhyme.length,
     selectionEnd: lyricsWithRhyme.length,
     title: "T",
@@ -403,21 +407,28 @@ describe("next_word options", () => {
     expect(prompt).toContain("Current line up to the cursor");
   });
 
-  it("asks for at least three options, with an explicit rhyme target from the single prior line", () => {
+  it("asks for at least three options, with a soft, position-based rhyme target from the single prior line", () => {
     // Only one complete lyric line exists before the in-progress one — not
-    // enough for nextLineTargets to infer a scheme (AABB needs two lines to
-    // show a rhyme at all) — but the line directly above is still the
-    // obvious rhyme partner for the line being typed, so next_word must
-    // name it explicitly rather than leave the model guessing (#79 / R6 fix).
+    // enough for nextLineTargets to infer an actual scheme (AABB needs two
+    // lines to show a rhyme at all) — but the line directly above is still
+    // a reasonable position-based guess for the line being typed. With no
+    // rhyme evidence yet this is a soft suggestion, not a hard requirement
+    // (#79 / R6 §2.3 fix — the old version forced this as a hard target).
     const { system } = buildNextWordOptionsPrompt(input);
     expect(system).toContain("never fewer than 3");
-    expect(system).toContain('must rhyme with "alone"');
+    expect(system).toContain('ideally rhyme with "alone"');
+    expect(system).not.toContain("must rhyme with");
     expect(system).toContain('kind="rhyme"');
   });
 
-  it("asks for a rhyme with the line above once a scheme is established", () => {
+  it("asks for a hard rhyme with the line above once a scheme is established", () => {
+    // road/code (lines 1-2) rhyme and close a couplet; "wide" (line 3) is
+    // the odd-one-out awaiting its own partner — the couplet-parity rule
+    // (§2.3) targets it as a hard requirement for the word being typed on
+    // line 4, not "code" (closing an already-closed couplet would push
+    // the verse toward AAA).
     const lyrics =
-      "[Verse]\nI walk down the road\nsearching for a code\nthrough the empty ";
+      "[Verse]\nI walk down the road\nsearching for a code\nunder a sky so wide\nthrough the empty ";
     const { system } = buildNextWordOptionsPrompt({
       ...input,
       lyrics,
@@ -426,7 +437,7 @@ describe("next_word options", () => {
       selectionStart: lyrics.length,
       selectionEnd: lyrics.length,
     });
-    expect(system).toContain('must rhyme with "code"');
+    expect(system).toContain('must rhyme with "wide"');
     expect(system).toContain('kind="rhyme"');
   });
 
@@ -452,9 +463,10 @@ describe("next_word options", () => {
   });
 
   it("has a Hebrew version", () => {
-    // Two prior lines that rhyme (תפילה/הלילה) so a scheme is established
-    // before the in-progress third line.
-    const lyrics = "אני שר תפילה\nלבד בתוך הלילה\nברחוב ה";
+    // תפילה/הלילה (lines 1-2) rhyme and close a couplet; כחולים (line 3) is
+    // the odd-one-out awaiting its own partner, so the hard target for the
+    // word being typed on line 4 is "כחולים", not "הלילה".
+    const lyrics = "אני שר תפילה\nלבד בתוך הלילה\nמתחת לשמיים כחולים\nברחוב ה";
     const { system } = buildNextWordOptionsPrompt({
       ...input,
       lyrics,
@@ -463,7 +475,7 @@ describe("next_word options", () => {
       selectionStart: lyrics.length,
       selectionEnd: lyrics.length,
     });
-    expect(system).toContain('לפחות אפשרות אחת חייבת להתחרז עם "הלילה"');
+    expect(system).toContain('לפחות אפשרות אחת חייבת להתחרז עם "כחולים"');
     expect(system).toContain("עקרונות כתיבת שירים");
   });
 
@@ -913,13 +925,15 @@ describe("fix: completion falls back to the line above when no scheme is establi
     expect(prompt).toContain('rhyme with: "stay"');
   });
 
-  it("Hebrew: free verse (2+ prior lines, none of which rhyme) gets no forced rhyme target", () => {
+  it("Hebrew: genuine free verse (4+ prior lines, none of which rhyme) gets no forced rhyme target", () => {
     // Fixed bug: the old fallback always targeted the immediately preceding
     // line even when the prior lines show no AABB/ABAB pattern at all —
-    // wrong for genuine free verse. With 2+ non-rhyming prior lines, the
-    // instruction should be omitted entirely rather than forcing a rhyme.
+    // wrong for genuine free verse. R6 §2.3 still infers a soft, position-
+    // based target for a 2nd/3rd/4th line with no scheme yet (see the
+    // "respects the AABB/ABAB/free-verse scheme" describe block below), so
+    // this needs 4+ non-rhyming prior lines to really have no target.
     const lyrics =
-      "[פזמון]\nהיית האור היחיד בעיר שכבתה\nואני הייתי רק ילד רודף ניצוץ\nעכשיו הרחובות שקטים ואני נושא את הסימן\nשל כל";
+      "[פזמון]\nהיית האור היחיד בעיר שכבתה\nואני הייתי רק ילד רודף ניצוץ\nעכשיו הרחובות שקטים ואני נושא את הסימן\nמחפש משהו שכבר אינו קיים\nשל כל";
     const { prompt } = buildLyricsSuggestionPrompt({
       lyrics,
       currentLine: "של כל",
@@ -939,8 +953,12 @@ describe("fix: completion falls back to the line above when no scheme is establi
   });
 });
 
-describe("fix: impliedRhymeTarget respects the AABB/ABAB/free-verse scheme", () => {
-  it("AABB: two prior lines that rhyme as a couplet target the previous line", () => {
+describe("fix: impliedRhymeTarget respects the AABB/ABAB/free-verse scheme (R6 §2.3)", () => {
+  it("AABB closed couplet: a fresh 3rd line gets NO forced rhyme (last-line bias fix)", () => {
+    // "rain"/"pain" (lines 1-2) rhyme and close a couplet. The 3rd line
+    // starts a fresh pair, so forcing it to rhyme with "pain" would push
+    // the verse toward an unintended AAA run — this is the exact bug the
+    // review flagged (en-completion-long: "flame"/"reclaim").
     const lyrics =
       "I walked down a street in the rain\nTrying to shake off the pain\nI found an old coat by the";
     const { prompt } = buildLyricsSuggestionPrompt({
@@ -958,7 +976,32 @@ describe("fix: impliedRhymeTarget respects the AABB/ABAB/free-verse scheme", () 
       recentAccepted: [],
       mode: "completion",
     });
-    expect(prompt).toContain('rhyme with: "pain"');
+    expect(prompt).not.toContain("rhyme with:");
+  });
+
+  it("AABB continuing (AAA chorus): the 3rd line IS the target for the 4th", () => {
+    // All three lines happen to rhyme (dark/spark/mark), but the rule only
+    // needs lines 1-2 to close the first pair — line 3 is then the fresh,
+    // odd-one-out first half of a new pair and gets a HARD target for the
+    // 4th line, same as the he-completion-chorus-rhyme eval fixture.
+    const lyrics =
+      "You were the only light in a town gone dark\nAnd I was just a boy chasing a spark\nNow the streets are quiet, and I carry the mark\nOf every";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "Of every",
+      textBeforeCursor: "Of every",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain('must rhyme with: "mark"');
   });
 
   it("ABAB: line n-1 rhymes with n-3, so the completion targets line n-2 (not n-1)", () => {
@@ -983,12 +1026,55 @@ describe("fix: impliedRhymeTarget respects the AABB/ABAB/free-verse scheme", () 
       recentAccepted: [],
       mode: "completion",
     });
-    expect(prompt).toContain('rhyme with: "tree"');
+    expect(prompt).toContain('must rhyme with: "tree"');
   });
 
-  it("free verse: 2+ prior lines with no rhyme pattern get no forced target", () => {
+  it("no scheme, line 3 (k=2): soft target is the 1st prior line", () => {
+    const lyrics = "I walk through the city\nUnder the bridge at noon\nI ";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "I",
+      textBeforeCursor: "I ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain('ideally rhyme with: "city"');
+    expect(prompt).not.toContain("must rhyme with:");
+  });
+
+  it("no scheme, line 4 (k=3): soft target is the 2nd prior line, not the 3rd", () => {
     const lyrics =
       "I walk through the city\nUnder the bridge at noon\nThinking of nothing at all\nI ";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "I",
+      textBeforeCursor: "I ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain('ideally rhyme with: "noon"');
+    expect(prompt).not.toContain("must rhyme with:");
+  });
+
+  it("free verse: 4+ prior lines with no rhyme anywhere get no forced target at all", () => {
+    const lyrics =
+      "I walk through the city\nUnder the bridge at noon\nThinking of nothing at all\nJust watching the traffic go by\nI ";
     const { prompt } = buildLyricsSuggestionPrompt({
       lyrics,
       currentLine: "I",
@@ -1007,7 +1093,7 @@ describe("fix: impliedRhymeTarget respects the AABB/ABAB/free-verse scheme", () 
     expect(prompt).not.toContain("rhyme with:");
   });
 
-  it("single prior line still gets the obvious-partner fallback (next_word)", () => {
+  it("single prior line still gets a soft, position-based target (next_word)", () => {
     const lyrics = "I walk alone\nthrough the empty ";
     const { system } = buildNextWordOptionsPrompt({
       lyrics,
@@ -1023,7 +1109,74 @@ describe("fix: impliedRhymeTarget respects the AABB/ABAB/free-verse scheme", () 
       projectProfile: null,
       recentAccepted: [],
     });
-    expect(system).toContain('must rhyme with "alone"');
+    expect(system).toContain('ideally rhyme with "alone"');
+    expect(system).not.toContain("must rhyme with");
+  });
+
+  it("no scheme, line 3 (k=2, next_word): offers two rhyme-tagged options, one per candidate line", () => {
+    const lyrics =
+      "I walk through the city\nUnder the bridge at noon\nthrough the empty ";
+    const { system } = buildNextWordOptionsPrompt({
+      lyrics,
+      currentLine: "through the empty ",
+      textBeforeCursor: "through the empty ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+    });
+    expect(system).toContain('ideally rhymes with "city"');
+    expect(system).toContain('ideally rhymes with "noon"');
+    expect(system).not.toContain("must rhyme with");
+  });
+
+  it("no scheme, line 4 (k=3, next_word): offers two rhyme-tagged options for the 2nd and 3rd lines", () => {
+    const lyrics =
+      "I walk through the city\nUnder the bridge at noon\nThinking of nothing at all\nthrough the empty ";
+    const { system } = buildNextWordOptionsPrompt({
+      lyrics,
+      currentLine: "through the empty ",
+      textBeforeCursor: "through the empty ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+    });
+    expect(system).toContain('ideally rhymes with "noon"');
+    expect(system).toContain('ideally rhymes with "all"');
+  });
+
+  it("free verse: 4+ prior lines with no rhyme anywhere get no target at all (next_word)", () => {
+    const lyrics =
+      "I walk through the city\nUnder the bridge at noon\nThinking of nothing at all\nJust watching the traffic go by\nthrough the empty ";
+    const { system } = buildNextWordOptionsPrompt({
+      lyrics,
+      currentLine: "through the empty ",
+      textBeforeCursor: "through the empty ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+    });
+    expect(system).not.toContain("rhyme with");
+    expect(system).toContain(
+      'Mark kind="rhyme" only for an option that rhymes with the end of an earlier line',
+    );
   });
 });
 
@@ -1048,6 +1201,208 @@ describe("R6: current section and line position", () => {
     });
     expect(prompt).toContain("Current section: Chorus");
     expect(prompt).toContain("repeated chorus");
+  });
+
+  it("infers a line position from blank-line-separated stanzas when there's no [Section] header", () => {
+    // #79: a headerless draft still has stanzas — blank lines bound them —
+    // so the prompt can still say "line N of it" instead of saying nothing.
+    const lyrics =
+      "I packed my bags before the sun came up\nI left a note behind\n\nNow the city hums a different tune\nI ";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "I",
+      textBeforeCursor: "I ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    // The cursor's stanza is the 2nd block, not the whole song — "line 3
+    // of it" (consistent with how a [Section]-headered chorus counts the
+    // same way; see "names the section and flags a repeated chorus"
+    // above), not some line number counting from the very first stanza.
+    expect(prompt).toContain("Current section: this verse (line 3 of it)");
+    expect(prompt).not.toContain("line 4 of it");
+  });
+
+  it("says nothing about section/line position for a genuinely empty draft", () => {
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics: "",
+      currentLine: "",
+      textBeforeCursor: "",
+      selectionStart: 0,
+      selectionEnd: 0,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "next_line",
+    });
+    expect(prompt).not.toContain("Current section");
+  });
+});
+
+describe("#79: punctuation awareness for completion", () => {
+  const base = {
+    title: "T",
+    bpm: null,
+    key: null,
+    timeSignature: null,
+    globalProfile: null,
+    projectProfile: null,
+    recentAccepted: [],
+    mode: "completion" as const,
+  };
+
+  it("tells the model to continue mid-clause after a comma", () => {
+    const lyrics = "I walked away, ";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      ...base,
+      lyrics,
+      currentLine: lyrics,
+      textBeforeCursor: lyrics,
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+    });
+    expect(prompt).toContain("ends mid-clause");
+    expect(prompt).not.toContain("ends a full sentence");
+  });
+
+  it("tells the model to start a fresh clause after a period", () => {
+    const lyrics = "I walked away. ";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      ...base,
+      lyrics,
+      currentLine: lyrics,
+      textBeforeCursor: lyrics,
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+    });
+    expect(prompt).toContain("ends a full sentence");
+    expect(prompt).not.toContain("ends mid-clause");
+  });
+
+  it("says the same for ! and ? as for a period", () => {
+    for (const mark of ["!", "?"]) {
+      const lyrics = `I walked away${mark} `;
+      const { prompt } = buildLyricsSuggestionPrompt({
+        ...base,
+        lyrics,
+        currentLine: lyrics,
+        textBeforeCursor: lyrics,
+        selectionStart: lyrics.length,
+        selectionEnd: lyrics.length,
+      });
+      expect(prompt).toContain("ends a full sentence");
+    }
+  });
+
+  it("treats an ellipsis as mid-clause (trailing off), not a sentence end", () => {
+    for (const ellipsis of ["...", "…"]) {
+      const lyrics = `I walked away${ellipsis} `;
+      const { prompt } = buildLyricsSuggestionPrompt({
+        ...base,
+        lyrics,
+        currentLine: lyrics,
+        textBeforeCursor: lyrics,
+        selectionStart: lyrics.length,
+        selectionEnd: lyrics.length,
+      });
+      expect(prompt).toContain("ends mid-clause");
+      expect(prompt).not.toContain("ends a full sentence");
+    }
+  });
+
+  it("says nothing when the text doesn't end in clause-boundary punctuation", () => {
+    const lyrics = "I walked away";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      ...base,
+      lyrics,
+      currentLine: lyrics,
+      textBeforeCursor: lyrics,
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+    });
+    expect(prompt).not.toContain("ends mid-clause");
+    expect(prompt).not.toContain("ends a full sentence");
+  });
+
+  it("has a Hebrew version for both postures", () => {
+    const midClause = "הלכתי משם, ";
+    const { prompt: midPrompt } = buildLyricsSuggestionPrompt({
+      ...base,
+      lyrics: midClause,
+      currentLine: midClause,
+      textBeforeCursor: midClause,
+      selectionStart: midClause.length,
+      selectionEnd: midClause.length,
+    });
+    expect(midPrompt).toContain("אמצע משפט");
+
+    const newClause = "הלכתי משם. ";
+    const { prompt: newPrompt } = buildLyricsSuggestionPrompt({
+      ...base,
+      lyrics: newClause,
+      currentLine: newClause,
+      textBeforeCursor: newClause,
+      selectionStart: newClause.length,
+      selectionEnd: newClause.length,
+    });
+    expect(newPrompt).toContain("סוף משפט");
+  });
+});
+
+describe("#79: completion doesn't repeat text already after the cursor", () => {
+  it("tells the model what's already written after the cursor", () => {
+    const lyrics = "I walk alone tonight";
+    const cursor = "I walk ".length;
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: lyrics,
+      textBeforeCursor: lyrics.slice(0, cursor),
+      selectionStart: cursor,
+      selectionEnd: cursor,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain(
+      'Already written after the cursor: "alone tonight"',
+    );
+  });
+
+  it("says nothing about after-cursor text when the cursor is at the end of the line", () => {
+    const lyrics = "I walk ";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: lyrics,
+      textBeforeCursor: lyrics,
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).not.toContain("Already written after the cursor");
   });
 });
 
