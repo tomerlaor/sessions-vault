@@ -34,6 +34,8 @@ import {
   requestPopupSuggestions,
   type RunSignature,
 } from "../src/lib/lyrics-ai-request";
+import { sanitizeLyricsOutput } from "../src/lib/lyrics-sanitize";
+import { smartJoinCompletion } from "../src/lib/lyrics-join";
 import type { AIConfig } from "../src/types";
 
 const cfg: AIConfig = {
@@ -511,5 +513,47 @@ describe("requestPopupSuggestions", () => {
     });
 
     expect(generatePopupSuggestionsMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── Overlay invariant: ghost text === accepted text ─────────────────────────
+
+describe("completion ghost text equals the accepted text after sanitizing", () => {
+  // LyricsAiOverlay stores the model's sanitized reply once as
+  // `currentSuggestion`; both the displayed ghost text
+  // (`displayGhostText`) and `handleAccept`'s inserted text run
+  // `smartJoinCompletion(draft.slice(0, selectionStart), currentSuggestion)`
+  // against that same value — see the component's comment above
+  // `displayGhostText`. This exercises that pipeline end to end for raw
+  // model replies a prompt-format slip could produce, so the two call
+  // sites can never silently drift apart.
+  const prefix = "I walk";
+
+  function overlayOutcome(rawModelReply: string): {
+    ghostText: string;
+    accepted: string;
+  } {
+    const suggestion = sanitizeLyricsOutput(rawModelReply, "completion");
+    return {
+      ghostText: smartJoinCompletion(prefix, suggestion),
+      accepted: smartJoinCompletion(prefix, suggestion),
+    };
+  }
+
+  it("matches for a clean reply", () => {
+    const { ghostText, accepted } = overlayOutcome(" away");
+    expect(ghostText).toBe(accepted);
+    expect(ghostText).toBe(" away");
+  });
+
+  it("matches for a labeled, quoted reply", () => {
+    const { ghostText, accepted } = overlayOutcome('Completion: "away"');
+    expect(ghostText).toBe(accepted);
+    expect(ghostText).toBe(" away");
+  });
+
+  it("matches for a glued mid-word reply", () => {
+    const { ghostText, accepted } = overlayOutcome("row");
+    expect(ghostText).toBe(accepted);
   });
 });

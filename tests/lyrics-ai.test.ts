@@ -6,6 +6,7 @@ import {
   normalizeNextWord,
   buildNextWordOptionsPrompt,
   normalizeNextWordOptions,
+  sanitizePopupSuggestions,
 } from "../src/lib/lyrics-ai";
 import { loadEnglishDict } from "../src/lib/prosody";
 
@@ -599,6 +600,120 @@ describe("R6: lyrics sent to the model strip chords/remarks but keep section hea
   });
 });
 
+describe("fix: cursor marker survives a cursor sitting inside a (remark) or [chord]", () => {
+  it("cursor inside a parenthetical ad-lib keeps the marker instead of deleting it with the remark", () => {
+    const lyrics = "I walk alone (ooh yeah) tonight";
+    const cursor = lyrics.indexOf("yeah");
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: lyrics,
+      textBeforeCursor: lyrics.slice(0, cursor),
+      selectionStart: cursor,
+      selectionEnd: cursor,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain("⟨CURSOR⟩");
+    expect(prompt).toContain("I walk alone (ooh ⟨CURSOR⟩yeah) tonight");
+  });
+
+  it("cursor inside an inline [chord] token keeps the marker", () => {
+    const lyrics = "I walk [C]alone tonight";
+    const cursor = lyrics.indexOf("alone");
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: lyrics,
+      textBeforeCursor: lyrics.slice(0, cursor),
+      selectionStart: cursor,
+      selectionEnd: cursor,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain("⟨CURSOR⟩");
+    expect(prompt).toContain("I walk⟨CURSOR⟩alone tonight");
+  });
+
+  it("removes a user-typed cursor marker before inserting the real one", () => {
+    const lyrics = "I typed ⟨CURSOR⟩ by mistake\nI walk alone";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "I walk alone",
+      textBeforeCursor: "I walk alone",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "next_line",
+    });
+    // The prompt always contains exactly one other literal "⟨CURSOR⟩" as
+    // part of the static "(⟨CURSOR⟩ marks the cursor):" instruction, so a
+    // correctly-deduped prompt has exactly 2 occurrences total — not 3,
+    // which is what an un-stripped, user-typed marker would add.
+    const markerCount = prompt.split("⟨CURSOR⟩").length - 1;
+    expect(markerCount).toBe(2);
+    expect(prompt).toContain("I typed by mistake");
+  });
+});
+
+describe("fix: a [Section] name is sanitized before it enters the prompt", () => {
+  function promptWithSection(headerInner: string): string {
+    const lyrics = `[${headerInner}]\nI walk alone\nI `;
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "I",
+      textBeforeCursor: "I ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    return prompt;
+  }
+
+  it("caps the section name length to about 40 characters in the 'Current section' line", () => {
+    // The raw header is still echoed verbatim in the lyrics block itself
+    // (the model needs to see the writer's actual structure) — only the
+    // name interpolated into the "Current section: ..." sentence is capped.
+    const longName = "Verse " + "x".repeat(60);
+    const prompt = promptWithSection(longName);
+    const match = /Current section: (.*?) \(line/.exec(prompt);
+    expect(match).not.toBeNull();
+    expect((match?.[1] ?? "").length).toBeLessThanOrEqual(40);
+  });
+
+  it("strips control characters and stray brackets from the name", () => {
+    expect(promptWithSection("Verse\x07")).toContain(
+      "Current section: Verse (line",
+    );
+    expect(promptWithSection("[Verse")).toContain(
+      "Current section: Verse (line",
+    );
+  });
+});
+
 describe("R6: no contradictory explain/question instructions in any lyrics system prompt", () => {
   const baseEn = {
     lyrics: "I walk alone\nthrough the city lights\n",
@@ -798,7 +913,11 @@ describe("fix: completion falls back to the line above when no scheme is establi
     expect(prompt).toContain('rhyme with: "stay"');
   });
 
-  it("Hebrew: prior lines in the section don't rhyme with each other, so no AABB/ABAB is detected — still targets the immediately preceding line", () => {
+  it("Hebrew: free verse (2+ prior lines, none of which rhyme) gets no forced rhyme target", () => {
+    // Fixed bug: the old fallback always targeted the immediately preceding
+    // line even when the prior lines show no AABB/ABAB pattern at all —
+    // wrong for genuine free verse. With 2+ non-rhyming prior lines, the
+    // instruction should be omitted entirely rather than forcing a rhyme.
     const lyrics =
       "[פזמון]\nהיית האור היחיד בעיר שכבתה\nואני הייתי רק ילד רודף ניצוץ\nעכשיו הרחובות שקטים ואני נושא את הסימן\nשל כל";
     const { prompt } = buildLyricsSuggestionPrompt({
@@ -816,7 +935,95 @@ describe("fix: completion falls back to the line above when no scheme is establi
       recentAccepted: [],
       mode: "completion",
     });
-    expect(prompt).toContain('להתחרז עם: "הסימן"');
+    expect(prompt).not.toContain("להתחרז עם");
+  });
+});
+
+describe("fix: impliedRhymeTarget respects the AABB/ABAB/free-verse scheme", () => {
+  it("AABB: two prior lines that rhyme as a couplet target the previous line", () => {
+    const lyrics =
+      "I walked down a street in the rain\nTrying to shake off the pain\nI found an old coat by the";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "I found an old coat by the",
+      textBeforeCursor: "I found an old coat by the",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain('rhyme with: "pain"');
+  });
+
+  it("ABAB: line n-1 rhymes with n-3, so the completion targets line n-2 (not n-1)", () => {
+    // "rain" (line 1) rhymes with "lane" (line 3); "tree" (line 2) rhymes
+    // with neither — an alternating scheme, not a couplet. The line being
+    // completed (line 4) should target line 2's end word ("tree"), two
+    // lines back, not line 3's ("lane").
+    const lyrics =
+      "I walk through the rain\nLost beneath a tree\nAlone down the lane\nI ";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "I",
+      textBeforeCursor: "I ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain('rhyme with: "tree"');
+  });
+
+  it("free verse: 2+ prior lines with no rhyme pattern get no forced target", () => {
+    const lyrics =
+      "I walk through the city\nUnder the bridge at noon\nThinking of nothing at all\nI ";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "I",
+      textBeforeCursor: "I ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).not.toContain("rhyme with:");
+  });
+
+  it("single prior line still gets the obvious-partner fallback (next_word)", () => {
+    const lyrics = "I walk alone\nthrough the empty ";
+    const { system } = buildNextWordOptionsPrompt({
+      lyrics,
+      currentLine: "through the empty ",
+      textBeforeCursor: "through the empty ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+    });
+    expect(system).toContain('must rhyme with "alone"');
   });
 });
 
@@ -864,5 +1071,60 @@ describe("R6: recentAccepted drops single-word examples", () => {
     expect(system).not.toContain("- fire\n");
     expect(system).toContain("the quiet night");
     expect(system).toContain("burning like the sun above");
+  });
+});
+
+describe("fix: sanitizePopupSuggestions cleans popup items the same way ghost text is cleaned", () => {
+  it("sanitizes completion/next_line/alternative items via the shared sanitizer", () => {
+    const out = sanitizePopupSuggestions(
+      [
+        { mode: "completion" as const, text: 'Completion: "away"' },
+        { mode: "next_line" as const, text: "Next line: a quiet leaving" },
+        { mode: "alternative" as const, text: "'a quiet leaving'" },
+      ],
+      "",
+    );
+    expect(out).toEqual([
+      { mode: "completion", text: "away" },
+      { mode: "next_line", text: "a quiet leaving" },
+      // Single quotes are never stripped (see lyrics-sanitize.ts) — the
+      // alternative item's wrapping single quotes stay as-is.
+      { mode: "alternative", text: "'a quiet leaving'" },
+    ]);
+  });
+
+  it("normalizes next_word items via normalizeNextWord", () => {
+    const out = sanitizePopupSuggestions(
+      [{ mode: "next_word" as const, text: "  world  " }],
+      "hello",
+    );
+    expect(out).toEqual([{ mode: "next_word", text: " world" }]);
+  });
+
+  it("drops items that sanitize down to nothing", () => {
+    const out = sanitizePopupSuggestions(
+      [
+        { mode: "next_line" as const, text: "```" },
+        { mode: "completion" as const, text: "away" },
+      ],
+      "",
+    );
+    expect(out).toEqual([{ mode: "completion", text: "away" }]);
+  });
+
+  it("preserves extra fields (e.g. a display label) through the mapping", () => {
+    const out = sanitizePopupSuggestions(
+      [
+        {
+          mode: "next_line" as const,
+          text: "Next line: a line",
+          label: "rhyme",
+        },
+      ],
+      "",
+    );
+    expect(out).toEqual([
+      { mode: "next_line", text: "a line", label: "rhyme" },
+    ]);
   });
 });

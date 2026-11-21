@@ -328,3 +328,49 @@ describe("omitted leading space diagnostic (#102)", () => {
     });
   });
 });
+
+describe("formatRaw diagnostic", () => {
+  it("aggregates pass/fail independently of the sanitized format check", () => {
+    const run = runWith([
+      {
+        ...trial([candidate("a", 0, [], true)], 0),
+        formatRaw: { status: "fail", detail: "starts with a label" },
+      },
+      {
+        ...trial([candidate("b", 0, [], true)], 0),
+        formatRaw: { status: "pass" },
+      },
+    ]);
+    const stats = computeStats(run);
+    expect(stats.formatRaw).toEqual({ pass: 1, fail: 1, skip: 0 });
+
+    const md = buildMarkdownReport(run);
+    expect(md).toContain(
+      "Raw (pre-sanitize) format pass rate (diagnostic, does not affect pass rate): 1/2 (50.0%)",
+    );
+  });
+
+  it("ignores trials that didn't report formatRaw", () => {
+    const run = runWith([trial([candidate("a", 0, [], true)], 0)]);
+    expect(computeStats(run).formatRaw).toEqual({
+      pass: 0,
+      fail: 0,
+      skip: 0,
+    });
+  });
+});
+
+describe("prompt version metadata", () => {
+  it("includes the prompt version in the report header when present", () => {
+    const run = runWith([trial([candidate("a", 0, [], true)], 0)]);
+    run.meta.promptVersion = "2026-11-21.1";
+    expect(buildMarkdownReport(run)).toContain(
+      "Prompt version: `2026-11-21.1`",
+    );
+  });
+
+  it("omits the prompt version segment when absent", () => {
+    const run = runWith([trial([candidate("a", 0, [], true)], 0)]);
+    expect(buildMarkdownReport(run)).not.toContain("Prompt version");
+  });
+});
