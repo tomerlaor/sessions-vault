@@ -16,16 +16,22 @@ export const CURSOR_MARKER = "⟨CURSOR⟩";
 // bold-markdown-wrapped (e.g. "**Next line:**"). The separator after the
 // label must be a colon (optionally spaced) or a dash with whitespace on
 // BOTH sides — a bare hyphen right against the label would otherwise treat
-// ordinary hyphenated lyrics ("Option-less, I run") as a label.
-const LABEL_WORDS =
-  "next\\s*line|next\\s*word|completion|suggestion|option|alternative|answer|line|הצעה|השלמה|שורה\\s*הבאה|מילה\\s*הבאה|אפשרות|חלופה|תשובה";
+// ordinary hyphenated lyrics ("Option-less, I run") as a label. "line" on
+// its own is too common an ordinary lyric word to risk the dash form at
+// all ("Line — by line" is real lyrics, not a label) — it requires a colon.
+const LABEL_WORDS_DASH_OK =
+  "next\\s*line|next\\s*word|completion|suggestion|option|alternative|answer|הצעה|השלמה|שורה\\s*הבאה|מילה\\s*הבאה|אפשרות|חלופה|תשובה";
+const LABEL_WORD_COLON_ONLY = "line";
 const LEADING_LABEL_RE = new RegExp(
-  `^\\*{0,2}\\s*(?:${LABEL_WORDS})\\*{0,2}(?:\\s*:\\s*|\\s+[-–—]\\s+)\\*{0,2}\\s*`,
+  `^\\*{0,2}\\s*(?:(?:${LABEL_WORDS_DASH_OK})\\*{0,2}(?:\\s*:\\s*|\\s+[-–—]\\s+)|${LABEL_WORD_COLON_ONLY}\\*{0,2}\\s*:\\s*)\\*{0,2}\\s*`,
   "i",
 );
 
-// A leading "1." or "1)" numbering the model sometimes adds before the line.
-const LEADING_NUMBERING_RE = /^\s*\d+[.)]\s*/;
+// A leading "1." or "1)" numbering the model sometimes adds before the
+// line — either followed by whitespace, or alone on its own line, but
+// never glued straight into digits that are actually part of the lyric
+// ("7.62 caliber love" must not lose its "7" to this).
+const LEADING_NUMBERING_RE = /^\s*\d+[.)](?:\s+|$)/;
 
 // A bracketed [Section] header or a markdown "## Heading" line.
 const HEADER_LINE_RE = /^\s*(?:\[[^\]]*]|#{1,6}\s+\S.*)\s*$/;
@@ -159,9 +165,13 @@ function looksLikeUnresolvedPrefix(s: string): boolean {
   const lower = bare.toLowerCase();
   return LABEL_WORD_LIST.some((word) => {
     const target = word.toLowerCase();
-    return lower.length <= target.length
-      ? target.startsWith(lower)
-      : lower.startsWith(target);
+    if (lower.length <= target.length) return target.startsWith(lower);
+    if (!lower.startsWith(target)) return false;
+    // Streamed past the label word itself ("Lines of fire", "Answers in
+    // the wind", "Optional love") — a letter right after it means this is
+    // a different, longer word, not the label, so stop holding it back.
+    // Only a non-letter (space, colon, dash, …) still leaves it ambiguous.
+    return !/^\p{L}/u.test(lower[target.length]);
   });
 }
 
@@ -198,12 +208,27 @@ export function sanitizePartialLyricsOutput(raw: string): string {
     return "";
   }
 
+  let strippedOpenQuote: string | undefined;
   if (cleanedFirst.length > 0) {
     for (const [open] of QUOTE_PAIRS) {
       if (cleanedFirst[0] === open) {
         cleanedFirst = cleanedFirst.slice(1);
+        strippedOpenQuote = open;
         break;
       }
+    }
+  }
+
+  // The matching close quote has just streamed in as the very last
+  // character so far — hide it rather than flash it, the same way the
+  // open quote was hidden the moment it appeared. sanitizeLyricsOutput
+  // will remove the matched pair for real once the full reply lands; if
+  // more text follows this char later, it naturally stops being the last
+  // character and this no longer applies.
+  if (strippedOpenQuote && rest === "" && cleanedFirst.length > 0) {
+    const close = QUOTE_PAIRS.find(([o]) => o === strippedOpenQuote)?.[1];
+    if (close && cleanedFirst.endsWith(close)) {
+      cleanedFirst = cleanedFirst.slice(0, -close.length);
     }
   }
 
@@ -226,12 +251,23 @@ export function trimRepeatedTail(
   if (suggestion.trim().toLowerCase() === after.toLowerCase()) return "";
 
   const suggestionTrimmedEnd = suggestion.replace(/\s+$/, "");
-  if (suggestionTrimmedEnd.toLowerCase().endsWith(after.toLowerCase())) {
-    const kept = suggestionTrimmedEnd.slice(
-      0,
-      suggestionTrimmedEnd.length - after.length,
-    );
-    return kept.replace(/\s+$/, "");
+  if (!suggestionTrimmedEnd.toLowerCase().endsWith(after.toLowerCase())) {
+    return suggestion;
   }
-  return suggestion;
+
+  const kept = suggestionTrimmedEnd.slice(
+    0,
+    suggestionTrimmedEnd.length - after.length,
+  );
+  // Only trim at a genuine word boundary: the overlap must sit between
+  // words, not split one in half (e.g. prefix "I want", after-text " me",
+  // reply " to come" would otherwise trim to " to co" -> "I want to co me").
+  // A boundary exists when nothing is kept, the kept text already ends in
+  // whitespace, or the overlap itself starts with a non-letter (so even a
+  // letter right before it, like "wait" before ", really", isn't a split).
+  const atWordBoundary =
+    kept === "" || /\s$/.test(kept) || !/^\p{L}/u.test(after);
+  if (!atWordBoundary) return suggestion;
+
+  return kept.replace(/\s+$/, "");
 }

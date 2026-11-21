@@ -374,3 +374,34 @@ describe("prompt version metadata", () => {
     expect(buildMarkdownReport(run)).not.toContain("Prompt version");
   });
 });
+
+describe("fixture notes", () => {
+  it("flags a case whose fixture carries a note", () => {
+    const run = runWith([
+      {
+        rawOutput: "a lone line",
+        ttftMs: 10,
+        totalMs: 10,
+        checks: allPass(),
+      },
+    ]);
+    run.cases[0].notes = "Rewritten to fix a scheme-detection bug (abc1234).";
+    const md = buildMarkdownReport(run);
+    expect(md).toContain("## Fixture notes");
+    expect(md).toContain(
+      "**en-next-line-aabb**: Rewritten to fix a scheme-detection bug (abc1234).",
+    );
+  });
+
+  it("omits the section when no case has a note", () => {
+    const run = runWith([
+      {
+        rawOutput: "a lone line",
+        ttftMs: 10,
+        totalMs: 10,
+        checks: allPass(),
+      },
+    ]);
+    expect(buildMarkdownReport(run)).not.toContain("## Fixture notes");
+  });
+});

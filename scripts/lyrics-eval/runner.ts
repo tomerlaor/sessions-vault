@@ -92,6 +92,10 @@ export interface CaseResult {
   mode: EvalMode;
   expect: EvalExpect;
   trials: TrialOutcome[];
+  // Carried over from the fixture (see EvalFixture.notes) so the report
+  // can flag a case whose fixture changed for reasons unrelated to the
+  // model under test.
+  notes?: string;
 }
 
 export interface EvalRunResult {
@@ -489,6 +493,7 @@ export async function runEval(
       mode: fixture.mode,
       expect: fixture.expect,
       trials,
+      notes: fixture.notes,
     });
   }
 

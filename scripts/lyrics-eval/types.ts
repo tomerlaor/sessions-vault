@@ -23,6 +23,11 @@ export interface EvalFixture {
   bpm?: number;
   key?: string;
   expect: EvalExpect;
+  // Free-text flag surfaced in the markdown report (see report.ts) when a
+  // fixture's lyrics/expectation were rewritten for reasons unrelated to
+  // the model under test — so a pass-rate delta against an older report
+  // isn't mistaken for a real regression/improvement on this case.
+  notes?: string;
 }
 
 export { type EvalExpect, type EvalLang, type EvalMode };

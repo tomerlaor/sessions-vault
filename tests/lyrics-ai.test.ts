@@ -438,6 +438,29 @@ describe("next_word options", () => {
       selectionEnd: lyrics.length,
     });
     expect(system).toContain('must rhyme with "wide"');
+    expect(system).toContain("the line above");
+    expect(system).not.toContain("two lines up");
+    expect(system).toContain('kind="rhyme"');
+  });
+
+  it("names the target as two lines up, not the line above, for an ABAB scheme", () => {
+    // "rain" (line 1) rhymes with "lane" (line 3); "tree" (line 2) rhymes
+    // with neither — an alternating scheme. The word being typed on line
+    // 4 should target line 2's end word ("tree"), two lines back, and the
+    // instruction must say so instead of always saying "the line above".
+    const lyrics =
+      "I walk through the rain\nLost beneath a tree\nAlone down the lane\nI ";
+    const { system } = buildNextWordOptionsPrompt({
+      ...input,
+      lyrics,
+      currentLine: "I ",
+      textBeforeCursor: "I ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+    });
+    expect(system).toContain('must rhyme with "tree"');
+    expect(system).toContain("two lines up");
+    expect(system).not.toContain("the line above");
     expect(system).toContain('kind="rhyme"');
   });
 
@@ -613,7 +636,11 @@ describe("R6: lyrics sent to the model strip chords/remarks but keep section hea
 });
 
 describe("fix: cursor marker survives a cursor sitting inside a (remark) or [chord]", () => {
-  it("cursor inside a parenthetical ad-lib keeps the marker instead of deleting it with the remark", () => {
+  it("cursor inside a parenthetical ad-lib keeps the marker and drops the whole remark, not half-fragments", () => {
+    // Splitting "(ooh yeah)" naively at the cursor used to leave "(ooh"
+    // and "yeah)" in the lyrics block — neither half is a complete
+    // remark token, so cleanLine couldn't strip either. The whole token
+    // must be dropped, with the marker left where it used to be.
     const lyrics = "I walk alone (ooh yeah) tonight";
     const cursor = lyrics.indexOf("yeah");
     const { prompt } = buildLyricsSuggestionPrompt({
@@ -632,7 +659,7 @@ describe("fix: cursor marker survives a cursor sitting inside a (remark) or [cho
       mode: "completion",
     });
     expect(prompt).toContain("⟨CURSOR⟩");
-    expect(prompt).toContain("I walk alone (ooh ⟨CURSOR⟩yeah) tonight");
+    expect(prompt).toContain("I walk alone ⟨CURSOR⟩ tonight");
   });
 
   it("cursor inside an inline [chord] token keeps the marker", () => {
@@ -655,6 +682,36 @@ describe("fix: cursor marker survives a cursor sitting inside a (remark) or [cho
     });
     expect(prompt).toContain("⟨CURSOR⟩");
     expect(prompt).toContain("I walk⟨CURSOR⟩alone tonight");
+  });
+
+  it("cursor strictly inside a [chord] token drops the whole bracket instead of leaking a half-fragment", () => {
+    // Splitting "[Am]" naively at the cursor (between A and m) leaves "[A"
+    // and "m]" — neither half is a complete bracket token, so cleanLine
+    // can't strip either and both fragments would leak into the prompt.
+    const lyrics = "I walk [Am]alone tonight";
+    const cursor = lyrics.indexOf("m]");
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: lyrics,
+      textBeforeCursor: lyrics.slice(0, cursor),
+      selectionStart: cursor,
+      selectionEnd: cursor,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain("⟨CURSOR⟩");
+    // The lyrics block passed to the model must drop the whole chord
+    // bracket, not leak the "[A" / "m]" half-fragments splitting it at the
+    // cursor would otherwise produce (the raw "Writer typed"/"Already
+    // written" lines elsewhere in the prompt still quote what was
+    // literally typed, chords included — that's unrelated and unchanged).
+    expect(prompt).toContain("I walk ⟨CURSOR⟩alone tonight");
   });
 
   it("removes a user-typed cursor marker before inserting the real one", () => {
@@ -1303,11 +1360,14 @@ describe("R6: current section and line position", () => {
       recentAccepted: [],
       mode: "completion",
     });
-    // The cursor's stanza is the 2nd block, not the whole song — "line 3
-    // of it" (consistent with how a [Section]-headered chorus counts the
-    // same way; see "names the section and flags a repeated chorus"
-    // above), not some line number counting from the very first stanza.
-    expect(prompt).toContain("Current section: this verse (line 3 of it)");
+    // The cursor's stanza is the 2nd block, not the whole song — "line 2
+    // of it" (one finished line — "Now the city hums a different tune" —
+    // plus the in-progress "I " being completed right now, which in
+    // completion mode doesn't yet count as its own finished line; see the
+    // R6 line-position fix below), not some line number counting from the
+    // very first stanza.
+    expect(prompt).toContain("Current section: this verse (line 2 of it)");
+    expect(prompt).not.toContain("line 3 of it");
     expect(prompt).not.toContain("line 4 of it");
   });
 
@@ -1328,6 +1388,99 @@ describe("R6: current section and line position", () => {
       mode: "next_line",
     });
     expect(prompt).not.toContain("Current section");
+  });
+
+  it("does not count the cursor's own in-progress line as finished in completion mode", () => {
+    // Three finished lines, then "And so are " is still being completed —
+    // it's the 4th line of the section, not the 5th. The old code counted
+    // the cursor's line as finished just because the cursor sits at its
+    // end (true even mid-completion, since there's nothing typed after
+    // it), double-counting it.
+    const lyrics =
+      "Line one here today\nLine two also fine\nLine three keeps going\nAnd so are ";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "And so are ",
+      textBeforeCursor: "And so are ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain("Current section: this verse (line 4 of it)");
+    expect(prompt).not.toContain("line 5 of it");
+  });
+
+  it("the first line of a freshly-headered chorus is line 1, not line 2, in completion mode", () => {
+    const lyrics = "[Chorus]\nla la ";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "la la ",
+      textBeforeCursor: "la la ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain("Current section: Chorus (line 1 of it)");
+    expect(prompt).not.toContain("line 2 of it");
+  });
+
+  it("DOES count the cursor's finished line in next_line mode, since the next line comes after it", () => {
+    const lyrics = "Line one\nLine two\nLine three";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "Line three",
+      textBeforeCursor: "Line three",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "next_line",
+    });
+    expect(prompt).toContain("Current section: this verse (line 4 of it)");
+  });
+
+  it("a headerless draft with the cursor on a blank line treats it as continuing the stanza above, not starting a new one", () => {
+    // The old stanzaStartAt matched the cursor's OWN blank line as the
+    // separator, forcing sectionStart just past the cursor and always
+    // reporting line 1 no matter how much of the stanza above was
+    // already written.
+    const lyrics = "Line one\nLine two\nLine three\n";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "",
+      textBeforeCursor: "",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain("Current section: this verse (line 4 of it)");
+    expect(prompt).not.toContain("line 1 of it");
   });
 });
 

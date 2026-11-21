@@ -103,6 +103,11 @@ export interface RhymeTarget {
   // with". false for a position-based guess with no rhyming evidence yet
   // — "ideally rhymes with", not forced.
   hard: boolean;
+  // Only meaningful when hard is true: how many finished lines back the
+  // rhyme partner sits — 1 for an AABB couplet (the line directly above),
+  // 2 for ABAB alternating (the line two above) — so the hard next_word
+  // rule can name the right one instead of always saying "the line above".
+  linesUp?: 1 | 2;
 }
 
 // No scheme has been detected yet (free verse so far) — infer a target from
@@ -147,7 +152,13 @@ function impliedRhymeTarget(
   cursor: number,
 ): RhymeTarget | undefined {
   const formal = nextLineTargets(draft, cursor);
-  if (formal.rhymeWith) return { word: formal.rhymeWith, hard: true };
+  if (formal.rhymeWith) {
+    return {
+      word: formal.rhymeWith,
+      hard: true,
+      linesUp: formal.scheme === "ABAB" ? 2 : 1,
+    };
+  }
   // A scheme WAS detected (e.g. AABB with the couplet just closed) but
   // nextLineTargets deliberately named no target for it right now — that's
   // a real "no target", not "no evidence yet". Only fall through to
@@ -297,6 +308,34 @@ function joinAroundMarker(
 // so cleaning the combined line would delete the marker along with an
 // ad-lib or chord it happened to land inside, e.g. "I walk alone (ooh
 // |yeah) tonight" (cursor at `|`) sent the model no marker at all.
+// A [...] chord/section token or a (...) remark that the cursor sits
+// strictly inside of (e.g. "[A|m]", cursor between A and m) — cleanLine
+// only strips a WHOLE bracket/remark span, so naively splitting the raw
+// line at the cursor leaves each half (e.g. "[A" / "m]") unmatched and
+// unstripped, leaking chord fragments into the model's lyrics. Drop the
+// whole token instead and report where it used to be so the marker lands
+// in its place.
+const CHORD_OR_REMARK_TOKEN_RE = /\[[^\]]*]|\([^)]*\)/g;
+
+function splitAtCursorToken(
+  line: string,
+  posInLine: number,
+): { rawBefore: string; rawAfter: string } {
+  CHORD_OR_REMARK_TOKEN_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = CHORD_OR_REMARK_TOKEN_RE.exec(line))) {
+    const start = m.index;
+    const end = start + m[0].length;
+    if (posInLine > start && posInLine < end) {
+      return { rawBefore: line.slice(0, start), rawAfter: line.slice(end) };
+    }
+  }
+  return {
+    rawBefore: line.slice(0, posInLine),
+    rawAfter: line.slice(posInLine),
+  };
+}
+
 function buildCursorMarkedLyrics(lyrics: string, cursor: number): string {
   const at = clampIndex(cursor, lyrics.length);
   const rawLines = lyrics.split("\n");
@@ -330,8 +369,7 @@ function buildCursorMarkedLyrics(lyrics: string, cursor: number): string {
           cleanedLine.slice(clampedPos)
         ).trim();
       }
-      const rawBefore = line.slice(0, posInLine);
-      const rawAfter = line.slice(posInLine);
+      const { rawBefore, rawAfter } = splitAtCursorToken(line, posInLine);
       const before = cleanLine(stripUserTypedCursorMarker(rawBefore));
       const after = cleanLine(stripUserTypedCursorMarker(rawAfter));
       const spaceBefore = rawBefore.length === 0 || /\s$/.test(rawBefore);
@@ -382,8 +420,16 @@ interface SectionPosition {
 // of lyric lines separated by a blank line. Used as the section-position
 // fallback so a headerless song still gets a sane "line N of it" instead
 // of counting from line 1 of the whole document.
+//
+// Searches strictly BEFORE the cursor's own line (cursorLine - 1, not
+// cursorLine) — a cursor sitting right on a blank line is still composing
+// within whatever stanza precedes it, not announcing a new one. Starting
+// the search at cursorLine let the cursor's own blank line match itself as
+// "the" separator, forcing sectionStart to cursorLine + 1 (past the
+// cursor) and always reporting line 1 regardless of how much of the
+// current stanza was already written above it.
 function stanzaStartAt(rawLines: string[], cursorLine: number): number {
-  for (let i = cursorLine; i >= 0; i--) {
+  for (let i = cursorLine - 1; i >= 0; i--) {
     if (rawLines[i].trim() === "") return i + 1;
   }
   return 0;
@@ -394,7 +440,17 @@ function stanzaStartAt(rawLines: string[], cursorLine: number): number {
 // "Current section: Chorus (line 3 of it)" and flag a repeated chorus so
 // the model keeps it consistent with the one already written. With no
 // header at all, falls back to the blank-line-bounded stanza (#79).
-function sectionPositionAt(lyrics: string, cursor: number): SectionPosition {
+//
+// `countCursorLineIfFinished`: whether a cursor sitting at the end of an
+// already-finished line should count that line towards the position —
+// true for next_line (about to write a brand-new line AFTER it, so it
+// should count as done), false otherwise (completion/next_word/popup are
+// still finishing/typing that very line, so it isn't done yet).
+function sectionPositionAt(
+  lyrics: string,
+  cursor: number,
+  countCursorLineIfFinished: boolean,
+): SectionPosition {
   const rawLines = lyrics.split("\n");
   const at = clampIndex(cursor, lyrics.length);
   const cursorLine = lineIndexAtOffset(rawLines, at);
@@ -423,7 +479,9 @@ function sectionPositionAt(lyrics: string, cursor: number): SectionPosition {
   const posInLine = at - lineStartOffset;
   const cursorLineRaw = rawLines[cursorLine] ?? "";
   const cursorLineFinished =
-    posInLine >= cursorLineRaw.length && cleanLine(cursorLineRaw).length > 0;
+    countCursorLineIfFinished &&
+    posInLine >= cursorLineRaw.length &&
+    cleanLine(cursorLineRaw).length > 0;
   if (cursorLineFinished) completed++;
 
   let isChorusRepeat = false;
@@ -442,11 +500,12 @@ function sectionContextLine(
   lyrics: string,
   cursor: number,
   hebrew: boolean,
+  countCursorLineIfFinished: boolean,
 ): string | null {
   // An empty draft has no stanza either — the empty-draft "write an
   // opening line" instructions (EMPTY_DRAFT_EN/HE) cover that case instead.
   if (!lyrics.trim()) return null;
-  const info = sectionPositionAt(lyrics, cursor);
+  const info = sectionPositionAt(lyrics, cursor, countCursorLineIfFinished);
   // #79: no [Section] header above the cursor — fall back to a generic
   // "this verse" label (stanzaStartAt already gave lineNumber the right
   // blank-line-bounded count) rather than saying nothing at all.
@@ -607,6 +666,7 @@ function buildInlineUserPrompt(
     input.lyrics,
     input.selectionStart,
     hebrew,
+    input.mode === "next_line",
   );
   if (section) lines.push(section);
 
@@ -937,9 +997,13 @@ function nextWordRhymeInstruction(
       : '- Mark kind="rhyme" only for an option that rhymes with the end of an earlier line in the song.';
   }
   if (rhyme.hard) {
+    // AABB's partner is the line directly above; ABAB's is two lines up —
+    // always saying "the line above" was wrong for an ABAB scheme.
+    const positionEn = rhyme.linesUp === 2 ? "two lines up" : "the line above";
+    const positionHe = rhyme.linesUp === 2 ? "שתי שורות מעלה" : "בשורה שמעל";
     return hebrew
-      ? `- לפחות אפשרות אחת חייבת להתחרז עם "${rhyme.word}" (המילה האחרונה בשורה שמעל), כדי שהכותב יוכל לסגור את השורה בחריזה. סמן אותה kind="rhyme".`
-      : `- At least one option must rhyme with "${rhyme.word}" (the last word of the line above) so the writer can land the line on a rhyme. Mark it kind="rhyme".`;
+      ? `- לפחות אפשרות אחת חייבת להתחרז עם "${rhyme.word}" (המילה האחרונה ${positionHe}), כדי שהכותב יוכל לסגור את השורה בחריזה. סמן אותה kind="rhyme".`
+      : `- At least one option must rhyme with "${rhyme.word}" (the last word of ${positionEn}) so the writer can land the line on a rhyme. Mark it kind="rhyme".`;
   }
   if (rhyme.altWord) {
     return hebrew
@@ -1001,6 +1065,7 @@ export function buildNextWordOptionsPrompt(
     input.lyrics,
     input.selectionStart,
     hebrew,
+    false,
   );
   const prompt = [
     `Entire lyrics (⟨CURSOR⟩ marks the cursor):\n${lyricsBlock || "(empty)"}`,

@@ -171,6 +171,14 @@ describe("sanitizeLyricsOutput", () => {
     ).toBe("Walking into tomorrow");
   });
 
+  it("does not treat a spaced dash after the bare word 'line' as a label separator", () => {
+    // "Line" alone is too common an ordinary lyric word for the dash form
+    // to be safe ("Line — by line" is real lyrics) — only a colon counts.
+    expect(sanitizeLyricsOutput("Line — by line", "next_line")).toBe(
+      "Line — by line",
+    );
+  });
+
   it("strips leading 1./1) numbering", () => {
     expect(sanitizeLyricsOutput("1. Walking into tomorrow", "next_line")).toBe(
       "Walking into tomorrow",
@@ -178,6 +186,18 @@ describe("sanitizeLyricsOutput", () => {
     expect(sanitizeLyricsOutput("1) Walking into tomorrow", "next_line")).toBe(
       "Walking into tomorrow",
     );
+  });
+
+  it("does not treat a number embedded in the lyric as numbering", () => {
+    // The old regex only required the punctuation, not whitespace after
+    // it, so "7.62 caliber love" lost its "7" to "62 caliber love".
+    expect(sanitizeLyricsOutput("7.62 caliber love", "next_line")).toBe(
+      "7.62 caliber love",
+    );
+  });
+
+  it("strips a number-only line with nothing else on it", () => {
+    expect(sanitizeLyricsOutput("12)", "next_line")).toBe("");
   });
 
   it("strips an echoed cursor marker", () => {
@@ -243,6 +263,35 @@ describe("sanitizePartialLyricsOutput", () => {
   it("combines label and quote stripping once both resolve", () => {
     expect(sanitizePartialLyricsOutput('Completion: "away')).toBe("away");
   });
+
+  it("holds back a label word even once it diverges mid-word, not just when it still matches exactly", () => {
+    // "Lines", "Answers", "Optional" each start with a known label word
+    // ("line", "answer", "option") but continue into a different, longer
+    // word — a letter right after the label is never a real label.
+    expect(sanitizePartialLyricsOutput("Lines of fire")).toBe("Lines of fire");
+    expect(sanitizePartialLyricsOutput("Answers in the wind")).toBe(
+      "Answers in the wind",
+    );
+    expect(sanitizePartialLyricsOutput("Optional love")).toBe("Optional love");
+  });
+
+  it("hides a trailing close quote the moment it streams in, matching the open quote it stripped", () => {
+    // Once the model's closing quote has streamed in, showing it would
+    // flash before sanitizeLyricsOutput removes the matched pair for
+    // real once the full reply lands.
+    expect(sanitizePartialLyricsOutput('"Walking into tomorrow"')).toBe(
+      "Walking into tomorrow",
+    );
+    expect(sanitizePartialLyricsOutput("“Walking into tomorrow”")).toBe(
+      "Walking into tomorrow",
+    );
+  });
+
+  it("does not hide a trailing quote when no opening quote was stripped", () => {
+    expect(sanitizePartialLyricsOutput('Walking into tomorrow"')).toBe(
+      'Walking into tomorrow"',
+    );
+  });
 });
 
 // ── trimRepeatedTail (#79: don't repeat text after the cursor) ────────────
@@ -279,5 +328,18 @@ describe("trimRepeatedTail", () => {
 
   it("leaves an empty suggestion untouched", () => {
     expect(trimRepeatedTail("", "alone tonight")).toBe("");
+  });
+
+  it("does not trim when the overlap splits a word in half", () => {
+    // prefix "I want", after-text " me", reply " to come" — "come" and
+    // "me" overlap on "me" but the split point ("co" | "me") is mid-word,
+    // not a word boundary, so trimming would produce "I want to co me".
+    expect(trimRepeatedTail(" to come", " me")).toBe(" to come");
+  });
+
+  it("trims when the overlap starts with a non-letter, even if the kept text ends in a letter", () => {
+    // The kept text "wait" ends in a letter, but the overlap ", really"
+    // starts with punctuation — that's still a real word boundary.
+    expect(trimRepeatedTail("wait, really", ", really")).toBe("wait");
   });
 });

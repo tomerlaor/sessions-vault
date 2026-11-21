@@ -34,7 +34,11 @@ import {
   requestPopupSuggestions,
   type RunSignature,
 } from "../src/lib/lyrics-ai-request";
-import { sanitizeLyricsOutput } from "../src/lib/lyrics-sanitize";
+import {
+  sanitizeLyricsOutput,
+  sanitizePartialLyricsOutput,
+  trimRepeatedTail,
+} from "../src/lib/lyrics-sanitize";
 import { smartJoinCompletion } from "../src/lib/lyrics-join";
 import type { AIConfig } from "../src/types";
 
@@ -519,24 +523,44 @@ describe("requestPopupSuggestions", () => {
 // ── Overlay invariant: ghost text === accepted text ─────────────────────────
 
 describe("completion ghost text equals the accepted text after sanitizing", () => {
-  // LyricsAiOverlay stores the model's sanitized reply once as
-  // `currentSuggestion`; both the displayed ghost text
-  // (`displayGhostText`) and `handleAccept`'s inserted text run
-  // `smartJoinCompletion(draft.slice(0, selectionStart), currentSuggestion)`
-  // against that same value — see the component's comment above
-  // `displayGhostText`. This exercises that pipeline end to end for raw
-  // model replies a prompt-format slip could produce, so the two call
-  // sites can never silently drift apart.
+  // LyricsAiOverlay runs two genuinely different pipelines on the same raw
+  // model reply (see onToken/onFinish in LyricsAiOverlay.tsx): while
+  // streaming, ghost text is `sanitizePartialLyricsOutput(accumulated)`
+  // (no trimRepeatedTail); once the reply finishes, the accepted text is
+  // `sanitizeLyricsOutput(full, "completion")` then (for completion)
+  // `trimRepeatedTail`. Both are joined with `smartJoinCompletion` before
+  // display/insertion. This exercises those two real pipelines end to
+  // end, rather than calling one function twice, so they can never
+  // silently drift apart.
   const prefix = "I walk";
 
-  function overlayOutcome(rawModelReply: string): {
+  function streamedGhostText(rawModelReply: string): string {
+    // By the time the last token has streamed in, onToken's `accumulated`
+    // is the full raw reply.
+    return sanitizePartialLyricsOutput(rawModelReply);
+  }
+
+  function acceptedSuggestion(
+    rawModelReply: string,
+    afterCursor: string,
+  ): string {
+    const sanitized = sanitizeLyricsOutput(rawModelReply, "completion");
+    return sanitized ? trimRepeatedTail(sanitized, afterCursor) : sanitized;
+  }
+
+  function overlayOutcome(
+    rawModelReply: string,
+    afterCursor = "",
+  ): {
     ghostText: string;
     accepted: string;
   } {
-    const suggestion = sanitizeLyricsOutput(rawModelReply, "completion");
     return {
-      ghostText: smartJoinCompletion(prefix, suggestion),
-      accepted: smartJoinCompletion(prefix, suggestion),
+      ghostText: smartJoinCompletion(prefix, streamedGhostText(rawModelReply)),
+      accepted: smartJoinCompletion(
+        prefix,
+        acceptedSuggestion(rawModelReply, afterCursor),
+      ),
     };
   }
 

@@ -393,6 +393,20 @@ export function buildMarkdownReport(run: EvalRunResult): string {
   );
   lines.push("");
 
+  const notedCases = run.cases.filter((c) => c.notes);
+  if (notedCases.length > 0) {
+    lines.push("## Fixture notes");
+    lines.push("");
+    lines.push(
+      "Pass-rate deltas on these cases against an older report aren't a like-for-like comparison — their fixture changed for reasons unrelated to the model under test.",
+    );
+    lines.push("");
+    for (const c of notedCases) {
+      lines.push(`- **${c.id}**: ${c.notes}`);
+    }
+    lines.push("");
+  }
+
   lines.push("## Pass rate per check");
   lines.push("");
   lines.push("| Check | Pass | Fail | Skip | Pass rate |");

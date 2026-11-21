@@ -27,6 +27,7 @@ const fixtureSchema = z.object({
   bpm: z.number().optional(),
   key: z.string().optional(),
   expect: expectSchema,
+  notes: z.string().optional(),
 });
 
 export function loadFixtures(dir: string = FIXTURES_DIR): EvalFixture[] {
