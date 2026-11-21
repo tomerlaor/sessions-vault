@@ -14,7 +14,7 @@ interface Call {
   params: unknown[];
 }
 
-function makeFakeDb(): {
+function makeFakeDb(selectResult: unknown[] = []): {
   db: TraceDb;
   calls: Call[];
   setShouldFail: (v: boolean) => void;
@@ -27,7 +27,8 @@ function makeFakeDb(): {
       if (shouldFail) throw new Error("boom");
     },
     async select() {
-      return [] as never;
+      if (shouldFail) throw new Error("boom");
+      return selectResult as never;
     },
   };
   return { db, calls, setShouldFail: (v) => (shouldFail = v) };
@@ -201,5 +202,27 @@ describe("SqliteTraceStore", () => {
     calls.length = 0;
     await store.flush();
     expect(calls).toHaveLength(0);
+  });
+
+  it("count() reports the ai_spans row count", async () => {
+    const { db } = makeFakeDb([{ c: 3 }]);
+    const store = makeStore(async () => db);
+    expect(await store.count()).toBe(3);
+  });
+
+  it("count() adds spans still sitting in the write buffer", async () => {
+    const { db } = makeFakeDb([{ c: 3 }]);
+    const store = makeStore(async () => db);
+    store.write(makeSpan("not-flushed-yet"));
+    expect(await store.count()).toBe(4);
+  });
+
+  it("count() falls back to the buffered count on a query failure", async () => {
+    const { db, setShouldFail } = makeFakeDb();
+    const store = makeStore(async () => db);
+    store.write(makeSpan("buffered"));
+    setShouldFail(true);
+    expect(await store.count()).toBe(1);
+    expect(store.droppedRecordCount).toBeGreaterThan(0);
   });
 });

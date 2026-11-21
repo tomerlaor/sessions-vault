@@ -23,11 +23,12 @@ vi.mock("../src/db/trace-client", () => ({
 import {
   getActiveTraceStore,
   clearAiActivityLog,
+  getAiActivityLogCount,
   setKeepAiActivityLog,
   resetTraceRuntimeForTests,
 } from "../src/lib/ai-trace/runtime";
 
-function makeFakeDb() {
+function makeFakeDb(selectResult: unknown[] = []) {
   const calls: { sql: string; params: unknown[] }[] = [];
   return {
     calls,
@@ -36,7 +37,7 @@ function makeFakeDb() {
         calls.push({ sql, params });
       },
       async select() {
-        return [] as never;
+        return selectResult as never;
       },
     },
   };
@@ -120,5 +121,24 @@ describe("clearAiActivityLog", () => {
     await clearAiActivityLog();
 
     expect(calls.some((c) => c.sql === "DELETE FROM ai_spans")).toBe(true);
+  });
+});
+
+describe("getAiActivityLogCount", () => {
+  it("returns 0 without touching the trace DB while the setting is off", async () => {
+    getAiActivityConfigMock.mockResolvedValue({ keepAiActivityLog: false });
+
+    const count = await getAiActivityLogCount();
+
+    expect(count).toBe(0);
+    expect(getTraceDbMock).not.toHaveBeenCalled();
+  });
+
+  it("returns the ai_spans row count once the setting is on", async () => {
+    getAiActivityConfigMock.mockResolvedValue({ keepAiActivityLog: true });
+    const { db } = makeFakeDb([{ c: 7 }]);
+    getTraceDbMock.mockResolvedValue(db);
+
+    expect(await getAiActivityLogCount()).toBe(7);
   });
 });

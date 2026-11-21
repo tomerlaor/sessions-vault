@@ -45,6 +45,7 @@ import {
   requestNextWordOptions,
   requestPopupSuggestions,
   withTimeoutSignal,
+  timeoutMessage,
   type RunSignature,
   type NextWordOptionsResult,
   type PopupSuggestionsResult,
@@ -413,7 +414,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               return;
             }
             if (result.status === "timeout") {
-              setErrorMsg("AI took too long");
+              setErrorMsg(timeoutMessage(aiConfig.provider));
               setStatus("error");
               setTimeout(() => {
                 setStatus("idle");
@@ -490,7 +491,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               return;
             }
             if (result.status === "timeout") {
-              setErrorMsg("AI took too long");
+              setErrorMsg(timeoutMessage(aiConfig.provider));
               setStatus("error");
               setTimeout(() => {
                 setStatus("idle");
@@ -571,7 +572,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
             }
             if (result.status === "timeout") {
               setGhostText("");
-              setErrorMsg("AI took too long");
+              setErrorMsg(timeoutMessage(aiConfig.provider));
               setStatus("error");
               setTimeout(() => {
                 setStatus("idle");

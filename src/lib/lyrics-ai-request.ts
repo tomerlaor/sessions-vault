@@ -2,7 +2,7 @@
 // timeout handling, a small result cache, and the skip-decision logic that
 // keeps a keystroke from firing a wasted or duplicate AI call. Kept free of
 // React and DB imports so it can be unit tested in plain Node.
-import type { AIConfig, LyricSuggestionMode } from "../types";
+import type { AIConfig, AIProvider, LyricSuggestionMode } from "../types";
 import {
   streamLyricsSuggestion,
   generateNextWordOptions,
@@ -69,6 +69,20 @@ export function withTimeoutSignal(
   };
 
   return { signal: controller.signal, clearTimeout: clearTimeoutFn, dispose };
+}
+
+// Timeout copy for the lyrics overlay: a generic retry prompt for cloud
+// providers, with a provider-specific nudge for local ones, where "the
+// server isn't running" is the most likely cause.
+export function timeoutMessage(provider: AIProvider): string {
+  switch (provider) {
+    case "ollama":
+      return "AI took too long. Try again, or check that Ollama is running.";
+    case "lmstudio":
+      return "AI took too long. Try again, or check that LM Studio is running.";
+    default:
+      return "AI took too long. Try again.";
+  }
 }
 
 // ── LRU cache ────────────────────────────────────────────────────────────────

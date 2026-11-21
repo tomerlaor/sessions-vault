@@ -208,6 +208,25 @@ export class SqliteTraceStore implements TraceStore {
     }
   }
 
+  // Settings' "Keep AI activity log" row needs this to decide whether
+  // unchecking the box should ask for confirmation, and what count to show.
+  // Includes spans still sitting in the write buffer (not yet flushed) so
+  // the number matches what "Clear log" is about to delete.
+  async count(): Promise<number> {
+    try {
+      const db = await this.getDb();
+      const rows = await db.select<{ c: number }[]>(
+        `SELECT COUNT(*) as c FROM ai_spans`,
+        [],
+      );
+      return Number(rows[0]?.c ?? 0) + this.spanBuffer.length;
+    } catch (err) {
+      this.errorCount += 1;
+      devWarn("[ai-trace] count failed", err);
+      return this.spanBuffer.length;
+    }
+  }
+
   dispose(): void {
     if (this.flushTimer) {
       clearInterval(this.flushTimer);

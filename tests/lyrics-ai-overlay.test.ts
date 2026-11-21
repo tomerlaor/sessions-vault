@@ -32,6 +32,7 @@ import {
   requestStreamSuggestion,
   requestNextWordOptions,
   requestPopupSuggestions,
+  timeoutMessage,
   TimeoutError,
   type RunSignature,
 } from "../src/lib/lyrics-ai-request";
@@ -233,6 +234,28 @@ describe("withTimeoutSignal", () => {
     const { signal } = withTimeoutSignal(parent.signal, 5000);
     parent.abort("superseded");
     expect(signal.reason).toBe("superseded");
+  });
+});
+
+// ── timeoutMessage ───────────────────────────────────────────────────────────
+
+describe("timeoutMessage", () => {
+  it("gives a generic retry prompt for cloud providers", () => {
+    expect(timeoutMessage("openai")).toBe("AI took too long. Try again.");
+    expect(timeoutMessage("anthropic")).toBe("AI took too long. Try again.");
+    expect(timeoutMessage("openrouter")).toBe("AI took too long. Try again.");
+  });
+
+  it("nudges toward checking Ollama when that's the active provider", () => {
+    expect(timeoutMessage("ollama")).toBe(
+      "AI took too long. Try again, or check that Ollama is running.",
+    );
+  });
+
+  it("nudges toward checking LM Studio when that's the active provider", () => {
+    expect(timeoutMessage("lmstudio")).toBe(
+      "AI took too long. Try again, or check that LM Studio is running.",
+    );
   });
 });
 

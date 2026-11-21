@@ -40,6 +40,16 @@ export async function clearAiActivityLog(): Promise<void> {
   await getStoreSingleton().clearAll();
 }
 
+// Number of logged spans, for the "Keep AI activity log" row (confirm-on-
+// disable copy) and the "Clear log" button's disabled state. Short-circuits
+// to 0 while the setting is off, since that path keeps the log empty
+// without ever opening the trace DB.
+export async function getAiActivityLogCount(): Promise<number> {
+  const { keepAiActivityLog } = await getAiActivityConfig();
+  if (!keepAiActivityLog) return 0;
+  return getStoreSingleton().count();
+}
+
 // Settings' single entry point for the "Keep AI activity log" checkbox.
 // Turning it off must stop writes immediately (handled by every call site
 // re-reading the setting via getActiveTraceStore) and delete what's already

@@ -34,8 +34,13 @@ import { traced } from "../../lib/ai-trace";
 import {
   clearAiActivityLog,
   getActiveTraceStore,
+  getAiActivityLogCount,
   setKeepAiActivityLog,
 } from "../../lib/ai-trace/runtime";
+import {
+  decideDisableToggle,
+  formatEntryCount,
+} from "../../lib/ai-trace/settings-log-ui";
 import {
   resolveIsDecisionsModel,
   fetchOpenRouterDecisionsModels,
@@ -162,7 +167,11 @@ export default function SettingsModal({ onClose }: Props) {
   const [aiActivityCfg, setAiActivityCfgState] = useState<AiActivityConfig>({
     keepAiActivityLog: false,
   });
+  const [aiActivityCount, setAiActivityCount] = useState(0);
+  const [confirmDisableLog, setConfirmDisableLog] = useState(false);
+  const [logDeletedFeedback, setLogDeletedFeedback] = useState(false);
   const [clearingLog, setClearingLog] = useState(false);
+  const [clearedFeedback, setClearedFeedback] = useState(false);
   const [aiTesting, setAiTesting] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<"ok" | "error" | null>(null);
@@ -193,7 +202,8 @@ export default function SettingsModal({ onClose }: Props) {
       getAIConfigWithoutKey(),
       getLyricsAIConfig(),
       getAiActivityConfig(),
-    ]).then(([lc, gf, gc, paths, ai, lyricsAI, aiActivity]) => {
+      getAiActivityLogCount(),
+    ]).then(([lc, gf, gc, paths, ai, lyricsAI, aiActivity, logCount]) => {
       setLocalCfg(lc);
       setGDriveFolderCfg(gf);
       setGdriveConnected(gc);
@@ -201,6 +211,7 @@ export default function SettingsModal({ onClose }: Props) {
       if (ai) setAiCfg(ai);
       setLyricsAICfgState(lyricsAI);
       setAiActivityCfgState(aiActivity);
+      setAiActivityCount(logCount);
     });
   }, []);
 
@@ -344,17 +355,41 @@ export default function SettingsModal({ onClose }: Props) {
   }, [aiCfg]);
 
   const handleToggleKeepAiActivityLog = useCallback(
-    async (enabled: boolean) => {
+    async (nextChecked: boolean) => {
+      const decision = decideDisableToggle(nextChecked, aiActivityCount);
+      if (decision.action === "confirm_disable") {
+        setConfirmDisableLog(true);
+        return;
+      }
+      setConfirmDisableLog(false);
+      const enabled = decision.action === "enable";
       setAiActivityCfgState({ keepAiActivityLog: enabled });
       await setKeepAiActivityLog(enabled);
+      if (!enabled) setAiActivityCount(0);
     },
-    [],
+    [aiActivityCount],
   );
+
+  const handleCancelDisableLog = useCallback(() => {
+    setConfirmDisableLog(false);
+  }, []);
+
+  const handleConfirmDisableLog = useCallback(async () => {
+    setConfirmDisableLog(false);
+    setAiActivityCfgState({ keepAiActivityLog: false });
+    await setKeepAiActivityLog(false);
+    setAiActivityCount(0);
+    setLogDeletedFeedback(true);
+    setTimeout(() => setLogDeletedFeedback(false), 2000);
+  }, []);
 
   const handleClearAiActivityLog = useCallback(async () => {
     setClearingLog(true);
     try {
       await clearAiActivityLog();
+      setAiActivityCount(0);
+      setClearedFeedback(true);
+      setTimeout(() => setClearedFeedback(false), 2000);
     } finally {
       setClearingLog(false);
     }
@@ -1132,22 +1167,63 @@ export default function SettingsModal({ onClose }: Props) {
                 Keep AI activity log
               </span>
             </label>
+            {confirmDisableLog && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: 11,
+                  marginTop: 6,
+                }}
+              >
+                <span style={{ color: "var(--text-2)" }}>
+                  Turn off and delete {formatEntryCount(aiActivityCount)}?
+                </span>
+                <button
+                  className="tb-btn"
+                  style={{ fontSize: 10, padding: "2px 8px" }}
+                  onClick={handleConfirmDisableLog}
+                >
+                  Delete
+                </button>
+                <button
+                  className="tb-btn"
+                  style={{ fontSize: 10, padding: "2px 8px" }}
+                  onClick={handleCancelDisableLog}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            {logDeletedFeedback && (
+              <div
+                style={{ fontSize: 11, color: "var(--green)", marginTop: 6 }}
+              >
+                Log deleted
+              </div>
+            )}
             <Hint>
-              Saves a local record of each AI request: when it ran, which
-              feature, provider and model, and whether it succeeded. It never
-              stores your lyrics, tabs, chats or prompts. Stays on this Mac, in
-              the app&apos;s data folder (ai-traces.db), and is never included
-              in backups. Turning this off deletes the existing log. Off by
-              default.
+              Saves a local record of each AI request: when it ran and how long
+              it took, which feature, song, provider and model, token counts and
+              estimated cost, and whether it succeeded (with a short error note
+              if not). It never stores the text of your lyrics, tabs, chats or
+              prompts. Stays on this Mac, in the app&apos;s data folder
+              (ai-traces.db), and is never included in backups. Turning this off
+              deletes the existing log. Off by default.
             </Hint>
             {aiActivityCfg.keepAiActivityLog && (
               <button
                 className="tb-btn"
                 style={{ fontSize: 11, padding: "4px 12px" }}
-                disabled={clearingLog}
+                disabled={clearingLog || aiActivityCount === 0}
                 onClick={handleClearAiActivityLog}
               >
-                {clearingLog ? "Clearing…" : "Clear log"}
+                {clearingLog
+                  ? "Clearing…"
+                  : clearedFeedback
+                    ? "Cleared"
+                    : "Clear log"}
               </button>
             )}
           </section>
