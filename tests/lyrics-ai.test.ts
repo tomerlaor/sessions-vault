@@ -982,6 +982,56 @@ describe("fix: impliedRhymeTarget respects the AABB/ABAB/free-verse scheme (R6 �
     expect(prompt).not.toContain("rhyme with:");
   });
 
+  it("monorhyme (AAA run): three lines that all actually rhyme still target the last line", () => {
+    // "dark"/"spark"/"mark" all rhyme with each other, not just the last
+    // two — a monorhyme run, not a closed AABB couplet. The naive "last two
+    // lines rhyme -> couplet closed -> no target" rule would wrongly drop
+    // the rhyme instruction here (en-completion-chorus-rhyme eval fixture).
+    const lyrics =
+      "[Chorus]\nYou were the only light in a town gone dark\nAnd I was just a boy chasing a spark\nNow the streets are quiet, and I carry the mark\nOf every";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "Of every",
+      textBeforeCursor: "Of every",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain('must rhyme with: "mark"');
+  });
+
+  it("Hebrew monorhyme (AAA run): three lines that all actually rhyme still target the last line", () => {
+    // Mirrors the English monorhyme case above, and the
+    // he-completion-chorus-rhyme eval fixture: הזמן/ישן/הסימן all rhyme
+    // with each other (shared -ן ending), so the run continues instead of
+    // closing a couplet.
+    const lyrics =
+      "[פזמון]\nהיית האור היחיד בעיר שאיבדה את הזמן\nואני הייתי רק ילד שרדף אחרי חלום ישן\nעכשיו הרחובות שקטים ואני נושא את הסימן\nשל כל";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "של כל",
+      textBeforeCursor: "של כל",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain('חייבת להתחרז עם: "הסימן"');
+  });
+
   it("AABB with an unpaired intro line: a closed couplet gets NO target (parity would misfire here)", () => {
     // "sky" is an unpaired intro line; "door"/"floor" actually rhyme and
     // close the couplet. 3 finished lines is an odd count, so the old
@@ -1013,8 +1063,7 @@ describe("fix: impliedRhymeTarget respects the AABB/ABAB/free-verse scheme (R6 �
     // doesn't rhyme with "floor" and so opens a fresh, still-unpaired
     // couplet. 4 finished lines is an even count, so the old parity rule
     // would have wrongly reported no target; the real rhyme check
-    // correctly targets "holds" for the line being completed, same as the
-    // he-completion-chorus-rhyme eval fixture.
+    // correctly targets "holds" for the line being completed.
     const lyrics =
       "Alone beneath a quiet sky\nI found an old coat by the door\nEvery lonely step led to the floor\nNow I wonder what tomorrow holds\nOf every";
     const { prompt } = buildLyricsSuggestionPrompt({

@@ -9,6 +9,7 @@
 * fix the AABB rhyme target's last-line bias (it now respects couplet parity instead of always targeting the previous line, in both the implied-target fallback and `nextLineTargets`), replace the no-scheme-yet fallback with a position-based soft target that hedges between two candidate lines for next_word when genuinely ambiguous, and add a non-failing `formatRaw` diagnostic plus a prompt-version bump (R6, #79 review follow-up).
 * smooth the inline ghost text while it's streaming — a light live sanitize now strips a leading label/numbering/quote/fence/header from the partial reply so it no longer flashes raw formatting and then jumps once the full reply lands.
 * finish more of #79: the completion prompt is now punctuation-aware (continues mid-clause after a comma, starts fresh after `. ! ?`), a prompt rule plus a post-filter stop completions from repeating text already after the cursor, and a headerless draft now infers its line position from blank-line-separated stanzas instead of saying nothing.
+* fix a monorhyme (AAA) regression from the AABB couplet-parity fix: a run of 3+ lines that all actually rhyme no longer gets mistaken for a closed 2-line couplet and silently loses its rhyme target.
 
 ## [0.2.0](https://github.com/tomerlaor/sessions-vault/compare/v0.1.0...v0.2.0) (2026-05-30)
 

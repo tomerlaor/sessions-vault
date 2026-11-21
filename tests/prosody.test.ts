@@ -257,6 +257,18 @@ describe("nextLineTargets", () => {
     expect(targets.rhymeWith).toBeUndefined();
   });
 
+  it("AABB: a monorhyme run (3+ lines all rhyming) keeps targeting the last line", () => {
+    // "dark"/"spark"/"mark" all actually rhyme with each other -- an AAA
+    // run, not a closed 2-line couplet -- so the line that follows should
+    // still target "mark", not fall silent (en-completion-chorus-rhyme eval
+    // fixture).
+    const lyrics =
+      "You were the only light in a town gone dark\nAnd I was just a boy chasing a spark\nNow the streets are quiet, and I carry the mark";
+    const targets = nextLineTargets(lyrics, lyrics.length);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBe("mark");
+  });
+
   it("AABB: an unpaired intro line ahead of a closed couplet still gets no target (parity would misfire here)", () => {
     // "sky" is an unpaired intro line that doesn't rhyme with anything; the
     // couplet is "door"/"floor", which actually rhyme and close the pair.
@@ -297,6 +309,17 @@ describe("nextLineTargets", () => {
     const targets = nextLineTargets(f.lyrics, f.cursor);
     expect(targets.scheme).toBe("ABAB");
     expect(targets.rhymeWith).toBe("זוכרים");
+  });
+
+  it("AABB: a monorhyme run (3+ lines all rhyming) keeps targeting the last line (he)", () => {
+    // הזמן/ישן/הסימן all share the -ן ending and actually rhyme with each
+    // other (he-completion-chorus-rhyme eval fixture) -- an AAA run, not a
+    // closed 2-line couplet.
+    const lyrics =
+      "היית האור היחיד בעיר שאיבדה את הזמן\nואני הייתי רק ילד שרדף אחרי חלום ישן\nעכשיו הרחובות שקטים ואני נושא את הסימן";
+    const targets = nextLineTargets(lyrics, lyrics.length);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBe("הסימן");
   });
 
   it("finds the genuine ABAB slant (return/burns share the stressed vowel)", () => {

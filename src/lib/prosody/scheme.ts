@@ -202,13 +202,22 @@ export function nextLineTargets(
     // parity -- a section with an unpaired line (e.g. a 1-line intro ahead
     // of couplets) desyncs parity from the real pairing. If the couplet is
     // already closed (last two lines rhyme), the next line starts a fresh
-    // pair and gets no target (else we'd force an unintended AAA run). If
-    // it's open -- including when there's only one line so far -- target
-    // the last finished line.
+    // pair and gets no target. The one exception is a monorhyme run: if the
+    // line before THAT also rhymes with the closed pair (three or more
+    // lines all rhyming -- AAA, not AABB), it's not a fresh couplet
+    // boundary at all, so the run continues and the last line stays the
+    // target. Genuine two-line couplets (A A B B, where the third-from-last
+    // line breaks the rhyme) still get no target. If the couplet is open --
+    // including when there's only one line so far -- target the last
+    // finished line.
     const rhymeFn = rhymesFor(lang);
     const last = lastWordOf(lines[lines.length - 1]);
     const prev = lines.length >= 2 ? lastWordOf(lines[lines.length - 2]) : "";
-    const closed = lines.length >= 2 && doRhyme(rhymeFn, prev, last);
+    const prev2 = lines.length >= 3 ? lastWordOf(lines[lines.length - 3]) : "";
+    const lastPairRhymes = lines.length >= 2 && doRhyme(rhymeFn, prev, last);
+    const monorhymeRun =
+      lastPairRhymes && lines.length >= 3 && doRhyme(rhymeFn, prev2, prev);
+    const closed = lastPairRhymes && !monorhymeRun;
     rhymeWith = closed ? undefined : last || undefined;
   } else if (scheme === "ABAB" && lines.length >= 2) {
     rhymeWith = lastWordOf(lines[lines.length - 2]) || undefined;
