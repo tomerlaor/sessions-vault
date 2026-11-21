@@ -80,6 +80,15 @@ export interface EvalStats {
   // Present when at least one trial stored pre-ranking candidates (the
   // decisions "generate, then decide" path). Null rates mean no such trial.
   pickerAccuracy: PickerAccuracy;
+  // #102 diagnostic (see checkOmittedLeadingSpace in ./checks) — never
+  // affects overallTrialPassRate. eligibleTrials is completion-mode trials
+  // that didn't error (the only ones the check can flag); rate is null when
+  // there are none.
+  omittedLeadingSpace: {
+    count: number;
+    eligibleTrials: number;
+    rate: number | null;
+  };
 }
 
 export interface PickerAccuracy {
@@ -221,6 +230,8 @@ export function computeStats(run: EvalRunResult): EvalStats {
   let errorCount = 0;
   let lengthOrReasoningErrorCount = 0;
   let passedTrials = 0;
+  let omittedLeadingSpaceCount = 0;
+  let omittedLeadingSpaceEligible = 0;
 
   for (const c of run.cases) {
     byMode[c.mode] ??= emptyPFS();
@@ -234,6 +245,10 @@ export function computeStats(run: EvalRunResult): EvalStats {
       }
       if (typeof trial.reasoningTokens === "number") {
         reasoningTokenValues.push(trial.reasoningTokens);
+      }
+      if (c.mode === "completion" && !trial.error) {
+        omittedLeadingSpaceEligible++;
+        if (trial.omittedLeadingSpace) omittedLeadingSpaceCount++;
       }
 
       const passed = trialPassed(trial);
@@ -315,6 +330,14 @@ export function computeStats(run: EvalRunResult): EvalStats {
     },
     failingCases,
     pickerAccuracy: computePickerAccuracy(run),
+    omittedLeadingSpace: {
+      count: omittedLeadingSpaceCount,
+      eligibleTrials: omittedLeadingSpaceEligible,
+      rate:
+        omittedLeadingSpaceEligible > 0
+          ? omittedLeadingSpaceCount / omittedLeadingSpaceEligible
+          : null,
+    },
   };
 }
 
@@ -349,6 +372,10 @@ export function buildMarkdownReport(run: EvalRunResult): string {
     `- Total trials: ${stats.totalTrials} (errors: ${stats.errorCount} (length/reasoning: ${stats.errorKinds.lengthOrReasoning}, other: ${stats.errorKinds.other}))`,
   );
   lines.push(`- **Overall pass rate: ${pct(stats.overallTrialPassRate)}**`);
+  lines.push(
+    `- Model omitted leading space (diagnostic, does not affect pass rate): ` +
+      `${stats.omittedLeadingSpace.count}/${stats.omittedLeadingSpace.eligibleTrials} completion trials (${pct(stats.omittedLeadingSpace.rate)})`,
+  );
   lines.push("");
 
   lines.push("## Pass rate per check");

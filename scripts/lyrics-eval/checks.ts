@@ -195,6 +195,9 @@ export function checkFormat(
   // raw adjacency alone. A genuinely glued-wrong reply like "I walk" +
   // "away" is simply repaired to "I walk away" by joinCompletion, so it no
   // longer fails this check; it's not a new acceptance of garbled output.
+  // The raw-adjacency signal itself isn't thrown away though — see
+  // checkOmittedLeadingSpace() below, which reports it as a non-failing
+  // diagnostic instead.
 
   if (ctx.mode === "next_word") {
     const words = trimmed.split(/\s+/).filter(Boolean);
@@ -220,6 +223,31 @@ export function checkFormat(
   }
 
   return { status: "pass" };
+}
+
+// Diagnostic only — returns a plain boolean, never a CheckResult, so it can
+// never fail a trial or move the pass rate. This is the #102 root-cause
+// signal checkFormat used to fail on directly (see the comment above): a
+// completion-mode trial where the typed prefix ends with no whitespace and
+// the model's raw output starts with no whitespace either, i.e. the model
+// omitted the leading space a human would have typed. #102 established that
+// raw adjacency alone isn't a defect in the *inserted* text — joinCompletion
+// repairs it correctly before insertion in the common case — but it's still
+// useful to know how often the model is relying on that repair rather than
+// producing a naturally-joinable reply. Reported as "model omitted leading
+// space" in the eval summary/report, as a rate alongside (not inside) the
+// pass/fail checks.
+export function checkOmittedLeadingSpace(
+  output: string,
+  ctx: CheckContext,
+): boolean {
+  return (
+    ctx.mode === "completion" &&
+    ctx.linePrefix.length > 0 &&
+    output.length > 0 &&
+    !/\s$/.test(ctx.linePrefix) &&
+    !/^\s/.test(output)
+  );
 }
 
 export function checkSyllables(

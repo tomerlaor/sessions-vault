@@ -26,11 +26,25 @@ describe("smartJoinCompletion", () => {
     expect(join("could not", " say")).toBe("could not say");
   });
 
-  it("never strips whitespace that's already there on both sides", () => {
-    // Rule 3 only avoids ADDING a space — it doesn't collapse one that's
-    // already doubled up between the prefix and the suggestion.
-    expect(smartJoinCompletion("I ", " walk")).toBe(" walk");
-    expect(join("I ", " walk")).toBe("I  walk");
+  describe("prefix ends in whitespace: strip the suggestion's leading spaces/tabs", () => {
+    it('"not " + " say" -> "not say" (no double space)', () => {
+      expect(smartJoinCompletion("not ", " say")).toBe("say");
+      expect(join("not ", " say")).toBe("not say");
+    });
+
+    it("collapses a doubled-up space between prefix and suggestion", () => {
+      expect(smartJoinCompletion("I ", " walk")).toBe("walk");
+      expect(join("I ", " walk")).toBe("I walk");
+    });
+
+    it("strips leading tabs too", () => {
+      expect(smartJoinCompletion("not ", "\tsay")).toBe("say");
+    });
+
+    it("never strips a leading newline (a line break is meaningful)", () => {
+      expect(smartJoinCompletion("not ", "\nsay")).toBe("\nsay");
+      expect(join("not ", "\nsay")).toBe("not \nsay");
+    });
   });
 
   describe("Latin mid-word completions stay glued (fragment is not itself a word)", () => {
@@ -66,16 +80,24 @@ describe("smartJoinCompletion", () => {
       expect(join("so", "me")).toBe("so me");
     });
 
-    it('"in" + "to" -> adds a space ("in" is already a word)', () => {
-      expect(join("in", "to")).toBe("in to");
+    it('"in" + "to the night" -> adds a space ("in" is already a word)', () => {
+      expect(join("in", "to the night")).toBe("in to the night");
     });
 
     it('"for" + "ever" -> adds a space ("for" is already a word)', () => {
       expect(join("for", "ever")).toBe("for ever");
     });
 
+    it('"be" + "cause" -> adds a space ("be" is already a word)', () => {
+      expect(join("be", "cause")).toBe("be cause");
+    });
+
     it('"no" + "thing" -> adds a space ("no" is already a word)', () => {
       expect(join("no", "thing")).toBe("no thing");
+    });
+
+    it('"a" + "live" -> adds a space ("a" is already a word)', () => {
+      expect(join("a", "live")).toBe("a live");
     });
 
     it('"to" + "gether" -> adds a space ("to" is already a word)', () => {
@@ -93,6 +115,30 @@ describe("smartJoinCompletion", () => {
     });
   });
 
+  describe("non-ASCII letters count as letters (Unicode \\p{L}/\\p{M}, not just [A-Za-z])", () => {
+    it("a prefix ending in an accented letter is still recognized as a word boundary and can glue", () => {
+      // With the old [A-Za-z]-only regexes, a prefix ending in "é" would
+      // never even enter this branch (it would fall straight through to
+      // the space default). "understané" is constructed so the "é" is a
+      // decorative extra letter, not one the real spelling needs:
+      // isKnownEnglishWord() strips non-ASCII letters before looking a
+      // word up, so the fragment normalizes to "understan" (not a word,
+      // so it doesn't take the early "fragment is already a word" exit),
+      // and the combined "understané" + "ding" normalizes to
+      // "understanding" — a real word — so it glues.
+      expect(join("understané", "ding")).toBe("understanéding");
+    });
+
+    it('documented limit: "café" + "s" gets a space, not "cafés"', () => {
+      // Here the accent isn't decorative — "café" without it normalizes to
+      // "caf" (not a word), and "cafés" normalizes to "cafs" (also not a
+      // word, since stripping the accent deletes the letter rather than
+      // replacing it with a plain "e"). Neither check matches, so this
+      // falls through to the space default rather than gluing.
+      expect(join("café", "s")).toBe("café s");
+    });
+  });
+
   describe("punctuation", () => {
     it("a suggestion starting with closing punctuation stays glued", () => {
       expect(join("love", ", baby")).toBe("love, baby");
@@ -102,12 +148,68 @@ describe("smartJoinCompletion", () => {
       expect(join("He said (", "quietly")).toBe("He said (quietly");
     });
 
+    it("a prefix ending in sentence punctuation gets a space", () => {
+      expect(join("Hello.", "World")).toBe("Hello. World");
+    });
+  });
+
+  describe("quotes and apostrophes", () => {
+    it("an opening single quote preceded by whitespace stays glued", () => {
+      expect(join("said '", "hello'")).toBe("said 'hello'");
+    });
+
+    it("an opening double quote preceded by whitespace stays glued", () => {
+      expect(join('say "', 'hi"')).toBe('say "hi"');
+    });
+
+    it("an opening quote at the very start of the text stays glued", () => {
+      expect(join("'", "hello")).toBe("'hello");
+    });
+
+    it("a possessive apostrophe after a letter gets a space, not glued", () => {
+      expect(join("boys'", "toys")).toBe("boys' toys");
+    });
+
+    it("a contraction apostrophe followed by a suffix glues", () => {
+      expect(join("don'", "t")).toBe("don't");
+      expect(join("I'", "ll see you")).toBe("I'll see you");
+      expect(join("we'", "re here")).toBe("we're here");
+      expect(join("they'", "ve gone")).toBe("they've gone");
+    });
+
+    it("a closing double quote after a letter gets a space", () => {
+      expect(join('he said "hi"', "Then")).toBe('he said "hi" Then');
+    });
+
+    it("curly quotes are handled the same as straight ones", () => {
+      expect(join("said ‘", "hello’")).toBe("said ‘hello’");
+      expect(join("boys’", "toys")).toBe("boys’ toys");
+    });
+  });
+
+  describe("dashes", () => {
+    it("a hyphen directly after a letter is a compound and stays glued", () => {
+      expect(join("love-", "forever")).toBe("love-forever");
+    });
+
+    it("an em dash directly after a letter is a compound and stays glued", () => {
+      expect(join("love—", "forever")).toBe("love—forever");
+    });
+
+    it("a spaced em dash is a separator and gets a space after", () => {
+      expect(join("love —", "forever")).toBe("love — forever");
+    });
+
     it("a prefix ending in a hyphen stays glued (compound word)", () => {
       expect(join("co-", "writer")).toBe("co-writer");
     });
 
-    it("a prefix ending in sentence punctuation gets a space", () => {
-      expect(join("Hello.", "World")).toBe("Hello. World");
+    it("a suggestion starting with an em dash stays glued (no space added)", () => {
+      expect(join("love", "—forever")).toBe("love—forever");
+    });
+
+    it("a suggestion starting with a space then a dash is left untouched", () => {
+      expect(join("love", " — forever")).toBe("love — forever");
     });
   });
 
@@ -134,6 +236,32 @@ describe("smartJoinCompletion", () => {
 
     it("a prefix ending in a maqaf (hyphen) stays glued", () => {
       expect(join("תל־", "אביב")).toBe("תל־אביב");
+    });
+
+    describe("single-letter prefixes/conjunctions glue onto the next word", () => {
+      it('"ו" (and) + "אהבה" -> "ואהבה"', () => {
+        expect(join("ו", "אהבה")).toBe("ואהבה");
+      });
+
+      it('"ב" (in) + "לב" -> "בלב"', () => {
+        expect(join("ב", "לב")).toBe("בלב");
+      });
+
+      it('mid-sentence: "אני ו" (I and) + "את" -> "אני ואת"', () => {
+        expect(join("אני ו", "את")).toBe("אני ואת");
+      });
+    });
+
+    describe("mid-word heuristics", () => {
+      it('suggestion starting with a final-form letter continues the word: "שָׁלוֹ" + "ם" -> "שלום"', () => {
+        expect(join("שָׁלוֹ", "ם")).toBe("שָׁלוֹם");
+      });
+
+      it("prefix ending in a non-final form (of a letter with a final form), run length >= 2, is unfinished", () => {
+        // "מכ" ends in כ (non-final kaf) with a 2-letter run, so the word
+        // can't be finished yet (Hebrew never ends a word on that form).
+        expect(join("מכ", "תב")).toBe("מכתב");
+      });
     });
   });
 

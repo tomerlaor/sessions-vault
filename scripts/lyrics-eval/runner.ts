@@ -27,6 +27,7 @@ import {
   checkFormat,
   checkLanguage,
   checkNoCopy,
+  checkOmittedLeadingSpace,
   checkRhyme,
   checkSyllables,
   type CheckContext,
@@ -64,6 +65,10 @@ export interface TrialOutcome {
   reasoningTokens?: number;
   error?: string;
   checks: Record<CheckName, CheckResult>;
+  // Diagnostic only (see checkOmittedLeadingSpace in ./checks) — never
+  // affects `checks` or the pass rate. Undefined for non-completion modes
+  // and error trials, where the raw-adjacency signal doesn't apply.
+  omittedLeadingSpace?: boolean;
   // Present only when `model` is an OpenRouter decisions model — see
   // src/lib/ai.ts's "generate, then decide" pipeline.
   generator?: LyricsGeneratorStageMetrics;
@@ -416,6 +421,7 @@ export async function runTrial(
       ranker: metrics?.ranker,
       candidates: scored?.candidates,
       pickedIndex: scored?.pickedIndex,
+      omittedLeadingSpace: checkOmittedLeadingSpace(output, ctx),
       checks: {
         format: checkFormat(output, ctx, fixture.expect),
         syllables: checkSyllables(output, fixture.expect, ctx),

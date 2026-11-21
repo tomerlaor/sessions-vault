@@ -4,6 +4,7 @@ import {
   checkFormat,
   checkLanguage,
   checkNoCopy,
+  checkOmittedLeadingSpace,
   checkRhyme,
   checkSyllables,
   countSyllables,
@@ -201,6 +202,74 @@ describe("checkFormat", () => {
       ctx({ mode: "completion", linePrefix: "tomor" }),
     );
     expect(result.status).toBe("pass");
+  });
+});
+
+describe("checkOmittedLeadingSpace (#102 diagnostic, never fails)", () => {
+  it("flags a completion glued to the prefix with no whitespace on either side", () => {
+    expect(
+      checkOmittedLeadingSpace(
+        "away",
+        ctx({ mode: "completion", linePrefix: "I walk" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not flag when the prefix already ends in whitespace", () => {
+    expect(
+      checkOmittedLeadingSpace(
+        "away",
+        ctx({ mode: "completion", linePrefix: "I walk " }),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not flag when the output already starts with whitespace", () => {
+    expect(
+      checkOmittedLeadingSpace(
+        " away",
+        ctx({ mode: "completion", linePrefix: "I walk" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not flag a valid glued mid-word completion either — it's still just the raw signal", () => {
+    expect(
+      checkOmittedLeadingSpace(
+        "row",
+        ctx({ mode: "completion", linePrefix: "tomor" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not flag non-completion modes", () => {
+    expect(
+      checkOmittedLeadingSpace(
+        "away",
+        ctx({ mode: "next_line", linePrefix: "I walk" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not flag an empty prefix or empty output", () => {
+    expect(
+      checkOmittedLeadingSpace(
+        "away",
+        ctx({ mode: "completion", linePrefix: "" }),
+      ),
+    ).toBe(false);
+    expect(
+      checkOmittedLeadingSpace(
+        "",
+        ctx({ mode: "completion", linePrefix: "I walk" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("never fails checkFormat for the same case it flags", () => {
+    const c = ctx({ mode: "completion", linePrefix: "I walk" });
+    expect(checkOmittedLeadingSpace("away", c)).toBe(true);
+    expect(checkFormat("away", c).status).toBe("pass");
   });
 });
 
