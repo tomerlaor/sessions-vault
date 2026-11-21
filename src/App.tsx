@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { checkpointDb } from "./db/client";
+import { pruneAiActivityLogIfEnabled } from "./lib/ai-trace/runtime";
 import { AboutWindow } from "./components/AboutWindow";
 import Sidebar from "./components/layout/Sidebar";
 import ProjectList from "./components/library/ProjectList";
@@ -105,6 +106,13 @@ export default function App() {
   useEffect(() => {
     reloadTags();
   }, [reloadTags]);
+
+  // Enforces the AI activity log's retention window promptly at launch
+  // rather than waiting on the 500th insert of a session that might make
+  // very few AI calls. No-op while the setting is off; never throws.
+  useEffect(() => {
+    void pruneAiActivityLogIfEnabled();
+  }, []);
 
   const filtered = useFilteredProjects(projects, filter, sort);
   const selected = projects.find((p) => p.id === selectedId) ?? null;

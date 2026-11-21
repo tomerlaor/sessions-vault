@@ -104,6 +104,12 @@ export interface TraceStore {
   write(span: SpanRecord): void | Promise<void>;
   writeAttempt(attempt: AttemptRecord): void | Promise<void>;
   flush(): void | Promise<void>;
+  // Best-effort liveness check (T2, #90/#118) so a call site that resolved
+  // this store at call start can still skip writing once an in-flight
+  // operation finishes after the user has turned logging off. Stores
+  // without an enable/disable concept (e.g. MemoryTraceStore) omit this and
+  // are always treated as active.
+  isActive?(): boolean;
 }
 
 // Threaded explicitly through call sites (no AsyncLocalStorage in the

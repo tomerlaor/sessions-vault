@@ -8,7 +8,7 @@ export interface ScrubbedError {
   errorMessage: string;
 }
 
-const MAX_MESSAGE_CHARS = 200;
+const MAX_MESSAGE_CHARS = 120;
 const MIN_REDACTED_QUOTE_LEN = 40;
 
 // Order matters: the provider-specific prefixes must be redacted before the
@@ -19,6 +19,30 @@ const SECRET_PATTERNS: RegExp[] = [
   /sk-or-[A-Za-z0-9_-]+/g,
   /sk-[A-Za-z0-9_-]+/g,
 ];
+
+// These AI SDK errors build their own `.message` directly from the model's
+// raw output — JSONParseError embeds the unparsed text, TypeValidationError
+// embeds the parsed value, and ai.ts's own generateObjectLenient recovery
+// path (a plain Error, no `.name` override) can carry a "Raw text: …"
+// suffix. Rather than trust redact()/truncate() to scrub whatever shape
+// that text takes, a recognized error name is replaced outright with a
+// fixed, per-type string — the message is never even inspected.
+const FIXED_MESSAGE_BY_ERROR_NAME: Record<string, string> = {
+  AI_NoObjectGeneratedError: "no object generated",
+  AI_JSONParseError: "JSON parse error",
+  AI_TypeValidationError: "type validation error",
+};
+
+// Defense in depth for any other caller that builds a message like
+// `${base} Raw text: ${modelOutput}` (or "Text:"/"Value:", as the two AI
+// SDK errors above do) — cut before the marker so arbitrary model output
+// can never survive truncation as a trailing fragment.
+const RAW_TEXT_MARKER = /\b(?:Raw text|Text|Value):/;
+
+function cutAtRawTextMarker(message: string): string {
+  const match = RAW_TEXT_MARKER.exec(message);
+  return match ? message.slice(0, match.index).trimEnd() : message;
+}
 
 function redact(message: string): string {
   let out = message;
@@ -53,6 +77,7 @@ function extractHttpStatus(err: unknown): number | undefined {
 function classifyErrorType(err: unknown, message: string): string {
   const name = err instanceof Error ? err.name : "";
   if (name === "AbortError" || name === "TimeoutError") return "abort";
+  if (name in FIXED_MESSAGE_BY_ERROR_NAME) return "schema_parse";
 
   const httpStatus = extractHttpStatus(err);
   if (httpStatus) return `http_${httpStatus}`;
@@ -67,8 +92,12 @@ function classifyErrorType(err: unknown, message: string): string {
 }
 
 export function scrubError(err: unknown): ScrubbedError {
+  const name = err instanceof Error ? err.name : "";
   const rawMessage = err instanceof Error ? err.message : String(err);
   const errorType = classifyErrorType(err, rawMessage);
-  const errorMessage = truncate(redact(rawMessage));
+  const fixedMessage = FIXED_MESSAGE_BY_ERROR_NAME[name];
+  const errorMessage = fixedMessage
+    ? fixedMessage
+    : truncate(redact(cutAtRawTextMarker(rawMessage)));
   return { errorType, errorMessage };
 }

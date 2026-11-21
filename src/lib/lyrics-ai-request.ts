@@ -275,6 +275,17 @@ export async function requestStreamSuggestion(
       accumulated += chunk;
       params.onToken(accumulated);
     }
+    // ai@6's streamText does not throw on abort — the textStream just ends
+    // (the catch block below never runs). Check the signal explicitly so a
+    // partial suggestion from an aborted/timed-out request is never cached
+    // as "ok", and the overlay still sees aborted vs timeout rather than a
+    // false success.
+    // ai@6's streamText does not throw on abort — the textStream just ends
+    // (the catch block below never runs). Check the signal explicitly so a
+    // partial suggestion from an aborted/timed-out request is never cached
+    // as "ok", and the overlay still sees aborted vs timeout rather than a
+    // false success.
+    if (signal.aborted) return { status: classifyAbort(signal, params.trace) };
     // An empty result (e.g. the model spent its whole token cap on
     // reasoning and emitted no text) must not be cached as "ok" — that
     // would make a later retry replay the same empty string forever.

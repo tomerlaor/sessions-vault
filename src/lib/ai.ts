@@ -652,14 +652,16 @@ async function generateObjectLenient<S extends z.ZodTypeAny>({
     }
 
     const rawCombined = (fallback.text || raw).trim();
-    const snippet = rawCombined.slice(0, 500);
     const base =
       error instanceof Error
         ? error.message
         : "No object generated: could not parse the response.";
-    const err = new Error(
-      snippet ? `${base} Raw text: ${snippet}` : base,
-    ) as Error & {
+    // The model's raw output never belongs in Error.message — it can echo
+    // lyrics, tab chat content, or anything else the user typed, and
+    // Error.message is what traces, logs and `err.message` displays in the
+    // UI eventually see. It survives only on `err.text`, same as the error
+    // generateObject itself throws.
+    const err = new Error(base) as Error & {
       text?: string;
       finishReason?: string;
       usage?: LanguageModelUsage;

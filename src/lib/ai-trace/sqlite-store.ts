@@ -96,14 +96,36 @@ function devWarn(...args: unknown[]): void {
   if (import.meta.env?.DEV) console.warn(...args);
 }
 
+interface Buffered<T> {
+  record: T;
+  generation: number;
+}
+
 export class SqliteTraceStore implements TraceStore {
-  private spanBuffer: SpanRecord[] = [];
-  private attemptBuffer: AttemptRecord[] = [];
+  private spanBuffer: Buffered<SpanRecord>[] = [];
+  private attemptBuffer: Buffered<AttemptRecord>[] = [];
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private insertsSincePrune = 0;
   private errorCount = 0;
+  // Flipped off by clearAll() (disable or "Clear log") and back on by
+  // runtime.ts's getActiveTraceStore() on the next call while the setting
+  // is on. `generation` is bumped alongside so a flush already mid-loop
+  // over a now-stale buffer snapshot can tell its records apart from
+  // anything written since (M1, #118).
+  private enabled = true;
+  private generation = 0;
+  // Serializes flush() and clearAll() — each acquires this lock before
+  // touching the DB, so a clear's DELETEs can never run while a flush's
+  // own INSERTs for an earlier generation are still in flight.
+  private mutex: Promise<void> = Promise.resolve();
 
-  constructor(private readonly getDb: () => Promise<TraceDb>) {
+  constructor(
+    private readonly getDb: () => Promise<TraceDb>,
+    // Injected so the real singleton (runtime.ts) can rotate ai-traces.db's
+    // install_salt on every clear/disable (L2) without this store needing
+    // to know about trace-client.ts's module-level salt cache.
+    private readonly rotateSalt?: () => Promise<void>,
+  ) {
     this.flushTimer = setInterval(() => void this.flush(), FLUSH_INTERVAL_MS);
     if (typeof window !== "undefined") {
       window.addEventListener("beforeunload", () => void this.flush());
@@ -115,13 +137,27 @@ export class SqliteTraceStore implements TraceStore {
     return this.errorCount;
   }
 
+  isActive(): boolean {
+    return this.enabled;
+  }
+
+  enable(): void {
+    this.enabled = true;
+  }
+
+  disable(): void {
+    this.enabled = false;
+  }
+
   write(span: SpanRecord): void {
-    this.spanBuffer.push(span);
+    if (!this.enabled) return;
+    this.spanBuffer.push({ record: span, generation: this.generation });
     this.flushIfBatchFull();
   }
 
   writeAttempt(attempt: AttemptRecord): void {
-    this.attemptBuffer.push(attempt);
+    if (!this.enabled) return;
+    this.attemptBuffer.push({ record: attempt, generation: this.generation });
     this.flushIfBatchFull();
   }
 
@@ -134,55 +170,113 @@ export class SqliteTraceStore implements TraceStore {
     }
   }
 
-  async flush(): Promise<void> {
-    if (this.spanBuffer.length === 0 && this.attemptBuffer.length === 0) return;
-    const spans = this.spanBuffer;
-    const attempts = this.attemptBuffer;
-    this.spanBuffer = [];
-    this.attemptBuffer = [];
+  // FIFO async mutex: each call chains onto whatever's currently running,
+  // so flush() and clearAll() never touch the DB concurrently.
+  private async withLock<T>(fn: () => Promise<T>): Promise<T> {
+    const previous = this.mutex;
+    let release!: () => void;
+    this.mutex = new Promise<void>((resolve) => (release = resolve));
+    await previous;
     try {
-      const db = await this.getDb();
-      for (const span of spans) {
-        await db.execute(INSERT_SPAN_SQL, spanParams(span));
-      }
-      for (const attempt of attempts) {
-        await db.execute(INSERT_ATTEMPT_SQL, attemptParams(attempt));
-      }
-      this.insertsSincePrune += spans.length + attempts.length;
-      if (this.insertsSincePrune >= PRUNE_EVERY_N_INSERTS) {
-        this.insertsSincePrune = 0;
-        await this.prune();
-      }
-    } catch (err) {
-      this.errorCount += spans.length + attempts.length;
-      devWarn("[ai-trace] flush failed; records dropped", err);
+      return await fn();
+    } finally {
+      release();
     }
+  }
+
+  async flush(): Promise<void> {
+    return this.withLock(async () => {
+      if (this.spanBuffer.length === 0 && this.attemptBuffer.length === 0) {
+        return;
+      }
+      const spans = this.spanBuffer;
+      const attempts = this.attemptBuffer;
+      this.spanBuffer = [];
+      this.attemptBuffer = [];
+      let db: TraceDb;
+      try {
+        db = await this.getDb();
+      } catch (err) {
+        this.errorCount += spans.length + attempts.length;
+        devWarn("[ai-trace] flush failed; records dropped", err);
+        return;
+      }
+      try {
+        await db.execute(`BEGIN`, []);
+        for (const { record, generation } of spans) {
+          // Re-checked before EACH insert: a clearAll() that ran while this
+          // loop was suspended mid-insert (awaiting a prior statement)
+          // disables the store and bumps the generation — any record from
+          // before that point must be skipped, not written (M1, #118).
+          if (!this.enabled || generation !== this.generation) continue;
+          await db.execute(INSERT_SPAN_SQL, spanParams(record));
+        }
+        for (const { record, generation } of attempts) {
+          if (!this.enabled || generation !== this.generation) continue;
+          await db.execute(INSERT_ATTEMPT_SQL, attemptParams(record));
+        }
+        if (!this.enabled) {
+          // clearAll() ran mid-flush: roll back the whole batch rather than
+          // commit whatever slipped in before the per-record checks above
+          // started skipping (M1, #118) — "disabled" must mean nothing from
+          // this flush reaches disk, not "most of it does."
+          await db.execute(`ROLLBACK`, []);
+          return;
+        }
+        await db.execute(`COMMIT`, []);
+        // Spans only (nit, #118): pruning is driven by RETENTION_MAX_SPANS, a
+        // span-count limit, so the trigger should track span volume rather
+        // than being inflated by attempt-only bursts (e.g. SDK retries).
+        this.insertsSincePrune += spans.length;
+        if (this.insertsSincePrune >= PRUNE_EVERY_N_INSERTS) {
+          this.insertsSincePrune = 0;
+          await this.prune();
+        }
+      } catch (err) {
+        await db.execute(`ROLLBACK`, []).catch(() => {});
+        this.errorCount += spans.length + attempts.length;
+        devWarn("[ai-trace] flush failed; records dropped", err);
+      }
+    });
   }
 
   // Deletes spans older than RETENTION_DAYS, and any beyond the newest
   // RETENTION_MAX_SPANS, whichever is hit first — then cascades to
-  // attempts/outcomes, and separately sweeps expired debug-capture payloads.
+  // attempts/outcomes, but ONLY for the span_ids this call actually
+  // deleted. An attempt is written (and can be flushed) well before its
+  // span — the middleware records attempts while the model call is still
+  // running, but the span itself isn't written until the whole traced()
+  // operation resolves — so "span_id NOT IN ai_spans" would also match an
+  // attempt whose span is simply still sitting in the write buffer, not
+  // actually pruned (nit, #118). Capturing the deleted ids up front and
+  // scoping the cascade to exactly those avoids orphaning live attempts.
+  // No ai_payloads table here — debug capture payloads are T7, a separate
+  // opt-in this PR doesn't create.
   async prune(): Promise<void> {
     try {
       const db = await this.getDb();
       const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
-      await db.execute(
-        `DELETE FROM ai_spans WHERE started_at < ? OR span_id IN (
+      const toDelete = await db.select<{ span_id: string }[]>(
+        `SELECT span_id FROM ai_spans WHERE started_at < ? OR span_id IN (
            SELECT span_id FROM ai_spans ORDER BY started_at DESC LIMIT -1 OFFSET ?
          )`,
         [cutoff, RETENTION_MAX_SPANS],
       );
+      if (toDelete.length === 0) return;
+      const ids = toDelete.map((row) => row.span_id);
+      const placeholders = ids.map(() => "?").join(",");
       await db.execute(
-        `DELETE FROM ai_attempts WHERE span_id NOT IN (SELECT span_id FROM ai_spans)`,
-        [],
+        `DELETE FROM ai_spans WHERE span_id IN (${placeholders})`,
+        ids,
       );
       await db.execute(
-        `DELETE FROM ai_outcomes WHERE span_id NOT IN (SELECT span_id FROM ai_spans)`,
-        [],
+        `DELETE FROM ai_attempts WHERE span_id IN (${placeholders})`,
+        ids,
       );
-      await db.execute(`DELETE FROM ai_payloads WHERE expires_at < ?`, [
-        Date.now(),
-      ]);
+      await db.execute(
+        `DELETE FROM ai_outcomes WHERE span_id IN (${placeholders})`,
+        ids,
+      );
     } catch (err) {
       this.errorCount += 1;
       devWarn("[ai-trace] prune failed", err);
@@ -190,22 +284,33 @@ export class SqliteTraceStore implements TraceStore {
   }
 
   // "Keep AI activity log" was just turned off (or the user clicked "Clear
-  // log" while it's still on): drop anything buffered in memory — it must
-  // never reach disk — then delete every row so far, keeping only
-  // ai_trace_meta (schema_version/install_salt survive a clear).
+  // log" while it's still on): disable the store and bump the generation
+  // immediately (so any write/flush already in flight drops or skips its
+  // records — M1, #118), drop anything buffered in memory — it must never
+  // reach disk — then wait for a flush that's already running before
+  // deleting every row so far, keeping only ai_trace_meta (schema_version
+  // survives; install_salt survives the row but is rotated right after —
+  // L2, #118). secure_delete+VACUUM make sure the deleted pages don't
+  // linger in the file's free space.
   async clearAll(): Promise<void> {
+    this.enabled = false;
+    this.generation += 1;
     this.spanBuffer = [];
     this.attemptBuffer = [];
-    try {
-      const db = await this.getDb();
-      await db.execute(`DELETE FROM ai_payloads`, []);
-      await db.execute(`DELETE FROM ai_outcomes`, []);
-      await db.execute(`DELETE FROM ai_attempts`, []);
-      await db.execute(`DELETE FROM ai_spans`, []);
-    } catch (err) {
-      this.errorCount += 1;
-      devWarn("[ai-trace] clearAll failed", err);
-    }
+    await this.withLock(async () => {
+      try {
+        const db = await this.getDb();
+        await db.execute(`DELETE FROM ai_outcomes`, []);
+        await db.execute(`DELETE FROM ai_attempts`, []);
+        await db.execute(`DELETE FROM ai_spans`, []);
+        await db.execute(`PRAGMA secure_delete=ON`, []);
+        await db.execute(`VACUUM`, []);
+        await this.rotateSalt?.();
+      } catch (err) {
+        this.errorCount += 1;
+        devWarn("[ai-trace] clearAll failed", err);
+      }
+    });
   }
 
   // Settings' "Keep AI activity log" row needs this to decide whether

@@ -550,17 +550,17 @@ mod tests {
 
     #[test]
     fn zip_project_never_includes_the_ai_trace_store() {
-        // ai-traces.db (tracing T2, #90) lives in the Tauri app data dir, a
+        // ai-traces.db (tracing T2, #90) lives in the Tauri app config dir, a
         // path that is never passed to zip_project — it only ever reads the
         // single .als path, its .dawmgr sidecar, and caller-supplied
-        // StageFileInput rows. Simulate a real app data dir containing the
+        // StageFileInput rows. Simulate a real app config dir containing the
         // trace store sitting right next to (but not inside) the project
         // directory, and confirm it never ends up in the archive.
         let project_dir = tempfile::tempdir().unwrap();
         let als = write_file(project_dir.path(), "song.als", b"fake-als-bytes");
 
-        let app_data_dir = tempfile::tempdir().unwrap();
-        write_file(app_data_dir.path(), "ai-traces.db", b"fake-sqlite-bytes");
+        let app_config_dir = tempfile::tempdir().unwrap();
+        write_file(app_config_dir.path(), "ai-traces.db", b"fake-sqlite-bytes");
 
         // Even the .dawmgr sidecar (which IS walked recursively) must not
         // carry the trace store — no caller ever writes it there.

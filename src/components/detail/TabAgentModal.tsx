@@ -106,12 +106,17 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
-  // One AbortController for the whole modal lifetime: aborted on close/unmount
-  // so a generate or chat call in flight doesn't keep running (or get traced
-  // as "ok") after the user has already left.
-  const abortRef = useRef<AbortController>(new AbortController());
+  // One AbortController per real mount: aborted on close/unmount so a
+  // generate or chat call in flight doesn't keep running (or get traced as
+  // "ok") after the user has already left. Created inside the effect, not
+  // as the useRef initializer — React StrictMode mounts, cleans up, and
+  // re-mounts the same component instance (same ref) during dev; a
+  // controller built once outside the effect would already be aborted by
+  // the first cleanup by the time the second mount's handlers read it.
+  const abortRef = useRef<AbortController | null>(null);
   useEffect(() => {
-    const controller = abortRef.current;
+    const controller = new AbortController();
+    abortRef.current = controller;
     return () => controller.abort();
   }, []);
 
@@ -407,7 +412,7 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
     if (!aiCfg || project.aiOptOut) return;
     setStep("generating");
     addAgent("Generating your tab structure…");
-    const signal = abortRef.current.signal;
+    const signal = abortRef.current!.signal;
     try {
       const { store, salt } = await getActiveTraceStore();
       const result = await traced(
@@ -488,7 +493,7 @@ If the user asks a question rather than requesting generation, answer concisely.
           content: m.text,
         }));
       history.push({ role: "user", content: text });
-      const signal = abortRef.current.signal;
+      const signal = abortRef.current!.signal;
       const { store, salt } = await getActiveTraceStore();
       const reply = await traced(
         {
@@ -505,7 +510,7 @@ If the user asks a question rather than requesting generation, answer concisely.
       if (signal.aborted) return; // modal closed mid-request
       addAgent(reply);
     } catch (e) {
-      if (abortRef.current.signal.aborted) return; // modal closed mid-request
+      if (abortRef.current!.signal.aborted) return; // modal closed mid-request
       addAgent(`Error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setChatSending(false);

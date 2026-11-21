@@ -26,7 +26,8 @@ function makeFakeDb(selectResult: unknown[] = []): {
       calls.push({ sql, params });
       if (shouldFail) throw new Error("boom");
     },
-    async select() {
+    async select(sql, params) {
+      calls.push({ sql, params });
       if (shouldFail) throw new Error("boom");
       return selectResult as never;
     },
@@ -136,30 +137,48 @@ describe("SqliteTraceStore", () => {
     ).toHaveLength(1);
   });
 
-  it("prune() deletes spans older than 30 days or beyond the newest 20000, cascading to attempts/outcomes, plus expired payloads", async () => {
-    const { db, calls } = makeFakeDb();
+  it("prune() selects the spans beyond 30 days / the newest 20000, then cascades to attempts/outcomes by exactly those ids", async () => {
+    const { db, calls } = makeFakeDb([
+      { span_id: "old1" },
+      { span_id: "old2" },
+    ]);
     const store = makeStore(async () => db);
     calls.length = 0; // drop the constructor's own startup prune
     await store.prune();
 
-    const spanDelete = calls.find((c) =>
-      c.sql.includes("DELETE FROM ai_spans"),
+    const spanSelect = calls.find(
+      (c) =>
+        c.sql.includes("SELECT span_id FROM ai_spans") && c.params.length === 2,
     );
-    expect(spanDelete).toBeDefined();
-    const [cutoff, limit] = spanDelete!.params as [number, number];
+    expect(spanSelect).toBeDefined();
+    const [cutoff, limit] = spanSelect!.params as [number, number];
     expect(limit).toBe(RETENTION_MAX_SPANS);
     const expectedCutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
     expect(Math.abs(cutoff - expectedCutoff)).toBeLessThan(5000);
 
-    expect(calls.some((c) => c.sql.includes("DELETE FROM ai_attempts"))).toBe(
-      true,
+    const spanDelete = calls.find(
+      (c) => c.sql === "DELETE FROM ai_spans WHERE span_id IN (?,?)",
     );
-    expect(calls.some((c) => c.sql.includes("DELETE FROM ai_outcomes"))).toBe(
-      true,
+    const attemptDelete = calls.find(
+      (c) => c.sql === "DELETE FROM ai_attempts WHERE span_id IN (?,?)",
     );
-    expect(calls.some((c) => c.sql.includes("DELETE FROM ai_payloads"))).toBe(
-      true,
+    const outcomeDelete = calls.find(
+      (c) => c.sql === "DELETE FROM ai_outcomes WHERE span_id IN (?,?)",
     );
+    expect(spanDelete?.params).toEqual(["old1", "old2"]);
+    expect(attemptDelete?.params).toEqual(["old1", "old2"]);
+    expect(outcomeDelete?.params).toEqual(["old1", "old2"]);
+    expect(calls.some((c) => c.sql.includes("ai_payloads"))).toBe(false);
+  });
+
+  it("prune() is a no-op (no DELETEs) when nothing is beyond the retention window — never deletes attempts whose span just isn't flushed yet (nit, #118)", async () => {
+    const { db, calls } = makeFakeDb([]);
+    const store = makeStore(async () => db);
+    calls.length = 0;
+
+    await store.prune();
+
+    expect(calls.some((c) => c.sql.startsWith("DELETE"))).toBe(false);
   });
 
   it("prunes automatically every 500 inserts", async () => {
@@ -184,7 +203,7 @@ describe("SqliteTraceStore", () => {
     expect(store.droppedRecordCount).toBeGreaterThan(0);
   });
 
-  it("clearAll drops the in-memory buffer and deletes every row except ai_trace_meta", async () => {
+  it("clearAll drops the in-memory buffer, deletes every row except ai_trace_meta, then secure-deletes and VACUUMs (M1, #118)", async () => {
     const { db, calls } = makeFakeDb();
     const store = makeStore(async () => db);
     store.write(makeSpan("buffered-not-yet-flushed"));
@@ -192,16 +211,141 @@ describe("SqliteTraceStore", () => {
 
     await store.clearAll();
 
-    expect(calls.some((c) => c.sql === "DELETE FROM ai_payloads")).toBe(true);
+    expect(calls.some((c) => c.sql.includes("ai_payloads"))).toBe(false);
     expect(calls.some((c) => c.sql === "DELETE FROM ai_outcomes")).toBe(true);
     expect(calls.some((c) => c.sql === "DELETE FROM ai_attempts")).toBe(true);
     expect(calls.some((c) => c.sql === "DELETE FROM ai_spans")).toBe(true);
     expect(calls.some((c) => c.sql.includes("ai_trace_meta"))).toBe(false);
+    expect(calls.some((c) => c.sql === "PRAGMA secure_delete=ON")).toBe(true);
+    expect(calls.some((c) => c.sql === "VACUUM")).toBe(true);
 
     // The buffered (never-flushed) span must not surface after clearAll.
     calls.length = 0;
     await store.flush();
     expect(calls).toHaveLength(0);
+  });
+
+  it("clearAll rotates the install salt", async () => {
+    const { db } = makeFakeDb();
+    const rotateSalt = vi.fn().mockResolvedValue(undefined);
+    const store = new SqliteTraceStore(async () => db, rotateSalt);
+    stores.push(store);
+
+    await store.clearAll();
+
+    expect(rotateSalt).toHaveBeenCalledTimes(1);
+  });
+
+  it("disable()/enable() flip isActive() and suppress writes while disabled (M1, #118)", async () => {
+    const { db, calls } = makeFakeDb();
+    const store = makeStore(async () => db);
+    calls.length = 0;
+
+    store.disable();
+    expect(store.isActive()).toBe(false);
+    store.write(makeSpan("dropped-while-disabled"));
+    await store.flush();
+    expect(calls.some((c) => c.sql.includes("INSERT"))).toBe(false);
+
+    store.enable();
+    expect(store.isActive()).toBe(true);
+    store.write(makeSpan("written-once-enabled"));
+    await store.flush();
+    expect(calls.some((c) => c.sql.includes("INSERT INTO ai_spans"))).toBe(
+      true,
+    );
+  });
+
+  it("a flush suspended mid-insert rolls back its whole batch once clearAll disables the store, and nothing survives the DELETEs (M1, #118)", async () => {
+    const calls: Call[] = [];
+    let gated = false;
+    let releaseGate!: () => void;
+    const gate = new Promise<void>((resolve) => (releaseGate = resolve));
+    const db: TraceDb = {
+      async execute(sql, params) {
+        calls.push({ sql, params });
+        if (!gated && sql.includes("INSERT INTO ai_spans")) {
+          gated = true;
+          await gate;
+        }
+      },
+      async select() {
+        return [] as never;
+      },
+    };
+    const store = makeStore(async () => db);
+    calls.length = 0; // drop the constructor's own startup prune
+    store.write(makeSpan("s0"));
+    store.write(makeSpan("s1"));
+    store.write(makeSpan("s2"));
+
+    const flushPromise = store.flush();
+    await tick();
+    // flush is now parked mid-loop, awaiting s0's INSERT.
+    expect(
+      calls.filter((c) => c.sql.includes("INSERT INTO ai_spans")),
+    ).toHaveLength(1);
+
+    const clearPromise = store.clearAll();
+    releaseGate();
+    await Promise.all([flushPromise, clearPromise]);
+
+    const spanInserts = calls.filter((c) =>
+      c.sql.includes("INSERT INTO ai_spans"),
+    );
+    // s0's INSERT was issued inside the still-open transaction before
+    // clearAll flipped enabled/generation; s1/s2 are skipped. The flush
+    // then rolls the whole transaction back instead of committing it, so
+    // s0 never actually lands on disk either.
+    expect(spanInserts).toHaveLength(1);
+    expect(calls.some((c) => c.sql === "ROLLBACK")).toBe(true);
+    expect(calls.some((c) => c.sql === "COMMIT")).toBe(false);
+    const deleteIndex = calls.findIndex(
+      (c) => c.sql === "DELETE FROM ai_spans",
+    );
+    expect(deleteIndex).toBeGreaterThan(-1);
+    // Nothing is written after clearAll's DELETEs run.
+    expect(calls.slice(deleteIndex).some((c) => c.sql.includes("INSERT"))).toBe(
+      false,
+    );
+  });
+
+  it("flush runs its INSERTs inside a single BEGIN/COMMIT transaction (item 4, #118)", async () => {
+    const { db, calls } = makeFakeDb();
+    const store = makeStore(async () => db);
+    await tick(); // let the constructor's own startup prune land first
+    calls.length = 0;
+    store.write(makeSpan("a"));
+    store.write(makeSpan("b"));
+
+    await store.flush();
+
+    expect(calls[0].sql).toBe("BEGIN");
+    expect(calls[calls.length - 1].sql).toBe("COMMIT");
+    expect(calls.some((c) => c.sql === "ROLLBACK")).toBe(false);
+  });
+
+  it("flush rolls back the transaction (not just drops records) when a mid-batch insert fails", async () => {
+    const calls: Call[] = [];
+    const db: TraceDb = {
+      async execute(sql, params) {
+        calls.push({ sql, params });
+        if (sql.includes("INSERT INTO ai_spans")) throw new Error("boom");
+      },
+      async select() {
+        return [] as never;
+      },
+    };
+    const store = makeStore(async () => db);
+    calls.length = 0;
+    store.write(makeSpan("will-fail"));
+
+    await expect(store.flush()).resolves.toBeUndefined();
+
+    expect(calls.some((c) => c.sql === "BEGIN")).toBe(true);
+    expect(calls.some((c) => c.sql === "ROLLBACK")).toBe(true);
+    expect(calls.some((c) => c.sql === "COMMIT")).toBe(false);
+    expect(store.droppedRecordCount).toBeGreaterThan(0);
   });
 
   it("count() reports the ai_spans row count", async () => {

@@ -202,7 +202,7 @@ async function* streamTextChunks(
 }
 
 describe("scrubError", () => {
-  it("redacts secrets and long quoted strings, and truncates to ~200 chars", () => {
+  it("redacts secrets and long quoted strings, and truncates to ~120 chars", () => {
     const secret = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789";
     const longQuote = "y".repeat(60);
     const err = new Error(
@@ -211,7 +211,7 @@ describe("scrubError", () => {
     const { errorMessage } = scrubError(err);
     expect(errorMessage).not.toContain(secret);
     expect(errorMessage).not.toContain(longQuote);
-    expect(errorMessage.length).toBeLessThanOrEqual(201);
+    expect(errorMessage.length).toBeLessThanOrEqual(121);
   });
 
   it("classifies abort-named errors as errorType 'abort'", () => {
@@ -223,6 +223,42 @@ describe("scrubError", () => {
   it("classifies an http status from a statusCode field", () => {
     const err = Object.assign(new Error("failed"), { statusCode: 429 });
     expect(scrubError(err).errorType).toBe("http_429");
+  });
+
+  it("cuts a message at a 'Raw text:' marker, dropping everything after it (H1, #118)", () => {
+    const err = new Error(
+      "No object generated: could not parse the response. Raw text: SECRET_LYRIC_LINE about rain",
+    );
+    const { errorMessage } = scrubError(err);
+    expect(errorMessage).not.toContain("SECRET_LYRIC_LINE");
+    expect(errorMessage).toContain("could not parse the response");
+  });
+
+  it("replaces AI_NoObjectGeneratedError's message with a fixed string, never inspecting it", () => {
+    const err = new Error("No object generated: could not parse the response.");
+    err.name = "AI_NoObjectGeneratedError";
+    expect(scrubError(err).errorMessage).toBe("no object generated");
+  });
+
+  it("replaces AI_JSONParseError's message (which embeds the raw model text) with a fixed string", () => {
+    const lyricLine = "SECRET_LYRIC_9f1 wandering under the rain";
+    const err = new Error(
+      `JSON parsing failed: Text: ${lyricLine}.\nError message: Unexpected token`,
+    );
+    err.name = "AI_JSONParseError";
+    const { errorMessage } = scrubError(err);
+    expect(errorMessage).toBe("JSON parse error");
+    expect(errorMessage).not.toContain(lyricLine);
+  });
+
+  it("replaces AI_TypeValidationError's message (which embeds the parsed value) with a fixed string", () => {
+    const err = new Error(
+      `Type validation failed: Value: ${JSON.stringify({ lyric: "SECRET_LYRIC_X" })}.\nError message: invalid`,
+    );
+    err.name = "AI_TypeValidationError";
+    const { errorMessage } = scrubError(err);
+    expect(errorMessage).toBe("type validation error");
+    expect(errorMessage).not.toContain("SECRET_LYRIC_X");
   });
 });
 
@@ -289,6 +325,41 @@ describe("traced()", () => {
       async () => "ok",
     );
     expect(result).toBe("ok");
+  });
+
+  it("enqueues the span but never calls flush() itself — batching is the store's job (item 4, #118)", async () => {
+    const writeSpy = vi.fn();
+    const flushSpy = vi.fn(() => Promise.resolve());
+    const store: TraceStore = {
+      write: writeSpy,
+      writeAttempt: () => {},
+      flush: flushSpy,
+    };
+    const result = await traced(
+      { operation: "test_connection", store },
+      async () => "ok",
+    );
+    expect(result).toBe("ok");
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    expect(flushSpy).not.toHaveBeenCalled();
+  });
+
+  it("skips writing entirely when the store reports isActive() === false (disabled mid-flight, M1, #118)", async () => {
+    const writeSpy = vi.fn();
+    const flushSpy = vi.fn(() => Promise.resolve());
+    const store: TraceStore & { isActive(): boolean } = {
+      write: writeSpy,
+      writeAttempt: () => {},
+      flush: flushSpy,
+      isActive: () => false,
+    };
+    const result = await traced(
+      { operation: "test_connection", store },
+      async () => "ok",
+    );
+    expect(result).toBe("ok");
+    expect(writeSpy).not.toHaveBeenCalled();
+    expect(flushSpy).not.toHaveBeenCalled();
   });
 
   it("derives status cache_hit when fn marks the span cacheHit", async () => {

@@ -1208,7 +1208,7 @@ export default function SettingsModal({ onClose }: Props) {
               it took, which feature, song, provider and model, token counts and
               estimated cost, and whether it succeeded (with a short error note
               if not). It never stores the text of your lyrics, tabs, chats or
-              prompts. Stays on this Mac, in the app&apos;s data folder
+              prompts. Stays on this Mac, in the app&apos;s config folder
               (ai-traces.db), and is never included in backups. Turning this off
               deletes the existing log. Off by default.
             </Hint>
