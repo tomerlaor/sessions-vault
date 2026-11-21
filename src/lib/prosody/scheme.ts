@@ -28,6 +28,19 @@ function countSyllablesFor(lang: Lang) {
   return lang === "he" ? heCountSyllables : enCountSyllables;
 }
 
+// Shared "do these two line-ending words rhyme" check, used both to detect
+// a scheme from a whole section and to test whether a specific couplet has
+// closed. "slant" counts as a rhyme here, same threshold detectScheme uses.
+function doRhyme(
+  rhymeFn: (a: string, b: string) => "perfect" | "slant" | "none",
+  a: string,
+  b: string,
+): boolean {
+  if (!a || !b) return false;
+  const r = rhymeFn(a, b);
+  return r === "perfect" || r === "slant";
+}
+
 // A bracketed token: a [Section] header like [Verse]/[Chorus]/[בית]/[פזמון],
 // or an inline chord annotation like [C]/[Am]/[F#m7]. Both are written the
 // same way, so stripping every [...] span handles both at once — a
@@ -136,17 +149,12 @@ export function detectScheme(sectionLines: string[]): Scheme {
   const lang = detectLang(lines.join(" "));
   const rhymeFn = rhymesFor(lang);
   const ends = lines.map(lastWordOf);
-  const doRhyme = (a: string, b: string): boolean => {
-    if (!a || !b) return false;
-    const r = rhymeFn(a, b);
-    return r === "perfect" || r === "slant";
-  };
 
   for (let i = 0; i + 1 < ends.length; i++) {
-    if (doRhyme(ends[i], ends[i + 1])) return "AABB";
+    if (doRhyme(rhymeFn, ends[i], ends[i + 1])) return "AABB";
   }
   for (let i = 0; i + 2 < ends.length; i++) {
-    if (doRhyme(ends[i], ends[i + 2])) return "ABAB";
+    if (doRhyme(rhymeFn, ends[i], ends[i + 2])) return "ABAB";
   }
   return "free";
 }
@@ -189,16 +197,19 @@ export function nextLineTargets(
 
   let rhymeWith: string | undefined;
   if (scheme === "AABB" && lines.length >= 1) {
-    // AABB couplets close every two lines: an odd count means the most
-    // recently finished line is still the first half of its pair and
-    // needs a rhyming partner (target it); an even count means a pair
-    // just closed and the next line starts a fresh one, so forcing it to
-    // rhyme with the line above would turn an intended couplet scheme
-    // into an unintended AAA run (the "last-line bias" bug).
-    rhymeWith =
-      lines.length % 2 === 1
-        ? lastWordOf(lines[lines.length - 1]) || undefined
-        : undefined;
+    // AABB couplet state is decided by whether the two most recently
+    // finished lines actually rhyme with each other, not by their count's
+    // parity -- a section with an unpaired line (e.g. a 1-line intro ahead
+    // of couplets) desyncs parity from the real pairing. If the couplet is
+    // already closed (last two lines rhyme), the next line starts a fresh
+    // pair and gets no target (else we'd force an unintended AAA run). If
+    // it's open -- including when there's only one line so far -- target
+    // the last finished line.
+    const rhymeFn = rhymesFor(lang);
+    const last = lastWordOf(lines[lines.length - 1]);
+    const prev = lines.length >= 2 ? lastWordOf(lines[lines.length - 2]) : "";
+    const closed = lines.length >= 2 && doRhyme(rhymeFn, prev, last);
+    rhymeWith = closed ? undefined : last || undefined;
   } else if (scheme === "ABAB" && lines.length >= 2) {
     rhymeWith = lastWordOf(lines[lines.length - 2]) || undefined;
   }

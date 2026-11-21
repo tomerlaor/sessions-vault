@@ -245,11 +245,11 @@ describe("nextLineTargets", () => {
     expect(targets.rhymeWith).toBe("shine");
   });
 
-  it("AABB couplet-parity: a closed 2-line couplet gets no target for the line that starts the next one", () => {
+  it("AABB: a closed 2-line couplet gets no target for the line that starts the next one", () => {
     // "flame"/"reclaim" are the only two lines — a complete, closed
-    // couplet — so the next line should start a fresh pair, not be forced
-    // to extend this one into an unintended AAA run (the last-line bias
-    // this R6 fix removes).
+    // couplet (they actually rhyme) — so the next line should start a
+    // fresh pair, not be forced to extend this one into an unintended AAA
+    // run (the last-line bias this R6 fix removes).
     const lyrics =
       "The city lights flicker like a dying flame\nEvery corner holds a memory I can't reclaim";
     const targets = nextLineTargets(lyrics, lyrics.length);
@@ -257,16 +257,32 @@ describe("nextLineTargets", () => {
     expect(targets.rhymeWith).toBeUndefined();
   });
 
-  it("AABB couplet-parity: a 3rd line that opens a fresh pair IS the target for the 4th", () => {
-    // All three lines happen to share a rhyme (an AAA chorus), but the
-    // couplet-parity rule doesn't need that: it only needs line 3 to be
-    // the (odd-count) first half of a fresh pair after lines 1-2 closed
-    // the first one.
+  it("AABB: an unpaired intro line ahead of a closed couplet still gets no target (parity would misfire here)", () => {
+    // "sky" is an unpaired intro line that doesn't rhyme with anything; the
+    // couplet is "door"/"floor", which actually rhyme and close the pair.
+    // 3 finished lines is an odd count, so the old line-count-parity rule
+    // would have wrongly forced a target onto the line that starts the
+    // next pair — the real fix checks whether lines[n-1] and lines[n-2]
+    // actually rhyme, not whether the count is odd or even.
     const lyrics =
-      "You were the only light in a town gone dark\nAnd I was just a boy chasing a spark\nNow the streets are quiet, and I carry the mark";
+      "Alone beneath a quiet sky\nI found an old coat by the door\nEvery lonely step led to the floor";
     const targets = nextLineTargets(lyrics, lyrics.length);
     expect(targets.scheme).toBe("AABB");
-    expect(targets.rhymeWith).toBe("mark");
+    expect(targets.rhymeWith).toBeUndefined();
+  });
+
+  it("AABB: an unpaired intro line ahead of an open couplet DOES target the last line (parity would misfire here too)", () => {
+    // Same intro + closed "door"/"floor" couplet as above, plus one more
+    // line ("holds") that doesn't rhyme with "floor" — an open couplet
+    // waiting for its partner. 4 finished lines is an even count, so the
+    // old parity rule would have wrongly reported no target; the real
+    // rhyme check sees "floor"/"holds" don't rhyme and correctly targets
+    // "holds".
+    const lyrics =
+      "Alone beneath a quiet sky\nI found an old coat by the door\nEvery lonely step led to the floor\nNow I wonder what tomorrow holds";
+    const targets = nextLineTargets(lyrics, lyrics.length);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBe("holds");
   });
 
   it("targets the AABB rhyme word (he)", () => {
@@ -305,9 +321,10 @@ describe("nextLineTargets", () => {
     // the earlier repeat before the second [Chorus] header) — if the
     // scheme detector jumped the boundary it would see a header/chord
     // word instead of "comes" and AABB wouldn't trigger at all. The 2
-    // in-section lines form one complete, closed couplet, so the line
-    // after them starts a fresh pair and gets no forced rhyme (R6 fix —
-    // AABB no longer always targets the last line regardless of parity).
+    // in-section lines form one complete, closed couplet (they actually
+    // rhyme — same word, "comes"), so the line after them starts a fresh
+    // pair and gets no forced rhyme (R6 fix — AABB no longer always
+    // targets the last line, and no longer relies on count parity either).
     expect(targets.scheme).toBe("AABB");
     expect(targets.rhymeWith).toBeUndefined();
   });
@@ -329,11 +346,12 @@ describe("nextLineTargets", () => {
 
   it("excludes the in-progress line when the caller passes a truncated draft", () => {
     // Simulates next_word's wiring: without truncation, the unfinished
-    // line being typed gets treated as a 4th finished AABB reference —
-    // an even count, so the (correct) couplet-parity rule now reports no
-    // target at all rather than the old bug's useless partial word ("the").
-    // Either way it's wrong; the caller must pass a draft cut back to
-    // just before that line instead.
+    // line being typed gets treated as a 4th finished AABB reference.
+    // "door" (line 3) and "the" (the in-progress line's last typed word)
+    // don't rhyme, so the real rhyme check reports the fragment "the" as
+    // the target — useless, same as the pre-R6 bug, just for a different
+    // reason. Either way it's wrong; the caller must pass a draft cut back
+    // to just before that line instead.
     const priorLines =
       "I walked down a street in the rain\n" +
       "Trying to shake off the pain\n" +
@@ -341,7 +359,7 @@ describe("nextLineTargets", () => {
     const untruncated = priorLines + "\nNow I am ringing the ";
 
     const broken = nextLineTargets(untruncated, untruncated.length);
-    expect(broken.rhymeWith).toBeUndefined();
+    expect(broken.rhymeWith).toBe("the");
 
     const fixed = nextLineTargets(priorLines, priorLines.length);
     expect(fixed.rhymeWith).toBe("door");

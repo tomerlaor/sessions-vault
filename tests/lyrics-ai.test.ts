@@ -862,8 +862,11 @@ describe("R6: completion gets a remaining-syllable target, not the full line len
 
 describe("R6: explicit rhyme target in the task text when a scheme is established", () => {
   it("completion", () => {
+    // "rain"/"pain" close the first couplet; "door" doesn't rhyme with
+    // "pain", so it opens a fresh, still-unpaired one â€” the line being
+    // completed should target "door".
     const lyrics =
-      "[Chorus]\nYou were the only light in a town gone dark\nAnd I was just a boy chasing a spark\nNow the streets are quiet, and I carry the mark\nOf every";
+      "[Chorus]\nI walked down a street in the rain\nTrying to shake off the pain\nI found an old coat by the door\nOf every";
     const { prompt } = buildLyricsSuggestionPrompt({
       lyrics,
       currentLine: "Of every",
@@ -879,7 +882,7 @@ describe("R6: explicit rhyme target in the task text when a scheme is establishe
       recentAccepted: [],
       mode: "completion",
     });
-    expect(prompt).toContain('rhyme with: "mark"');
+    expect(prompt).toContain('must rhyme with: "door"');
   });
 
   it("next_line", () => {
@@ -979,13 +982,14 @@ describe("fix: impliedRhymeTarget respects the AABB/ABAB/free-verse scheme (R6 Â
     expect(prompt).not.toContain("rhyme with:");
   });
 
-  it("AABB continuing (AAA chorus): the 3rd line IS the target for the 4th", () => {
-    // All three lines happen to rhyme (dark/spark/mark), but the rule only
-    // needs lines 1-2 to close the first pair â€” line 3 is then the fresh,
-    // odd-one-out first half of a new pair and gets a HARD target for the
-    // 4th line, same as the he-completion-chorus-rhyme eval fixture.
+  it("AABB with an unpaired intro line: a closed couplet gets NO target (parity would misfire here)", () => {
+    // "sky" is an unpaired intro line; "door"/"floor" actually rhyme and
+    // close the couplet. 3 finished lines is an odd count, so the old
+    // line-count-parity rule would have wrongly forced a target onto the
+    // line starting the next pair â€” the real check (do lines[n-1] and
+    // lines[n-2] actually rhyme?) correctly reports no target.
     const lyrics =
-      "You were the only light in a town gone dark\nAnd I was just a boy chasing a spark\nNow the streets are quiet, and I carry the mark\nOf every";
+      "Alone beneath a quiet sky\nI found an old coat by the door\nEvery lonely step led to the floor\nOf every";
     const { prompt } = buildLyricsSuggestionPrompt({
       lyrics,
       currentLine: "Of every",
@@ -1001,7 +1005,34 @@ describe("fix: impliedRhymeTarget respects the AABB/ABAB/free-verse scheme (R6 Â
       recentAccepted: [],
       mode: "completion",
     });
-    expect(prompt).toContain('must rhyme with: "mark"');
+    expect(prompt).not.toContain("rhyme with:");
+  });
+
+  it("AABB with an unpaired intro line: an open couplet DOES get a target (parity would misfire here too)", () => {
+    // Same intro + closed "door"/"floor" couplet, plus "holds" which
+    // doesn't rhyme with "floor" and so opens a fresh, still-unpaired
+    // couplet. 4 finished lines is an even count, so the old parity rule
+    // would have wrongly reported no target; the real rhyme check
+    // correctly targets "holds" for the line being completed, same as the
+    // he-completion-chorus-rhyme eval fixture.
+    const lyrics =
+      "Alone beneath a quiet sky\nI found an old coat by the door\nEvery lonely step led to the floor\nNow I wonder what tomorrow holds\nOf every";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "Of every",
+      textBeforeCursor: "Of every",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain('must rhyme with: "holds"');
   });
 
   it("ABAB: line n-1 rhymes with n-3, so the completion targets line n-2 (not n-1)", () => {
