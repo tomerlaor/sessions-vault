@@ -23,11 +23,20 @@ function randomHex(byteLength: number): string {
     .join("");
 }
 
-async function runMigrations(raw: Database): Promise<void> {
-  // Every DELETE in this file (clearAll, prune) relies on the freed pages
-  // never lingering in plaintext in the file's free space (M1, #118), so
-  // this is set unconditionally on every load, not just after a clear.
-  await raw.execute(`PRAGMA secure_delete=ON`, []);
+// Test-only export (M1, #118): lets tests/ai-trace-sqlite-real.test.ts build
+// the real schema against a node:sqlite-backed TraceDb the same way
+// getRaw() builds it against the real plugin-sql Database.
+export async function runMigrations(raw: TraceDb): Promise<void> {
+  // auto_vacuum is a file-level property persisted in the database header
+  // (set here, before any table exists, so it applies regardless of which
+  // pooled connection later runs it) — unlike PRAGMA secure_delete, which
+  // is per-connection and therefore useless under tauri-plugin-sql's
+  // connection pool (sqlx hands each execute() to whichever of several
+  // open connections is free, so a PRAGMA set on one has no effect on the
+  // others). We don't set secure_delete here for that reason. What
+  // actually keeps deleted rows from lingering in the file is VACUUM
+  // (clearAll(), M1 #118): it rebuilds the whole file, so the old rows'
+  // pages are simply not part of the result.
   await raw.execute(`PRAGMA auto_vacuum=INCREMENTAL`, []);
 
   await raw.execute(
@@ -127,7 +136,7 @@ async function runMigrations(raw: Database): Promise<void> {
 
 const SCHEMA_VERSION = "1";
 
-async function ensureMeta(raw: Database): Promise<void> {
+export async function ensureMeta(raw: TraceDb): Promise<void> {
   await raw.execute(
     `INSERT INTO ai_trace_meta (key, value) VALUES ('schema_version', ?)
      ON CONFLICT(key) DO NOTHING`,

@@ -30,11 +30,21 @@ function getStoreSingleton(): SqliteTraceStore {
 // TracedMeta. Reads the setting fresh each time (a single local DB read)
 // so toggling it in Settings takes effect on the very next call — when
 // it's off (the default), no store or salt is handed out, so nothing is
-// written and no prompt gets hashed. Re-enables the singleton on every
-// active call (M1, #118): clearAll() (disable, or "Clear log" while still
-// on) disables the store, and this is the only place that re-arms it, so a
-// "Clear log" click while logging stays on doesn't silently stop future
-// writes.
+// written and no prompt gets hashed.
+//
+// The store's own `generation` (bumped synchronously by bumpGeneration(),
+// M3 #118) is what guards against two races here, not a module-level
+// counter: (1) a clearAll()/disable that lands while getInstallSalt() is
+// in flight below must not be undone by the enable() call that follows —
+// so enable() only runs if the generation hasn't moved since it was
+// captured; (2) a setKeepAiActivityLog(false) whose config write lands
+// after this function's first read but before it returns must still result
+// in no store — so the setting is re-read right before returning. Either
+// way, the TraceStore handed back is store.handle(), which stamps its own
+// generation at this exact moment (handle() captures `this._generation`
+// internally) — so even if this call's own writes land long after a later
+// clearAll() has re-armed the store for a *different* generation, they
+// still get dropped instead of polluting the new generation's log.
 export async function getActiveTraceStore(): Promise<{
   store?: TraceStore;
   salt?: string;
@@ -43,9 +53,12 @@ export async function getActiveTraceStore(): Promise<{
     const { keepAiActivityLog } = await getAiActivityConfig();
     if (!keepAiActivityLog) return {};
     const store = getStoreSingleton();
-    store.enable();
+    const generationAtStart = store.generation;
     const salt = await getInstallSalt();
-    return { store, salt };
+    if (store.generation === generationAtStart) store.enable();
+    const { keepAiActivityLog: stillOn } = await getAiActivityConfig();
+    if (!stillOn) return {};
+    return { store: store.handle(), salt };
   } catch {
     // A settings-read or DB-open failure here must never break an AI call —
     // tracing is strictly best-effort. Fall back to "no store", identical
@@ -57,9 +70,18 @@ export async function getActiveTraceStore(): Promise<{
 // Deletes every ai_spans/ai_attempts/ai_outcomes row (and drops any
 // in-memory buffer), keeping ai_trace_meta's salt/schema rows — though the
 // salt itself is rotated right after (L2, #118). Used by the "Clear log"
-// button in Settings and whenever the log is turned off.
-export async function clearAiActivityLog(): Promise<void> {
-  await getStoreSingleton().clearAll();
+// button in Settings and whenever the log is turned off. Returns `ok:
+// false` if the clear didn't fully succeed (deletes failed, VACUUM failed
+// after retries, or rows remained) so Settings can show an error instead of
+// claiming success (H2, #118).
+export async function clearAiActivityLog(): Promise<{ ok: boolean }> {
+  const store = getStoreSingleton();
+  // Disable + bump the generation synchronously, before awaiting clearAll's
+  // DB work (M3, #118) — matches the store's own clearAll(), which does
+  // the same thing; calling it again here is what lets a concurrent
+  // setKeepAiActivityLog(false) path see the bump immediately too.
+  store.bumpGeneration();
+  return store.clearAll();
 }
 
 // Number of logged spans, for the "Keep AI activity log" row (confirm-on-
@@ -78,13 +100,24 @@ export async function getAiActivityLogCount(): Promise<number> {
 // on disk — the setting copy promises both. But if the log was never
 // turned on (or was on but nothing ever touched the DB this session), there
 // is nothing to delete — skip opening ai-traces.db just to clear a file
-// that may not even exist yet (nit, #118).
-export async function setKeepAiActivityLog(enabled: boolean): Promise<void> {
+// that may not even exist yet (nit, #118). Returns `ok: false` when a clear
+// was attempted but didn't fully succeed (H2, #118), so Settings can show
+// an error instead of "deleted".
+export async function setKeepAiActivityLog(
+  enabled: boolean,
+): Promise<{ ok: boolean }> {
+  // Disable + bump the generation synchronously (M3, #118), before any
+  // await below — a getActiveTraceStore() call racing this one must not be
+  // able to re-arm the store we're about to clear. Only touches an
+  // already-created store; if the log was never touched this session
+  // there is nothing racing it yet.
+  if (!enabled && _store) _store.bumpGeneration();
   const shouldClear =
     !enabled &&
     (_dbTouchedThisSession || (await getAiActivityConfig()).keepAiActivityLog);
   await setAiActivityConfig({ keepAiActivityLog: enabled });
-  if (shouldClear) await clearAiActivityLog();
+  if (shouldClear) return clearAiActivityLog();
+  return { ok: true };
 }
 
 // Fire-and-forget: called once from app bootstrap so the retention window

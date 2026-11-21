@@ -172,6 +172,10 @@ export default function SettingsModal({ onClose }: Props) {
   const [logDeletedFeedback, setLogDeletedFeedback] = useState(false);
   const [clearingLog, setClearingLog] = useState(false);
   const [clearedFeedback, setClearedFeedback] = useState(false);
+  // Shown instead of "Log deleted"/"Cleared" when clearAll() couldn't fully
+  // delete the rows (DELETEs failed, VACUUM failed after retries, or rows
+  // remained) — H2, #118.
+  const [logErrorFeedback, setLogErrorFeedback] = useState(false);
   const [aiTesting, setAiTesting] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<"ok" | "error" | null>(null);
@@ -356,18 +360,37 @@ export default function SettingsModal({ onClose }: Props) {
 
   const handleToggleKeepAiActivityLog = useCallback(
     async (nextChecked: boolean) => {
-      const decision = decideDisableToggle(nextChecked, aiActivityCount);
-      if (decision.action === "confirm_disable") {
-        setConfirmDisableLog(true);
+      if (!nextChecked) {
+        // Refresh before deciding: `aiActivityCount` can be stale (e.g. an
+        // AI call logged an entry since the count was last fetched), and a
+        // stale 0 would skip the "Turn off and delete N entries?" confirm
+        // it should show (UX nit, #118).
+        const freshCount = await getAiActivityLogCount();
+        setAiActivityCount(freshCount);
+        if (
+          decideDisableToggle(false, freshCount).action === "confirm_disable"
+        ) {
+          setConfirmDisableLog(true);
+          return;
+        }
+        setConfirmDisableLog(false);
+        setAiActivityCfgState({ keepAiActivityLog: false });
+        const { ok } = await setKeepAiActivityLog(false);
+        setAiActivityCount(0);
+        if (!ok) {
+          setLogErrorFeedback(true);
+          setTimeout(() => setLogErrorFeedback(false), 2000);
+        }
         return;
       }
       setConfirmDisableLog(false);
-      const enabled = decision.action === "enable";
-      setAiActivityCfgState({ keepAiActivityLog: enabled });
-      await setKeepAiActivityLog(enabled);
-      if (!enabled) setAiActivityCount(0);
+      setAiActivityCfgState({ keepAiActivityLog: true });
+      await setKeepAiActivityLog(true);
+      // Refresh so "Clear log" isn't stuck disabled on a stale 0 right
+      // after turning logging back on (UX nit, #118).
+      setAiActivityCount(await getAiActivityLogCount());
     },
-    [aiActivityCount],
+    [],
   );
 
   const handleCancelDisableLog = useCallback(() => {
@@ -377,19 +400,32 @@ export default function SettingsModal({ onClose }: Props) {
   const handleConfirmDisableLog = useCallback(async () => {
     setConfirmDisableLog(false);
     setAiActivityCfgState({ keepAiActivityLog: false });
-    await setKeepAiActivityLog(false);
+    const { ok } = await setKeepAiActivityLog(false);
     setAiActivityCount(0);
-    setLogDeletedFeedback(true);
-    setTimeout(() => setLogDeletedFeedback(false), 2000);
+    if (ok) {
+      setLogDeletedFeedback(true);
+      setTimeout(() => setLogDeletedFeedback(false), 2000);
+    } else {
+      setLogErrorFeedback(true);
+      setTimeout(() => setLogErrorFeedback(false), 2000);
+    }
   }, []);
 
   const handleClearAiActivityLog = useCallback(async () => {
     setClearingLog(true);
     try {
-      await clearAiActivityLog();
-      setAiActivityCount(0);
-      setClearedFeedback(true);
-      setTimeout(() => setClearedFeedback(false), 2000);
+      const { ok } = await clearAiActivityLog();
+      // Re-fetch rather than assuming 0 — if the clear failed, rows may
+      // still be there and the count/Clear-button state should say so
+      // (H2, #118).
+      setAiActivityCount(await getAiActivityLogCount());
+      if (ok) {
+        setClearedFeedback(true);
+        setTimeout(() => setClearedFeedback(false), 2000);
+      } else {
+        setLogErrorFeedback(true);
+        setTimeout(() => setLogErrorFeedback(false), 2000);
+      }
     } finally {
       setClearingLog(false);
     }
@@ -1201,6 +1237,11 @@ export default function SettingsModal({ onClose }: Props) {
                 style={{ fontSize: 11, color: "var(--green)", marginTop: 6 }}
               >
                 Log deleted
+              </div>
+            )}
+            {logErrorFeedback && (
+              <div style={{ fontSize: 11, color: "var(--red)", marginTop: 6 }}>
+                Couldn&apos;t delete the log. Try again.
               </div>
             )}
             <Hint>

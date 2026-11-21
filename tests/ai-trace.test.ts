@@ -201,17 +201,25 @@ async function* streamTextChunks(
   for await (const chunk of result.textStream) yield chunk;
 }
 
-describe("scrubError", () => {
-  it("redacts secrets and long quoted strings, and truncates to ~120 chars", () => {
+describe("scrubError — allowlist (L4, #118)", () => {
+  // Only transport-level error types (abort/network/cors/http_*) ever keep
+  // (redacted, truncated) free text — everything else is replaced outright
+  // with a fixed string, because those are exactly the families (schema/
+  // parse failures, anything unclassified) that can carry arbitrary model
+  // output in `.message`.
+
+  it("keeps redacted, truncated (<=80 char) free text for an allowlisted type (network)", () => {
     const secret = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789";
     const longQuote = "y".repeat(60);
     const err = new Error(
-      `failed Bearer ${secret} body: "${longQuote}" ${"z".repeat(300)}`,
+      `network error: fetch failed, Bearer ${secret} body: "${longQuote}" ${"z".repeat(300)}`,
     );
-    const { errorMessage } = scrubError(err);
+    const { errorType, errorMessage } = scrubError(err);
+    expect(errorType).toBe("network");
     expect(errorMessage).not.toContain(secret);
     expect(errorMessage).not.toContain(longQuote);
-    expect(errorMessage.length).toBeLessThanOrEqual(121);
+    expect(errorMessage.length).toBeLessThanOrEqual(81);
+    expect(errorMessage).toContain("network error");
   });
 
   it("classifies abort-named errors as errorType 'abort'", () => {
@@ -225,13 +233,55 @@ describe("scrubError", () => {
     expect(scrubError(err).errorType).toBe("http_429");
   });
 
-  it("cuts a message at a 'Raw text:' marker, dropping everything after it (H1, #118)", () => {
+  it("keeps an http_* message's free text, still cut at a 'Response:' marker so a quoted provider body can't leak model output", () => {
+    const err = Object.assign(
+      new Error("Upstream said: Response: SECRET_LYRIC_HTTP about rain"),
+      { statusCode: 500 },
+    );
+    const { errorType, errorMessage } = scrubError(err);
+    expect(errorType).toBe("http_500");
+    expect(errorMessage).not.toContain("SECRET_LYRIC_HTTP");
+    expect(errorMessage).toContain("Upstream said:");
+  });
+
+  it("drops free text to a fixed string for a non-allowlisted (unknown) error", () => {
+    const err = new Error("something unexpected happened");
+    const { errorType, errorMessage } = scrubError(err);
+    expect(errorType).toBe("unknown");
+    expect(errorMessage).toBe("error");
+  });
+
+  it("falls back to <ErrorName> for a named, non-allowlisted error with no fixed-message mapping", () => {
+    const err = new Error("some weird parse hiccup with content: LEAKED_TEXT");
+    err.name = "WeirdCustomError";
+    const { errorMessage } = scrubError(err);
+    expect(errorMessage).toBe("<WeirdCustomError>");
+    expect(errorMessage).not.toContain("LEAKED_TEXT");
+  });
+
+  it("the marker regex is case-insensitive — a lowercase 'raw text:' still cuts, and a non-allowlisted type still drops to a fixed string", () => {
     const err = new Error(
-      "No object generated: could not parse the response. Raw text: SECRET_LYRIC_LINE about rain",
+      "could not generate output. raw text: SECRET_LYRIC_LOWER about rain",
     );
     const { errorMessage } = scrubError(err);
-    expect(errorMessage).not.toContain("SECRET_LYRIC_LINE");
-    expect(errorMessage).toContain("could not parse the response");
+    expect(errorMessage).not.toContain("SECRET_LYRIC_LOWER");
+    expect(errorMessage).toBe("error");
+  });
+
+  it("also cuts at a 'Response:' marker", () => {
+    const err = new Error(
+      "Model returned a bad response. Response: SECRET_LYRIC_RESP about rain",
+    );
+    const { errorMessage } = scrubError(err);
+    expect(errorMessage).not.toContain("SECRET_LYRIC_RESP");
+  });
+
+  it("also cuts at an 'output:' marker", () => {
+    const err = new Error(
+      "Model returned invalid output: SECRET_LYRIC_OUT about rain",
+    );
+    const { errorMessage } = scrubError(err);
+    expect(errorMessage).not.toContain("SECRET_LYRIC_OUT");
   });
 
   it("replaces AI_NoObjectGeneratedError's message with a fixed string, never inspecting it", () => {

@@ -5,9 +5,10 @@ import {
   RETENTION_MAX_SPANS,
   FLUSH_INTERVAL_MS,
   PRUNE_EVERY_N_INSERTS,
+  MAX_ROWS_PER_INSERT,
 } from "../src/lib/ai-trace/sqlite-store";
 import type { TraceDb } from "../src/db/trace-client";
-import type { SpanRecord } from "../src/lib/ai-trace/types";
+import type { AttemptRecord, SpanRecord } from "../src/lib/ai-trace/types";
 
 interface Call {
   sql: string;
@@ -48,6 +49,10 @@ function makeSpan(id: string): SpanRecord {
   };
 }
 
+function makeAttempt(spanId: string): AttemptRecord {
+  return { spanId, attempt: 1, startedAt: Date.now(), status: "ok" };
+}
+
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 describe("SqliteTraceStore", () => {
@@ -74,9 +79,13 @@ describe("SqliteTraceStore", () => {
 
     store.write(makeSpan("s49"));
     await tick();
-    expect(
-      calls.filter((c) => c.sql.includes("INSERT INTO ai_spans")),
-    ).toHaveLength(50);
+    // All 50 fit in a single multi-row INSERT (well under
+    // MAX_ROWS_PER_INSERT), so one statement carries all 50 rows' params.
+    const spanInserts = calls.filter((c) =>
+      c.sql.includes("INSERT INTO ai_spans"),
+    );
+    expect(spanInserts).toHaveLength(1);
+    expect(spanInserts[0].params).toHaveLength(50 * 38);
   });
 
   it("flushes on the 2s timer even under the batch size", async () => {
@@ -156,18 +165,28 @@ describe("SqliteTraceStore", () => {
     const expectedCutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
     expect(Math.abs(cutoff - expectedCutoff)).toBeLessThan(5000);
 
-    const spanDelete = calls.find(
-      (c) => c.sql === "DELETE FROM ai_spans WHERE span_id IN (?,?)",
+    // Set-based deletes (nit/BLOCKER, #118): the doomed ids are identified
+    // by a subquery, never by binding every matched span_id as its own
+    // parameter — only [cutoff, limit] are ever bound, regardless of how
+    // many ids matched.
+    const spanDelete = calls.find((c) =>
+      c.sql.startsWith("DELETE FROM ai_spans"),
     );
-    const attemptDelete = calls.find(
-      (c) => c.sql === "DELETE FROM ai_attempts WHERE span_id IN (?,?)",
+    const attemptDelete = calls.find((c) =>
+      c.sql.startsWith("DELETE FROM ai_attempts"),
     );
-    const outcomeDelete = calls.find(
-      (c) => c.sql === "DELETE FROM ai_outcomes WHERE span_id IN (?,?)",
+    const outcomeDelete = calls.find((c) =>
+      c.sql.startsWith("DELETE FROM ai_outcomes"),
     );
-    expect(spanDelete?.params).toEqual(["old1", "old2"]);
-    expect(attemptDelete?.params).toEqual(["old1", "old2"]);
-    expect(outcomeDelete?.params).toEqual(["old1", "old2"]);
+    expect(spanDelete?.sql).toContain("span_id IN (");
+    expect(attemptDelete?.sql).toContain("span_id IN (");
+    expect(outcomeDelete?.sql).toContain("span_id IN (");
+    expect(spanDelete?.sql).not.toMatch(/\?,\s*\?/);
+    expect(attemptDelete?.sql).not.toMatch(/\?,\s*\?/);
+    expect(outcomeDelete?.sql).not.toMatch(/\?,\s*\?/);
+    expect(spanDelete?.params).toEqual([cutoff, RETENTION_MAX_SPANS]);
+    expect(attemptDelete?.params).toEqual([cutoff, RETENTION_MAX_SPANS]);
+    expect(outcomeDelete?.params).toEqual([cutoff, RETENTION_MAX_SPANS]);
     expect(calls.some((c) => c.sql.includes("ai_payloads"))).toBe(false);
   });
 
@@ -182,17 +201,24 @@ describe("SqliteTraceStore", () => {
   });
 
   it("prunes automatically every 500 inserts", async () => {
-    const { db } = makeFakeDb();
+    const { db, calls } = makeFakeDb();
     const store = makeStore(async () => db);
-    const pruneSpy = vi.spyOn(store, "prune");
-    pruneSpy.mockClear(); // drop the constructor's startup call
+    await tick(); // let the constructor's own startup prune land first
+    calls.length = 0;
 
     for (let batch = 0; batch < PRUNE_EVERY_N_INSERTS / 50; batch++) {
       for (let i = 0; i < 50; i++) store.write(makeSpan(`b${batch}-${i}`));
       await tick();
     }
 
-    expect(pruneSpy).toHaveBeenCalled();
+    // flush() calls the internal prune directly (never the public prune(),
+    // which would re-acquire its own mutex and deadlock against the
+    // flush already holding it) — observe the probe SELECT it issues
+    // instead of spying on a method name.
+    const pruneProbes = calls.filter((c) =>
+      c.sql.includes("SELECT span_id FROM ai_spans WHERE started_at"),
+    );
+    expect(pruneProbes.length).toBeGreaterThan(0);
   });
 
   it("swallows a prune failure and counts it instead of throwing", async () => {
@@ -203,14 +229,15 @@ describe("SqliteTraceStore", () => {
     expect(store.droppedRecordCount).toBeGreaterThan(0);
   });
 
-  it("clearAll drops the in-memory buffer, deletes every row except ai_trace_meta, then secure-deletes and VACUUMs (M1, #118)", async () => {
-    const { db, calls } = makeFakeDb();
+  it("clearAll drops the in-memory buffer, deletes every row except ai_trace_meta, secure-deletes, VACUUMs, verifies the count, and reports ok (H2, #118)", async () => {
+    const { db, calls } = makeFakeDb([{ c: 0 }]);
     const store = makeStore(async () => db);
     store.write(makeSpan("buffered-not-yet-flushed"));
     calls.length = 0;
 
-    await store.clearAll();
+    const result = await store.clearAll();
 
+    expect(result).toEqual({ ok: true });
     expect(calls.some((c) => c.sql.includes("ai_payloads"))).toBe(false);
     expect(calls.some((c) => c.sql === "DELETE FROM ai_outcomes")).toBe(true);
     expect(calls.some((c) => c.sql === "DELETE FROM ai_attempts")).toBe(true);
@@ -218,6 +245,9 @@ describe("SqliteTraceStore", () => {
     expect(calls.some((c) => c.sql.includes("ai_trace_meta"))).toBe(false);
     expect(calls.some((c) => c.sql === "PRAGMA secure_delete=ON")).toBe(true);
     expect(calls.some((c) => c.sql === "VACUUM")).toBe(true);
+    expect(
+      calls.some((c) => c.sql === "SELECT COUNT(*) as c FROM ai_spans"),
+    ).toBe(true);
 
     // The buffered (never-flushed) span must not surface after clearAll.
     calls.length = 0;
@@ -226,7 +256,7 @@ describe("SqliteTraceStore", () => {
   });
 
   it("clearAll rotates the install salt", async () => {
-    const { db } = makeFakeDb();
+    const { db } = makeFakeDb([{ c: 0 }]);
     const rotateSalt = vi.fn().mockResolvedValue(undefined);
     const store = new SqliteTraceStore(async () => db, rotateSalt);
     stores.push(store);
@@ -234,6 +264,37 @@ describe("SqliteTraceStore", () => {
     await store.clearAll();
 
     expect(rotateSalt).toHaveBeenCalledTimes(1);
+  });
+
+  it("clearAll reports { ok: false } when VACUUM keeps failing (retried 3x), but still rotates the salt (H2, #118)", async () => {
+    const calls: Call[] = [];
+    const db: TraceDb = {
+      async execute(sql, params) {
+        calls.push({ sql, params });
+        if (sql === "VACUUM") throw new Error("disk full");
+      },
+      async select() {
+        return [{ c: 0 }] as never;
+      },
+    };
+    const rotateSalt = vi.fn().mockResolvedValue(undefined);
+    const store = new SqliteTraceStore(async () => db, rotateSalt);
+    stores.push(store);
+
+    const result = await store.clearAll();
+
+    expect(result).toEqual({ ok: false });
+    expect(calls.filter((c) => c.sql === "VACUUM")).toHaveLength(3);
+    expect(rotateSalt).toHaveBeenCalledTimes(1);
+  });
+
+  it("clearAll reports { ok: false } when rows remain after VACUUM (count check, H2, #118)", async () => {
+    const { db } = makeFakeDb([{ c: 3 }]);
+    const store = makeStore(async () => db);
+
+    const result = await store.clearAll();
+
+    expect(result).toEqual({ ok: false });
   });
 
   it("disable()/enable() flip isActive() and suppress writes while disabled (M1, #118)", async () => {
@@ -256,7 +317,7 @@ describe("SqliteTraceStore", () => {
     );
   });
 
-  it("a flush suspended mid-insert rolls back its whole batch once clearAll disables the store, and nothing survives the DELETEs (M1, #118)", async () => {
+  it("a clearAll() landing between the spans INSERT and the attempts INSERT drops the attempts entirely, and deletes the spans that did land (M1/H2, #118)", async () => {
     const calls: Call[] = [];
     let gated = false;
     let releaseGate!: () => void;
@@ -270,36 +331,32 @@ describe("SqliteTraceStore", () => {
         }
       },
       async select() {
-        return [] as never;
+        return [{ c: 0 }] as never;
       },
     };
     const store = makeStore(async () => db);
     calls.length = 0; // drop the constructor's own startup prune
     store.write(makeSpan("s0"));
-    store.write(makeSpan("s1"));
-    store.write(makeSpan("s2"));
+    store.writeAttempt(makeAttempt("s0"));
 
     const flushPromise = store.flush();
     await tick();
-    // flush is now parked mid-loop, awaiting s0's INSERT.
+    // flush is parked mid-way through the (single, multi-row) spans INSERT.
     expect(
       calls.filter((c) => c.sql.includes("INSERT INTO ai_spans")),
     ).toHaveLength(1);
 
+    // bumpGeneration() (inside clearAll) runs synchronously the moment
+    // clearAll() is called — before the gate below is even released — so
+    // the disable/generation bump lands strictly before the attempts
+    // INSERT's own pre-statement check further down in the same flush.
     const clearPromise = store.clearAll();
     releaseGate();
     await Promise.all([flushPromise, clearPromise]);
 
-    const spanInserts = calls.filter((c) =>
-      c.sql.includes("INSERT INTO ai_spans"),
+    expect(calls.some((c) => c.sql.includes("INSERT INTO ai_attempts"))).toBe(
+      false,
     );
-    // s0's INSERT was issued inside the still-open transaction before
-    // clearAll flipped enabled/generation; s1/s2 are skipped. The flush
-    // then rolls the whole transaction back instead of committing it, so
-    // s0 never actually lands on disk either.
-    expect(spanInserts).toHaveLength(1);
-    expect(calls.some((c) => c.sql === "ROLLBACK")).toBe(true);
-    expect(calls.some((c) => c.sql === "COMMIT")).toBe(false);
     const deleteIndex = calls.findIndex(
       (c) => c.sql === "DELETE FROM ai_spans",
     );
@@ -310,22 +367,31 @@ describe("SqliteTraceStore", () => {
     );
   });
 
-  it("flush runs its INSERTs inside a single BEGIN/COMMIT transaction (item 4, #118)", async () => {
+  it("flush writes spans then attempts as standalone multi-row INSERT statements, never a BEGIN/COMMIT/ROLLBACK transaction (M1, #118)", async () => {
     const { db, calls } = makeFakeDb();
     const store = makeStore(async () => db);
     await tick(); // let the constructor's own startup prune land first
     calls.length = 0;
     store.write(makeSpan("a"));
     store.write(makeSpan("b"));
+    store.writeAttempt(makeAttempt("a"));
 
     await store.flush();
 
-    expect(calls[0].sql).toBe("BEGIN");
-    expect(calls[calls.length - 1].sql).toBe("COMMIT");
+    expect(calls.some((c) => c.sql === "BEGIN")).toBe(false);
+    expect(calls.some((c) => c.sql === "COMMIT")).toBe(false);
     expect(calls.some((c) => c.sql === "ROLLBACK")).toBe(false);
+    const spanIndex = calls.findIndex((c) =>
+      c.sql.includes("INSERT INTO ai_spans"),
+    );
+    const attemptIndex = calls.findIndex((c) =>
+      c.sql.includes("INSERT INTO ai_attempts"),
+    );
+    expect(spanIndex).toBeGreaterThan(-1);
+    expect(attemptIndex).toBeGreaterThan(spanIndex);
   });
 
-  it("flush rolls back the transaction (not just drops records) when a mid-batch insert fails", async () => {
+  it("a failed INSERT drops just that chunk's records (counted), with no transaction to roll back", async () => {
     const calls: Call[] = [];
     const db: TraceDb = {
       async execute(sql, params) {
@@ -342,10 +408,28 @@ describe("SqliteTraceStore", () => {
 
     await expect(store.flush()).resolves.toBeUndefined();
 
-    expect(calls.some((c) => c.sql === "BEGIN")).toBe(true);
-    expect(calls.some((c) => c.sql === "ROLLBACK")).toBe(true);
+    expect(calls.some((c) => c.sql === "BEGIN")).toBe(false);
+    expect(calls.some((c) => c.sql === "ROLLBACK")).toBe(false);
     expect(calls.some((c) => c.sql === "COMMIT")).toBe(false);
     expect(store.droppedRecordCount).toBeGreaterThan(0);
+  });
+
+  it("flush chunks a multi-row INSERT to at most MAX_ROWS_PER_INSERT rows per statement (H2, #118)", async () => {
+    const { db, calls } = makeFakeDb();
+    const store = makeStore(async () => db);
+    await tick();
+    calls.length = 0;
+    const total = MAX_ROWS_PER_INSERT + 1;
+    for (let i = 0; i < total; i++) store.write(makeSpan(`s${i}`));
+
+    await store.flush();
+
+    const spanInserts = calls.filter((c) =>
+      c.sql.includes("INSERT INTO ai_spans"),
+    );
+    expect(spanInserts).toHaveLength(2);
+    expect(spanInserts[0].params).toHaveLength(MAX_ROWS_PER_INSERT * 38);
+    expect(spanInserts[1].params).toHaveLength(1 * 38);
   });
 
   it("count() reports the ai_spans row count", async () => {
@@ -368,5 +452,74 @@ describe("SqliteTraceStore", () => {
     setShouldFail(true);
     expect(await store.count()).toBe(1);
     expect(store.droppedRecordCount).toBeGreaterThan(0);
+  });
+
+  it("count() and prune() share the flush/clearAll mutex — count() waits for an in-flight flush rather than reading mid-write (H2, #118)", async () => {
+    const calls: Call[] = [];
+    let gated = false;
+    let releaseGate!: () => void;
+    const gate = new Promise<void>((resolve) => (releaseGate = resolve));
+    const db: TraceDb = {
+      async execute(sql, params) {
+        calls.push({ sql, params });
+        if (!gated && sql.includes("INSERT INTO ai_spans")) {
+          gated = true;
+          await gate;
+        }
+      },
+      async select(sql, params) {
+        calls.push({ sql, params });
+        return [{ c: 5 }] as never;
+      },
+    };
+    const store = makeStore(async () => db);
+    calls.length = 0; // drop the constructor's own startup prune
+    store.write(makeSpan("s0"));
+
+    const flushPromise = store.flush();
+    await tick();
+    // flush is parked mid-insert, holding the mutex.
+    const countPromise = store.count();
+    releaseGate();
+    await Promise.all([flushPromise, countPromise]);
+
+    const insertIndex = calls.findIndex((c) =>
+      c.sql.includes("INSERT INTO ai_spans"),
+    );
+    const selectIndex = calls.findIndex((c) =>
+      c.sql.includes("SELECT COUNT(*)"),
+    );
+    expect(insertIndex).toBeGreaterThan(-1);
+    expect(selectIndex).toBeGreaterThan(insertIndex);
+  });
+
+  it("handle() captures the generation at call time: a write through a stale handle is dropped even after the store is re-enabled for a new generation (M3, #118)", async () => {
+    const { db, calls } = makeFakeDb();
+    const store = makeStore(async () => db);
+    await tick();
+    calls.length = 0;
+
+    const staleHandle = store.handle();
+    expect(staleHandle.isActive?.()).toBe(true);
+
+    // Simulates "Clear log" (disable + bump) followed by a new call
+    // re-enabling the store for the next generation.
+    store.bumpGeneration();
+    store.enable();
+
+    expect(staleHandle.isActive?.()).toBe(false);
+    staleHandle.write(makeSpan("from-stale-handle"));
+    staleHandle.writeAttempt(makeAttempt("from-stale-handle"));
+    await store.flush();
+
+    expect(calls.some((c) => c.sql.includes("INSERT"))).toBe(false);
+
+    // A handle captured after the bump writes normally.
+    const freshHandle = store.handle();
+    freshHandle.write(makeSpan("from-fresh-handle"));
+    await store.flush();
+    expect(calls.some((c) => c.sql.includes("INSERT INTO ai_spans"))).toBe(
+      true,
+    );
   });
 });

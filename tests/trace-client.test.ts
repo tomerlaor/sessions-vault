@@ -60,12 +60,24 @@ describe("getTraceDb (item 5 nit: memoized pending load, #118)", () => {
     expect(loadMock).toHaveBeenCalledTimes(2);
   });
 
-  it("runs secure_delete=ON as part of loading the DB", async () => {
+  it("sets auto_vacuum=INCREMENTAL at load time, and does NOT set secure_delete globally (M1, #118)", async () => {
     const { raw, calls } = makeFakeRaw();
     loadMock.mockResolvedValue(raw);
 
     await getTraceDb();
 
-    expect(calls.some((c) => c.sql === "PRAGMA secure_delete=ON")).toBe(true);
+    // auto_vacuum is a file-level property persisted in the database
+    // header, so setting it once at load time (before any table exists)
+    // applies regardless of which pooled connection later runs a
+    // statement. secure_delete is per-connection — tauri-plugin-sql's pool
+    // hands each execute()/select() to whichever of several open
+    // connections is free, so a PRAGMA set once at load time on one
+    // connection would be no guarantee for the others. It's set
+    // best-effort immediately before each DELETE batch instead (see
+    // SqliteTraceStore.clearAll()/prune()), never here.
+    expect(calls.some((c) => c.sql === "PRAGMA auto_vacuum=INCREMENTAL")).toBe(
+      true,
+    );
+    expect(calls.some((c) => c.sql === "PRAGMA secure_delete=ON")).toBe(false);
   });
 });

@@ -99,10 +99,49 @@ describe("getActiveTraceStore", () => {
     getAiActivityConfigMock.mockResolvedValueOnce({ keepAiActivityLog: false });
     expect((await getActiveTraceStore()).store).toBeUndefined();
 
+    // getActiveTraceStore reads the config twice per call (M3, #118) — once
+    // up front, once again right before returning, to catch a
+    // setKeepAiActivityLog(false) that lands in between — so both reads
+    // need to agree for this call to hand out a store.
+    getAiActivityConfigMock.mockResolvedValueOnce({ keepAiActivityLog: true });
     getAiActivityConfigMock.mockResolvedValueOnce({ keepAiActivityLog: true });
     getTraceDbMock.mockResolvedValue(makeFakeDb().db);
     getInstallSaltMock.mockResolvedValue("salt-2");
     expect((await getActiveTraceStore()).store).toBeDefined();
+  });
+
+  it("(M3, #118) a getActiveTraceStore() call whose second config read lands after a concurrent setKeepAiActivityLog(false) returns no store", async () => {
+    getAiActivityConfigMock.mockResolvedValueOnce({ keepAiActivityLog: true });
+    getAiActivityConfigMock.mockResolvedValueOnce({ keepAiActivityLog: false });
+    getTraceDbMock.mockResolvedValue(makeFakeDb().db);
+    getInstallSaltMock.mockResolvedValue("salt-3");
+
+    const result = await getActiveTraceStore();
+
+    expect(result).toEqual({});
+  });
+
+  it("(M3, #118) does not re-enable the store if its generation moved (e.g. a concurrent clearAll) while getInstallSalt() was in flight", async () => {
+    getAiActivityConfigMock.mockResolvedValue({ keepAiActivityLog: true });
+    const { db } = makeFakeDb();
+    getTraceDbMock.mockResolvedValue(db);
+    // Bumps the store's generation (disables it) the instant
+    // getInstallSalt() is awaited inside getActiveTraceStore() — simulates
+    // a "Clear log" landing in the middle of this call.
+    let bumped = false;
+    getInstallSaltMock.mockImplementation(async () => {
+      if (!bumped) {
+        bumped = true;
+        await clearAiActivityLog();
+      }
+      return "salt-4";
+    });
+
+    const result = await getActiveTraceStore();
+
+    // The store must come back disabled (isActive() false) rather than
+    // re-armed for a generation that's no longer current.
+    expect(result.store?.isActive?.()).toBe(false);
   });
 });
 
@@ -213,5 +252,56 @@ describe("getAiActivityLogCount", () => {
     getTraceDbMock.mockResolvedValue(db);
 
     expect(await getAiActivityLogCount()).toBe(7);
+  });
+});
+
+describe("M3 (#118): generation is stamped at call start, not write time", () => {
+  function makeSpan(id: string) {
+    return {
+      spanId: id,
+      traceId: id,
+      startedAt: Date.now(),
+      feature: "lyrics" as const,
+      operation: "stream_suggestion",
+      cacheHit: false,
+      attempts: 1,
+      status: "ok" as const,
+    };
+  }
+
+  it("a call started before 'Clear log' that finishes after a new call has re-armed the store writes nothing", async () => {
+    getAiActivityConfigMock.mockResolvedValue({ keepAiActivityLog: true });
+    const { db, calls } = makeFakeDb([{ c: 0 }]);
+    getTraceDbMock.mockResolvedValue(db);
+    getInstallSaltMock.mockResolvedValue("salt-a");
+    rotateInstallSaltMock.mockResolvedValue(undefined);
+
+    // Call A starts while logging is on and resolves its store/handle.
+    const callA = await getActiveTraceStore();
+    expect(callA.store).toBeDefined();
+
+    // The user clicks "Clear log" while call A's model request is still
+    // in flight.
+    await clearAiActivityLog();
+    calls.length = 0;
+
+    // A brand new call starts afterwards — this is what re-arms the store
+    // for the next generation.
+    const callB = await getActiveTraceStore();
+    expect(callB.store).toBeDefined();
+
+    // Call A finally finishes and writes its span through the handle it
+    // was holding onto since before the clear — it must be dropped, not
+    // written under the new generation.
+    callA.store?.write(makeSpan("from-call-a"));
+    await callA.store?.flush();
+    expect(calls.some((c) => c.sql.includes("INSERT"))).toBe(false);
+
+    // Call B's own write lands normally.
+    callB.store?.write(makeSpan("from-call-b"));
+    await callB.store?.flush();
+    expect(calls.some((c) => c.sql.includes("INSERT INTO ai_spans"))).toBe(
+      true,
+    );
   });
 });
