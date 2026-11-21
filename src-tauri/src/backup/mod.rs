@@ -549,6 +549,45 @@ mod tests {
     }
 
     #[test]
+    fn zip_project_never_includes_the_ai_trace_store() {
+        // ai-traces.db (tracing T2, #90) lives in the Tauri app data dir, a
+        // path that is never passed to zip_project — it only ever reads the
+        // single .als path, its .dawmgr sidecar, and caller-supplied
+        // StageFileInput rows. Simulate a real app data dir containing the
+        // trace store sitting right next to (but not inside) the project
+        // directory, and confirm it never ends up in the archive.
+        let project_dir = tempfile::tempdir().unwrap();
+        let als = write_file(project_dir.path(), "song.als", b"fake-als-bytes");
+
+        let app_data_dir = tempfile::tempdir().unwrap();
+        write_file(app_data_dir.path(), "ai-traces.db", b"fake-sqlite-bytes");
+
+        // Even the .dawmgr sidecar (which IS walked recursively) must not
+        // carry the trace store — no caller ever writes it there.
+        let sidecar = project_dir.path().join("song.dawmgr");
+        std::fs::create_dir_all(&sidecar).unwrap();
+        write_file(&sidecar, "notes.txt", b"ordinary sidecar content");
+
+        let stage_files = vec![]; // no caller ever passes trace-store rows
+        let (zip_path, manifest) =
+            zip_project(&als, "Song", "proj-1", None, None, None, &stage_files).unwrap();
+
+        assert!(!manifest
+            .files
+            .iter()
+            .any(|f| f.archive_path.contains("ai-traces")));
+
+        let file = File::open(&zip_path).unwrap();
+        let mut zip = zip::ZipArchive::new(file).unwrap();
+        for i in 0..zip.len() {
+            let entry = zip.by_index(i).unwrap();
+            assert!(!entry.name().contains("ai-traces"));
+        }
+
+        let _ = std::fs::remove_file(&zip_path);
+    }
+
+    #[test]
     fn checksum_file_matches_known_digest() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_file(dir.path(), "data.bin", b"hello world");

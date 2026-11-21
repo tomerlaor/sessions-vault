@@ -23,12 +23,19 @@ import {
   setLyricsAIConfig,
   clearStyleMemory,
 } from "../../db/queries/lyrics-ai";
+import { getAiActivityConfig } from "../../db/queries/ai-trace";
 import {
   testAIConnection,
   OPENAI_MODELS,
   ANTHROPIC_MODELS,
   DEFAULT_LYRICS_CANDIDATE_COUNT,
 } from "../../lib/ai";
+import { traced } from "../../lib/ai-trace";
+import {
+  clearAiActivityLog,
+  getActiveTraceStore,
+  setKeepAiActivityLog,
+} from "../../lib/ai-trace/runtime";
 import {
   resolveIsDecisionsModel,
   fetchOpenRouterDecisionsModels,
@@ -48,6 +55,7 @@ import type {
   AIProvider,
   LyricsAIConfig,
   LyricsDecisionsMode,
+  AiActivityConfig,
 } from "../../types";
 import LyricsAiSettings from "./LyricsAiSettings";
 import LyricsCloudConsentModal from "../shared/LyricsCloudConsentModal";
@@ -150,6 +158,11 @@ export default function SettingsModal({ onClose }: Props) {
   });
   const [pendingLyricsCfg, setPendingLyricsCfg] =
     useState<LyricsAIConfig | null>(null);
+  // Off by default — opt-in, metadata only (tracing T2, #90).
+  const [aiActivityCfg, setAiActivityCfgState] = useState<AiActivityConfig>({
+    keepAiActivityLog: false,
+  });
+  const [clearingLog, setClearingLog] = useState(false);
   const [aiTesting, setAiTesting] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<"ok" | "error" | null>(null);
@@ -179,13 +192,15 @@ export default function SettingsModal({ onClose }: Props) {
       invoke<string[]>("detect_gdrive_paths"),
       getAIConfigWithoutKey(),
       getLyricsAIConfig(),
-    ]).then(([lc, gf, gc, paths, ai, lyricsAI]) => {
+      getAiActivityConfig(),
+    ]).then(([lc, gf, gc, paths, ai, lyricsAI, aiActivity]) => {
       setLocalCfg(lc);
       setGDriveFolderCfg(gf);
       setGdriveConnected(gc);
       setDetectedPaths(paths);
       if (ai) setAiCfg(ai);
       setLyricsAICfgState(lyricsAI);
+      setAiActivityCfgState(aiActivity);
     });
   }, []);
 
@@ -314,7 +329,11 @@ export default function SettingsModal({ onClose }: Props) {
     try {
       // The key is only read from the keychain when actually needed.
       const apiKey = aiCfg.apiKey || (await getAIKey(aiCfg.provider));
-      await testAIConnection({ ...aiCfg, apiKey });
+      const { store, salt } = await getActiveTraceStore();
+      await traced(
+        { feature: "settings", operation: "test_connection", store, salt },
+        (ctx) => testAIConnection({ ...aiCfg, apiKey }, { trace: ctx }),
+      );
       setAiTestResult("ok");
     } catch (e) {
       setAiTestResult("error");
@@ -323,6 +342,23 @@ export default function SettingsModal({ onClose }: Props) {
       setAiTesting(false);
     }
   }, [aiCfg]);
+
+  const handleToggleKeepAiActivityLog = useCallback(
+    async (enabled: boolean) => {
+      setAiActivityCfgState({ keepAiActivityLog: enabled });
+      await setKeepAiActivityLog(enabled);
+    },
+    [],
+  );
+
+  const handleClearAiActivityLog = useCallback(async () => {
+    setClearingLog(true);
+    try {
+      await clearAiActivityLog();
+    } finally {
+      setClearingLog(false);
+    }
+  }, []);
 
   const PROVIDERS: { id: AIProvider; label: string }[] = [
     { id: "openai", label: "OpenAI" },
@@ -1062,6 +1098,58 @@ export default function SettingsModal({ onClose }: Props) {
               onRevokeLyrics={handleRevokeLyricsConsent}
               onRevokeTabAgent={handleRevokeTabAgentConsent}
             />
+
+            <div
+              style={{
+                height: 1,
+                background: "var(--line)",
+                margin: "14px 0 10px",
+              }}
+            />
+
+            <label
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={aiActivityCfg.keepAiActivityLog}
+                onChange={(e) =>
+                  handleToggleKeepAiActivityLog(e.target.checked)
+                }
+                style={{
+                  accentColor: "var(--accent)",
+                  width: 13,
+                  height: 13,
+                  marginTop: 2,
+                }}
+              />
+              <span style={{ fontSize: 12, color: "var(--text-1)" }}>
+                Keep AI activity log
+              </span>
+            </label>
+            <Hint>
+              Saves a local record of each AI request: when it ran, which
+              feature, provider and model, and whether it succeeded. It never
+              stores your lyrics, tabs, chats or prompts. Stays on this Mac, in
+              the app&apos;s data folder (ai-traces.db), and is never included
+              in backups. Turning this off deletes the existing log. Off by
+              default.
+            </Hint>
+            {aiActivityCfg.keepAiActivityLog && (
+              <button
+                className="tb-btn"
+                style={{ fontSize: 11, padding: "4px 12px" }}
+                disabled={clearingLog}
+                onClick={handleClearAiActivityLog}
+              >
+                {clearingLog ? "Clearing…" : "Clear log"}
+              </button>
+            )}
           </section>
 
           <div style={{ height: 1, background: "var(--line)" }} />

@@ -10,9 +10,23 @@ import {
   nextWordOptionsSchema,
   popupSuggestionsSchema,
 } from "./ai";
+import { isLocalProvider } from "./lyrics-privacy";
+import type { TraceContext } from "./ai-trace";
 import { z } from "zod";
 
 // ── Abort + timeout ──────────────────────────────────────────────────────────
+
+// Distinguishes "took too long" from a plain cancel (new keystroke, unmount,
+// parent abort) so traces — and the overlay's error message — can tell them
+// apart. `signal.reason` carries this when the timeout fires; a parent abort
+// keeps whatever reason the caller gave it (an AbortController aborted with
+// no reason gets the default AbortError, which is not a TimeoutError).
+export class TimeoutError extends Error {
+  constructor(message = "AI request timed out") {
+    super(message);
+    this.name = "TimeoutError";
+  }
+}
 
 // Combines a parent AbortSignal with a timeout into a single signal, without
 // relying on AbortSignal.any/AbortSignal.timeout (not in this project's DOM
@@ -28,7 +42,7 @@ export function withTimeoutSignal(
   const controller = new AbortController();
 
   if (parent?.aborted) {
-    controller.abort();
+    controller.abort(parent.reason);
     return {
       signal: controller.signal,
       clearTimeout: () => {},
@@ -36,11 +50,11 @@ export function withTimeoutSignal(
     };
   }
 
-  const onParentAbort = () => controller.abort();
+  const onParentAbort = () => controller.abort(parent!.reason);
   parent?.addEventListener("abort", onParentAbort);
 
   let timer: ReturnType<typeof setTimeout> | undefined = setTimeout(
-    () => controller.abort(),
+    () => controller.abort(new TimeoutError()),
     timeoutMs,
   );
 
@@ -164,10 +178,33 @@ export function shouldRunRequest(
 
 // ── Cached, abortable requests to the AI layer ──────────────────────────────
 
-type RequestOutcome<T> = { status: "ok"; value: T } | { status: "aborted" };
+type RequestOutcome<T> =
+  { status: "ok"; value: T } | { status: "aborted" } | { status: "timeout" };
 
 const DEFAULT_FIRST_TOKEN_TIMEOUT_MS = 5000;
 const DEFAULT_OBJECT_TIMEOUT_MS = 8000;
+
+// A cache hit never calls buildProvider (ai.ts), so it never gets the
+// provider/locality/requestModel fields that make NOT NULL columns in
+// ai_spans — set them here instead. No prompt/output text is touched.
+function markCacheHit(trace: TraceContext | undefined, cfg: AIConfig): void {
+  if (!trace) return;
+  trace.span.cacheHit = true;
+  trace.span.provider = cfg.provider;
+  trace.span.locality = isLocalProvider(cfg.provider) ? "local" : "cloud";
+  trace.span.requestModel = cfg.model || cfg.provider;
+}
+
+// Classifies an aborted signal onto the trace span (timeout vs a plain
+// cancel) and returns the matching RequestOutcome status.
+function classifyAbort(
+  signal: AbortSignal,
+  trace: TraceContext | undefined,
+): "timeout" | "aborted" {
+  const isTimeout = signal.reason instanceof TimeoutError;
+  if (trace) trace.span.status = isTimeout ? "timeout" : "cancelled";
+  return isTimeout ? "timeout" : "aborted";
+}
 
 export interface StreamRequestParams {
   aiConfig: AIConfig;
@@ -178,6 +215,7 @@ export interface StreamRequestParams {
   cache: LruCache<string, string>;
   firstTokenTimeoutMs?: number;
   onToken: (accumulated: string) => void;
+  trace?: TraceContext;
 }
 
 // Streams an inline suggestion. Enforces a first-token timeout (the rest of
@@ -190,6 +228,7 @@ export async function requestStreamSuggestion(
   const cached = params.cache.get(key);
   if (cached !== undefined) {
     params.onToken(cached);
+    markCacheHit(params.trace, params.aiConfig);
     return { status: "ok", value: cached };
   }
 
@@ -209,6 +248,8 @@ export async function requestStreamSuggestion(
       params.system,
       params.prompt,
       signal,
+      undefined,
+      { trace: params.trace },
     )) {
       if (!gotFirstToken) {
         gotFirstToken = true;
@@ -226,7 +267,7 @@ export async function requestStreamSuggestion(
     if (accumulated) params.cache.set(key, accumulated);
     return { status: "ok", value: accumulated };
   } catch (err) {
-    if (signal.aborted) return { status: "aborted" };
+    if (signal.aborted) return { status: classifyAbort(signal, params.trace) };
     throw err;
   } finally {
     dispose();
@@ -241,11 +282,13 @@ export interface ObjectRequestParams<T> {
   signal?: AbortSignal;
   cache: LruCache<string, T>;
   timeoutMs?: number;
+  trace?: TraceContext;
   call: (
     cfg: AIConfig,
     system: string,
     prompt: string,
     signal: AbortSignal,
+    options?: { trace?: TraceContext },
   ) => Promise<T>;
 }
 
@@ -254,7 +297,10 @@ async function requestCachedObject<T>(
 ): Promise<RequestOutcome<T>> {
   const key = hashRequestKey(params.cacheMode, params.system, params.prompt);
   const cached = params.cache.get(key);
-  if (cached !== undefined) return { status: "ok", value: cached };
+  if (cached !== undefined) {
+    markCacheHit(params.trace, params.aiConfig);
+    return { status: "ok", value: cached };
+  }
 
   const { signal, dispose } = withTimeoutSignal(
     params.signal,
@@ -266,11 +312,12 @@ async function requestCachedObject<T>(
       params.system,
       params.prompt,
       signal,
+      { trace: params.trace },
     );
     params.cache.set(key, value);
     return { status: "ok", value };
   } catch (err) {
-    if (signal.aborted) return { status: "aborted" };
+    if (signal.aborted) return { status: classifyAbort(signal, params.trace) };
     throw err;
   } finally {
     dispose();
@@ -287,11 +334,13 @@ export function requestNextWordOptions(params: {
   signal?: AbortSignal;
   cache: LruCache<string, NextWordOptionsResult>;
   timeoutMs?: number;
+  trace?: TraceContext;
 }): Promise<RequestOutcome<NextWordOptionsResult>> {
   return requestCachedObject({
     ...params,
     cacheMode: "next_word",
-    call: generateNextWordOptions,
+    call: (cfg, system, prompt, signal, options) =>
+      generateNextWordOptions(cfg, system, prompt, signal, undefined, options),
   });
 }
 
@@ -302,6 +351,7 @@ export function requestPopupSuggestions(params: {
   signal?: AbortSignal;
   cache: LruCache<string, PopupSuggestionsResult>;
   timeoutMs?: number;
+  trace?: TraceContext;
 }): Promise<RequestOutcome<PopupSuggestionsResult>> {
   return requestCachedObject({
     ...params,
