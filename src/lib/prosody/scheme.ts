@@ -189,7 +189,16 @@ export function nextLineTargets(
 
   let rhymeWith: string | undefined;
   if (scheme === "AABB" && lines.length >= 1) {
-    rhymeWith = lastWordOf(lines[lines.length - 1]) || undefined;
+    // AABB couplets close every two lines: an odd count means the most
+    // recently finished line is still the first half of its pair and
+    // needs a rhyming partner (target it); an even count means a pair
+    // just closed and the next line starts a fresh one, so forcing it to
+    // rhyme with the line above would turn an intended couplet scheme
+    // into an unintended AAA run (the "last-line bias" bug).
+    rhymeWith =
+      lines.length % 2 === 1
+        ? lastWordOf(lines[lines.length - 1]) || undefined
+        : undefined;
   } else if (scheme === "ABAB" && lines.length >= 2) {
     rhymeWith = lastWordOf(lines[lines.length - 2]) || undefined;
   }
