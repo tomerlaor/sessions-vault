@@ -6,6 +6,9 @@
 
 * Existing users will be asked for AI cloud consent once more, because consent is now tied to the current provider (lyrics helper and Tab Agent).
 * rewrite the lyrics AI prompts with cursor/section context and explicit rhyme/syllable targets (R6, #79), and fix the shared output sanitizer: wrapping-quote stripping now only removes a genuinely matched quote pair (never an apostrophe), the cursor marker survives ad-libs/chords and strips an echoed marker, popup suggestions are sanitized like ghost text, and the implied rhyme target respects AABB/ABAB/free-verse instead of always targeting the previous line.
+* fix the AABB rhyme target's last-line bias (it now respects couplet parity instead of always targeting the previous line, in both the implied-target fallback and `nextLineTargets`), replace the no-scheme-yet fallback with a position-based soft target that hedges between two candidate lines for next_word when genuinely ambiguous, and add a non-failing `formatRaw` diagnostic plus a prompt-version bump (R6, #79 review follow-up).
+* smooth the inline ghost text while it's streaming — a light live sanitize now strips a leading label/numbering/quote/fence/header from the partial reply so it no longer flashes raw formatting and then jumps once the full reply lands.
+* finish more of #79: the completion prompt is now punctuation-aware (continues mid-clause after a comma, starts fresh after `. ! ?`), a prompt rule plus a post-filter stop completions from repeating text already after the cursor, and a headerless draft now infers its line position from blank-line-separated stanzas instead of saying nothing.
 
 ## [0.2.0](https://github.com/tomerlaor/sessions-vault/compare/v0.1.0...v0.2.0) (2026-05-30)
 
