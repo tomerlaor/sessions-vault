@@ -28,8 +28,13 @@ import {
   buildLyricsPopupPrompt,
   buildNextWordOptionsPrompt,
   determineSuggestionMode,
+  isHebrew,
+  lyricsInlinePromptId,
+  lyricsPopupPromptId,
+  nextWordOptionsPromptId,
   normalizeNextWord,
   normalizeNextWordOptions,
+  PROMPT_VERSION,
 } from "../../../lib/lyrics-ai";
 import {
   LruCache,
@@ -39,6 +44,8 @@ import {
   requestStreamSuggestion,
   requestNextWordOptions,
   requestPopupSuggestions,
+  withTimeoutSignal,
+  timeoutMessage,
   type RunSignature,
   type NextWordOptionsResult,
   type PopupSuggestionsResult,
@@ -48,6 +55,8 @@ import {
   pickLocalProvider,
   switchToLocalAIConfig,
 } from "../../../lib/lyrics-privacy";
+import { traced } from "../../../lib/ai-trace";
+import { getActiveTraceStore } from "../../../lib/ai-trace/runtime";
 import LyricsCloudConsentModal from "../../shared/LyricsCloudConsentModal";
 import type {
   Project,
@@ -373,16 +382,44 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
           setStatus("loading");
           try {
             const { system, prompt } = buildNextWordOptionsPrompt(baseInput);
-            const result = await requestNextWordOptions({
-              aiConfig,
-              system,
-              prompt,
-              signal,
-              cache: nextWordCache,
-            });
+            const hebrew = isHebrew(draft || currentLine);
+            const { store, salt } = await getActiveTraceStore();
+            const result = await traced(
+              {
+                feature: "lyrics",
+                operation: "next_word",
+                mode: "next_word",
+                trigger: "debounce",
+                projectRef: project.id,
+                promptId: nextWordOptionsPromptId(hebrew),
+                promptVersion: PROMPT_VERSION,
+                store,
+                salt,
+              },
+              (ctx) => {
+                ctx.span.lang = hebrew ? "he" : "en";
+                return requestNextWordOptions({
+                  aiConfig,
+                  system,
+                  prompt,
+                  signal,
+                  cache: nextWordCache,
+                  trace: ctx,
+                });
+              },
+            );
             if (!isCurrent()) return;
             if (result.status === "aborted") {
               setStatus("idle");
+              return;
+            }
+            if (result.status === "timeout") {
+              setErrorMsg(timeoutMessage(aiConfig.provider));
+              setStatus("error");
+              setTimeout(() => {
+                setStatus("idle");
+                setErrorMsg(null);
+              }, 6000);
               return;
             }
             const options = normalizeNextWordOptions(
@@ -423,16 +460,43 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               ...baseInput,
               enabledModes: cfg.enabledModes,
             });
-            const result = await requestPopupSuggestions({
-              aiConfig,
-              system,
-              prompt,
-              signal,
-              cache: popupCache,
-            });
+            const hebrew = isHebrew(draft || currentLine);
+            const { store, salt } = await getActiveTraceStore();
+            const result = await traced(
+              {
+                feature: "lyrics",
+                operation: "popup",
+                trigger: "debounce",
+                projectRef: project.id,
+                promptId: lyricsPopupPromptId(hebrew),
+                promptVersion: PROMPT_VERSION,
+                store,
+                salt,
+              },
+              (ctx) => {
+                ctx.span.lang = hebrew ? "he" : "en";
+                return requestPopupSuggestions({
+                  aiConfig,
+                  system,
+                  prompt,
+                  signal,
+                  cache: popupCache,
+                  trace: ctx,
+                });
+              },
+            );
             if (!isCurrent()) return;
             if (result.status === "aborted") {
               setStatus("idle");
+              return;
+            }
+            if (result.status === "timeout") {
+              setErrorMsg(timeoutMessage(aiConfig.provider));
+              setStatus("error");
+              setTimeout(() => {
+                setStatus("idle");
+                setErrorMsg(null);
+              }, 6000);
               return;
             }
             setPopupItems(
@@ -468,23 +532,52 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               ...baseInput,
               mode,
             });
-            const result = await requestStreamSuggestion({
-              aiConfig,
-              cacheMode: mode,
-              system,
-              prompt,
-              signal,
-              cache: streamCache,
-              onToken: (accumulated) => {
-                if (!isCurrent()) return;
-                setGhostText(accumulated);
-                setStatus("streaming");
+            const hebrew = isHebrew(draft || currentLine);
+            const { store, salt } = await getActiveTraceStore();
+            const result = await traced(
+              {
+                feature: "lyrics",
+                operation: "stream_suggestion",
+                mode,
+                trigger: "debounce",
+                projectRef: project.id,
+                promptId: lyricsInlinePromptId(mode, hebrew),
+                promptVersion: PROMPT_VERSION,
+                store,
+                salt,
               },
-            });
+              (ctx) => {
+                ctx.span.lang = hebrew ? "he" : "en";
+                return requestStreamSuggestion({
+                  aiConfig,
+                  cacheMode: mode,
+                  system,
+                  prompt,
+                  signal,
+                  cache: streamCache,
+                  trace: ctx,
+                  onToken: (accumulated) => {
+                    if (!isCurrent()) return;
+                    setGhostText(accumulated);
+                    setStatus("streaming");
+                  },
+                });
+              },
+            );
             if (!isCurrent()) return;
             if (result.status === "aborted") {
               setGhostText("");
               setStatus("idle");
+              return;
+            }
+            if (result.status === "timeout") {
+              setGhostText("");
+              setErrorMsg(timeoutMessage(aiConfig.provider));
+              setStatus("error");
+              setTimeout(() => {
+                setStatus("idle");
+                setErrorMsg(null);
+              }, 6000);
               return;
             }
             if (result.value) {
@@ -537,12 +630,32 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
         if (!aiConfig) return;
         const count = await countAcceptedEvents(scopeId);
         if (count > 0 && count % 5 === 0) {
-          const recent = await getRecentAccepted(scopeId, 20);
-          const summary = await generateStyleSummary(aiConfig, recent);
-          const profileId = scopeId ?? "global";
-          await upsertStyleProfile(profileId, summary);
-          if (scopeId === null) setGlobalProfile(summary);
-          else setProjectProfile(summary);
+          const { signal, dispose } = withTimeoutSignal(undefined, 8000);
+          try {
+            const recent = await getRecentAccepted(scopeId, 20);
+            const { store, salt } = await getActiveTraceStore();
+            const summary = await traced(
+              {
+                feature: "lyrics",
+                operation: "style_summary",
+                trigger: "accept_threshold",
+                projectRef: scopeId ?? undefined,
+                store,
+                salt,
+              },
+              (ctx) =>
+                generateStyleSummary(aiConfig, recent, signal, { trace: ctx }),
+            );
+            const profileId = scopeId ?? "global";
+            await upsertStyleProfile(profileId, summary);
+            if (scopeId === null) setGlobalProfile(summary);
+            else setProjectProfile(summary);
+          } catch {
+            // A failed regen must not surface as an unhandled rejection from
+            // handleAccept — the trace above already recorded the error.
+          } finally {
+            dispose();
+          }
         }
       },
       [aiConfig],

@@ -23,12 +23,24 @@ import {
   setLyricsAIConfig,
   clearStyleMemory,
 } from "../../db/queries/lyrics-ai";
+import { getAiActivityConfig } from "../../db/queries/ai-trace";
 import {
   testAIConnection,
   OPENAI_MODELS,
   ANTHROPIC_MODELS,
   DEFAULT_LYRICS_CANDIDATE_COUNT,
 } from "../../lib/ai";
+import { traced } from "../../lib/ai-trace";
+import {
+  clearAiActivityLog,
+  getActiveTraceStore,
+  getAiActivityLogCount,
+  setKeepAiActivityLog,
+} from "../../lib/ai-trace/runtime";
+import {
+  decideDisableToggle,
+  formatEntryCount,
+} from "../../lib/ai-trace/settings-log-ui";
 import {
   resolveIsDecisionsModel,
   fetchOpenRouterDecisionsModels,
@@ -48,6 +60,7 @@ import type {
   AIProvider,
   LyricsAIConfig,
   LyricsDecisionsMode,
+  AiActivityConfig,
 } from "../../types";
 import LyricsAiSettings from "./LyricsAiSettings";
 import LyricsCloudConsentModal from "../shared/LyricsCloudConsentModal";
@@ -150,6 +163,15 @@ export default function SettingsModal({ onClose }: Props) {
   });
   const [pendingLyricsCfg, setPendingLyricsCfg] =
     useState<LyricsAIConfig | null>(null);
+  // Off by default — opt-in, metadata only (tracing T2, #90).
+  const [aiActivityCfg, setAiActivityCfgState] = useState<AiActivityConfig>({
+    keepAiActivityLog: false,
+  });
+  const [aiActivityCount, setAiActivityCount] = useState(0);
+  const [confirmDisableLog, setConfirmDisableLog] = useState(false);
+  const [logDeletedFeedback, setLogDeletedFeedback] = useState(false);
+  const [clearingLog, setClearingLog] = useState(false);
+  const [clearedFeedback, setClearedFeedback] = useState(false);
   const [aiTesting, setAiTesting] = useState(false);
   const [keySaved, setKeySaved] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<"ok" | "error" | null>(null);
@@ -179,13 +201,17 @@ export default function SettingsModal({ onClose }: Props) {
       invoke<string[]>("detect_gdrive_paths"),
       getAIConfigWithoutKey(),
       getLyricsAIConfig(),
-    ]).then(([lc, gf, gc, paths, ai, lyricsAI]) => {
+      getAiActivityConfig(),
+      getAiActivityLogCount(),
+    ]).then(([lc, gf, gc, paths, ai, lyricsAI, aiActivity, logCount]) => {
       setLocalCfg(lc);
       setGDriveFolderCfg(gf);
       setGdriveConnected(gc);
       setDetectedPaths(paths);
       if (ai) setAiCfg(ai);
       setLyricsAICfgState(lyricsAI);
+      setAiActivityCfgState(aiActivity);
+      setAiActivityCount(logCount);
     });
   }, []);
 
@@ -314,7 +340,11 @@ export default function SettingsModal({ onClose }: Props) {
     try {
       // The key is only read from the keychain when actually needed.
       const apiKey = aiCfg.apiKey || (await getAIKey(aiCfg.provider));
-      await testAIConnection({ ...aiCfg, apiKey });
+      const { store, salt } = await getActiveTraceStore();
+      await traced(
+        { feature: "settings", operation: "test_connection", store, salt },
+        (ctx) => testAIConnection({ ...aiCfg, apiKey }, { trace: ctx }),
+      );
       setAiTestResult("ok");
     } catch (e) {
       setAiTestResult("error");
@@ -323,6 +353,47 @@ export default function SettingsModal({ onClose }: Props) {
       setAiTesting(false);
     }
   }, [aiCfg]);
+
+  const handleToggleKeepAiActivityLog = useCallback(
+    async (nextChecked: boolean) => {
+      const decision = decideDisableToggle(nextChecked, aiActivityCount);
+      if (decision.action === "confirm_disable") {
+        setConfirmDisableLog(true);
+        return;
+      }
+      setConfirmDisableLog(false);
+      const enabled = decision.action === "enable";
+      setAiActivityCfgState({ keepAiActivityLog: enabled });
+      await setKeepAiActivityLog(enabled);
+      if (!enabled) setAiActivityCount(0);
+    },
+    [aiActivityCount],
+  );
+
+  const handleCancelDisableLog = useCallback(() => {
+    setConfirmDisableLog(false);
+  }, []);
+
+  const handleConfirmDisableLog = useCallback(async () => {
+    setConfirmDisableLog(false);
+    setAiActivityCfgState({ keepAiActivityLog: false });
+    await setKeepAiActivityLog(false);
+    setAiActivityCount(0);
+    setLogDeletedFeedback(true);
+    setTimeout(() => setLogDeletedFeedback(false), 2000);
+  }, []);
+
+  const handleClearAiActivityLog = useCallback(async () => {
+    setClearingLog(true);
+    try {
+      await clearAiActivityLog();
+      setAiActivityCount(0);
+      setClearedFeedback(true);
+      setTimeout(() => setClearedFeedback(false), 2000);
+    } finally {
+      setClearingLog(false);
+    }
+  }, []);
 
   const PROVIDERS: { id: AIProvider; label: string }[] = [
     { id: "openai", label: "OpenAI" },
@@ -1062,6 +1133,99 @@ export default function SettingsModal({ onClose }: Props) {
               onRevokeLyrics={handleRevokeLyricsConsent}
               onRevokeTabAgent={handleRevokeTabAgentConsent}
             />
+
+            <div
+              style={{
+                height: 1,
+                background: "var(--line)",
+                margin: "14px 0 10px",
+              }}
+            />
+
+            <label
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={aiActivityCfg.keepAiActivityLog}
+                onChange={(e) =>
+                  handleToggleKeepAiActivityLog(e.target.checked)
+                }
+                style={{
+                  accentColor: "var(--accent)",
+                  width: 13,
+                  height: 13,
+                  marginTop: 2,
+                }}
+              />
+              <span style={{ fontSize: 12, color: "var(--text-1)" }}>
+                Keep AI activity log
+              </span>
+            </label>
+            {confirmDisableLog && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: 11,
+                  marginTop: 6,
+                }}
+              >
+                <span style={{ color: "var(--text-2)" }}>
+                  Turn off and delete {formatEntryCount(aiActivityCount)}?
+                </span>
+                <button
+                  className="tb-btn"
+                  style={{ fontSize: 10, padding: "2px 8px" }}
+                  onClick={handleConfirmDisableLog}
+                >
+                  Delete
+                </button>
+                <button
+                  className="tb-btn"
+                  style={{ fontSize: 10, padding: "2px 8px" }}
+                  onClick={handleCancelDisableLog}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            {logDeletedFeedback && (
+              <div
+                style={{ fontSize: 11, color: "var(--green)", marginTop: 6 }}
+              >
+                Log deleted
+              </div>
+            )}
+            <Hint>
+              Saves a local record of each AI request: when it ran and how long
+              it took, which feature, song, provider and model, token counts and
+              estimated cost, and whether it succeeded (with a short error note
+              if not). It never stores the text of your lyrics, tabs, chats or
+              prompts. Stays on this Mac, in the app&apos;s data folder
+              (ai-traces.db), and is never included in backups. Turning this off
+              deletes the existing log. Off by default.
+            </Hint>
+            {aiActivityCfg.keepAiActivityLog && (
+              <button
+                className="tb-btn"
+                style={{ fontSize: 11, padding: "4px 12px" }}
+                disabled={clearingLog || aiActivityCount === 0}
+                onClick={handleClearAiActivityLog}
+              >
+                {clearingLog
+                  ? "Clearing…"
+                  : clearedFeedback
+                    ? "Cleared"
+                    : "Clear log"}
+              </button>
+            )}
           </section>
 
           <div style={{ height: 1, background: "var(--line)" }} />

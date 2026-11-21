@@ -32,8 +32,11 @@ import {
   requestStreamSuggestion,
   requestNextWordOptions,
   requestPopupSuggestions,
+  timeoutMessage,
+  TimeoutError,
   type RunSignature,
 } from "../src/lib/lyrics-ai-request";
+import { createTraceContext } from "../src/lib/ai-trace";
 import type { AIConfig } from "../src/types";
 
 const cfg: AIConfig = {
@@ -219,6 +222,41 @@ describe("withTimeoutSignal", () => {
     parent.abort();
     expect(signal.aborted).toBe(true);
   });
+
+  it("aborts with a TimeoutError reason when the timeout fires", () => {
+    const { signal } = withTimeoutSignal(undefined, 5000);
+    vi.advanceTimersByTime(5000);
+    expect(signal.reason).toBeInstanceOf(TimeoutError);
+  });
+
+  it("forwards the parent's own abort reason instead of a TimeoutError", () => {
+    const parent = new AbortController();
+    const { signal } = withTimeoutSignal(parent.signal, 5000);
+    parent.abort("superseded");
+    expect(signal.reason).toBe("superseded");
+  });
+});
+
+// ── timeoutMessage ───────────────────────────────────────────────────────────
+
+describe("timeoutMessage", () => {
+  it("gives a generic retry prompt for cloud providers", () => {
+    expect(timeoutMessage("openai")).toBe("AI took too long. Try again.");
+    expect(timeoutMessage("anthropic")).toBe("AI took too long. Try again.");
+    expect(timeoutMessage("openrouter")).toBe("AI took too long. Try again.");
+  });
+
+  it("nudges toward checking Ollama when that's the active provider", () => {
+    expect(timeoutMessage("ollama")).toBe(
+      "AI took too long. Try again, or check that Ollama is running.",
+    );
+  });
+
+  it("nudges toward checking LM Studio when that's the active provider", () => {
+    expect(timeoutMessage("lmstudio")).toBe(
+      "AI took too long. Try again, or check that LM Studio is running.",
+    );
+  });
 });
 
 // ── requestStreamSuggestion ──────────────────────────────────────────────────
@@ -295,7 +333,7 @@ describe("requestStreamSuggestion", () => {
     });
   }
 
-  it("aborts and reports status 'aborted' when no first token arrives within 5s", async () => {
+  it("reports status 'timeout' (distinct from a plain cancel) when no first token arrives within 5s", async () => {
     let capturedSignal: AbortSignal | undefined;
     streamLyricsSuggestionMock.mockImplementation(async function* (
       _cfg: AIConfig,
@@ -321,8 +359,9 @@ describe("requestStreamSuggestion", () => {
     await vi.advanceTimersByTimeAsync(5000);
     const result = await promise;
 
-    expect(result).toEqual({ status: "aborted" });
+    expect(result).toEqual({ status: "timeout" });
     expect(capturedSignal?.aborted).toBe(true);
+    expect(capturedSignal?.reason).toBeInstanceOf(TimeoutError);
   });
 
   it("aborts when the caller's parent signal is aborted mid-stream (after the first token)", async () => {
@@ -359,6 +398,44 @@ describe("requestStreamSuggestion", () => {
 
     expect(result).toEqual({ status: "aborted" });
     expect(capturedSignal?.aborted).toBe(true);
+    expect(capturedSignal?.reason).not.toBeInstanceOf(TimeoutError);
+  });
+
+  it("records a cache-hit span (no network call) when a trace context is given", async () => {
+    streamLyricsSuggestionMock.mockImplementation(async function* () {
+      yield "hello";
+    });
+    const cache = new LruCache<string, string>(50);
+
+    await requestStreamSuggestion({
+      aiConfig: cfg,
+      cacheMode: "completion",
+      system: "sys",
+      prompt: "prompt",
+      cache,
+      onToken: () => {},
+    });
+    streamLyricsSuggestionMock.mockClear();
+
+    const ctx = createTraceContext({
+      feature: "lyrics",
+      operation: "stream_suggestion",
+    });
+    const result = await requestStreamSuggestion({
+      aiConfig: cfg,
+      cacheMode: "completion",
+      system: "sys",
+      prompt: "prompt",
+      cache,
+      onToken: () => {},
+      trace: ctx,
+    });
+
+    expect(result).toEqual({ status: "ok", value: "hello" });
+    expect(streamLyricsSuggestionMock).not.toHaveBeenCalled();
+    expect(ctx.span.cacheHit).toBe(true);
+    expect(ctx.span.provider).toBe(cfg.provider);
+    expect(ctx.span.requestModel).toBe(cfg.model);
   });
 });
 
@@ -413,7 +490,7 @@ describe("requestNextWordOptions", () => {
     expect(generateNextWordOptionsMock).toHaveBeenCalledTimes(1);
   });
 
-  it("aborts after the 8s overall timeout and reports status 'aborted'", async () => {
+  it("reports status 'timeout' after the 8s overall timeout elapses", async () => {
     let capturedSignal: AbortSignal | undefined;
     generateNextWordOptionsMock.mockImplementation(
       (
@@ -444,7 +521,7 @@ describe("requestNextWordOptions", () => {
     await vi.advanceTimersByTimeAsync(8000);
     const result = await promise;
 
-    expect(result).toEqual({ status: "aborted" });
+    expect(result).toEqual({ status: "timeout" });
     expect(capturedSignal?.aborted).toBe(true);
   });
 });
@@ -453,7 +530,7 @@ describe("requestPopupSuggestions", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("aborts after the 8s overall timeout and reports status 'aborted'", async () => {
+  it("reports status 'timeout' after the 8s overall timeout elapses", async () => {
     let capturedSignal: AbortSignal | undefined;
     generatePopupSuggestionsMock.mockImplementation(
       (
@@ -484,7 +561,7 @@ describe("requestPopupSuggestions", () => {
     await vi.advanceTimersByTimeAsync(8000);
     const result = await promise;
 
-    expect(result).toEqual({ status: "aborted" });
+    expect(result).toEqual({ status: "timeout" });
     expect(capturedSignal?.aborted).toBe(true);
   });
 

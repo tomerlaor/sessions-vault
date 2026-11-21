@@ -298,10 +298,9 @@ function buildProvider(
   });
 }
 
-// Used by every one of the 7 call sites below when the caller didn't thread
-// a TraceContext through (no caller does yet in this PR — that's T2's job).
-// Still wraps the provider via buildProvider so untraced call sites remain
-// visible to a DEV console warning instead of silently skipping tracing.
+// Used by any call site that doesn't thread a TraceContext through. Still
+// wraps the provider via buildProvider so untraced call sites remain visible
+// to a DEV console warning instead of silently skipping tracing.
 function resolveTrace(
   trace: TraceContext | undefined,
   meta: { operation: string; mode?: SpanMode },
@@ -742,6 +741,7 @@ export type GeneratedParts = z.infer<typeof tabPartsSchema>;
 export async function generateTabStructure(
   cfg: AIConfig,
   input: TabGenerationInput,
+  signal?: AbortSignal,
   options?: { trace?: TraceContext },
 ): Promise<GeneratedParts> {
   const trace = resolveTrace(options?.trace, { operation: "tab_structure" });
@@ -781,6 +781,7 @@ Return exactly ${input.instruments.length} part(s), one per requested instrument
       provider,
       schema: tabPartsSchema,
       prompt,
+      signal,
     });
     trace.span.durationMs = Date.now() - t0;
     trace.span.outputChars = JSON.stringify(result.object).length;
@@ -805,6 +806,7 @@ export async function chatWithTabAgent(
   cfg: AIConfig,
   system: string,
   messages: { role: "user" | "assistant"; content: string }[],
+  signal?: AbortSignal,
   options?: { trace?: TraceContext },
 ): Promise<string> {
   const trace = resolveTrace(options?.trace, { operation: "tab_chat" });
@@ -819,6 +821,7 @@ export async function chatWithTabAgent(
       system,
       messages,
       maxOutputTokens: 400,
+      abortSignal: signal,
       onFinish({ text, usage, finishReason, response }) {
         trace.span.durationMs = Date.now() - t0;
         trace.span.outputChars = text.length;

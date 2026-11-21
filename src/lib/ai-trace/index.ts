@@ -14,6 +14,7 @@ export type {
   UsageSource,
 } from "./types";
 export { MemoryTraceStore } from "./memory-store";
+export { SqliteTraceStore } from "./sqlite-store";
 export { hashPrompt } from "./hash";
 export { scrubError } from "./scrub";
 export type { ScrubbedError } from "./scrub";

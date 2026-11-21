@@ -33,7 +33,7 @@ export interface LyricsPopupInput extends Omit<LyricsSuggestionInput, "mode"> {
 // eslint-disable-next-line no-misleading-character-class -- Hebrew presentation forms are intentional
 const HEBREW_RE = /[א-תיִ-פֿ]/;
 
-function isHebrew(text: string): boolean {
+export function isHebrew(text: string): boolean {
   return HEBREW_RE.test(text);
 }
 
