@@ -112,3 +112,126 @@ export function sanitizeLyricsOutput(raw: string, mode: SanitizeMode): string {
   if (hadLeadingSpace && text) text = ` ${text}`;
   return text;
 }
+
+// ─── Streaming (partial) sanitizer ─────────────────────────────────────────
+// A lighter version of sanitizeLyricsOutput for LyricsAiOverlay's streaming
+// ghost text (onToken) — it only ever trims from the start of the reply,
+// and holds back (returns "") rather than show a prefix that could still
+// turn into noise once more of the stream arrives (e.g. "Line" before the
+// ":" that would make it a label, or "1" before the "." that would make it
+// numbering). This avoids the ghost text visibly flashing a label/quote/
+// fence/header and then jumping to the clean text once the full reply —
+// still cleaned by sanitizeLyricsOutput — lands.
+const LABEL_WORD_LIST = [
+  "next line",
+  "next word",
+  "completion",
+  "suggestion",
+  "option",
+  "alternative",
+  "answer",
+  "line",
+  "הצעה",
+  "השלמה",
+  "שורה הבאה",
+  "מילה הבאה",
+  "אפשרות",
+  "חלופה",
+  "תשובה",
+];
+
+function isCompleteNoiseLine(line: string): boolean {
+  const trimmed = line.trim();
+  return (
+    trimmed === "" ||
+    HEADER_LINE_RE.test(trimmed) ||
+    FENCE_LINE_RE.test(trimmed)
+  );
+}
+
+// True while `s` (the streamed-so-far first line) could still turn into a
+// label ("Line" -> "Line: ...") or numbering ("1" -> "1. ...") once more
+// tokens arrive — holding back avoids ever flashing it.
+function looksLikeUnresolvedPrefix(s: string): boolean {
+  if (/^\s*\d+$/.test(s)) return true;
+  const bare = s.replace(/^\*{0,2}/, "");
+  if (bare === "") return s.length > 0; // only stars/whitespace so far
+  const lower = bare.toLowerCase();
+  return LABEL_WORD_LIST.some((word) => {
+    const target = word.toLowerCase();
+    return lower.length <= target.length
+      ? target.startsWith(lower)
+      : lower.startsWith(target);
+  });
+}
+
+export function sanitizePartialLyricsOutput(raw: string): string {
+  if (!raw) return raw;
+  let text = raw.split(CURSOR_MARKER).join("");
+
+  // Drop fully-streamed leading blank/header/fence lines.
+  for (;;) {
+    const nl = text.indexOf("\n");
+    if (nl === -1 || !isCompleteNoiseLine(text.slice(0, nl))) break;
+    text = text.slice(nl + 1);
+  }
+
+  const firstLineEnd = text.indexOf("\n");
+  const firstLine = firstLineEnd === -1 ? text : text.slice(0, firstLineEnd);
+  const rest = firstLineEnd === -1 ? "" : text.slice(firstLineEnd);
+
+  // A still-open header/fence line ("[Ver", "##", "`"): hold back — the
+  // loop above will drop it once it closes, or more text will prove it
+  // was never really one.
+  if (firstLineEnd === -1 && /^\s*(\[|#{1,6}(\s|$)|`)/.test(firstLine)) {
+    return "";
+  }
+
+  let cleanedFirst = firstLine.replace(LEADING_NUMBERING_RE, "");
+  cleanedFirst = cleanedFirst.replace(LEADING_LABEL_RE, "");
+
+  if (
+    cleanedFirst === firstLine &&
+    firstLineEnd === -1 &&
+    looksLikeUnresolvedPrefix(firstLine)
+  ) {
+    return "";
+  }
+
+  if (cleanedFirst.length > 0) {
+    for (const [open] of QUOTE_PAIRS) {
+      if (cleanedFirst[0] === open) {
+        cleanedFirst = cleanedFirst.slice(1);
+        break;
+      }
+    }
+  }
+
+  return cleanedFirst + rest;
+}
+
+// ─── After-cursor overlap trim (#79) ───────────────────────────────────────
+// A completion that duplicates text already sitting after the cursor (mid-
+// line editing) — trims that overlap off the end. Leading whitespace is
+// left untouched (smartJoinCompletion/sanitizeLyricsOutput's leading-space
+// signal still matters); only a trailing match against `afterCursor` is
+// removed.
+export function trimRepeatedTail(
+  suggestion: string,
+  afterCursor: string,
+): string {
+  const after = afterCursor.trim();
+  if (!after || !suggestion.trim()) return suggestion;
+
+  if (suggestion.trim().toLowerCase() === after.toLowerCase()) return "";
+
+  const suggestionTrimmedEnd = suggestion.replace(/\s+$/, "");
+  if (suggestionTrimmedEnd.toLowerCase().endsWith(after.toLowerCase())) {
+    const kept = suggestionTrimmedEnd.slice(
+      0,
+      suggestionTrimmedEnd.length - after.length,
+    );
+    return kept.replace(/\s+$/, "");
+  }
+  return suggestion;
+}

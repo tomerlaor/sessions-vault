@@ -32,7 +32,11 @@ import {
   sanitizePopupSuggestions,
 } from "../../../lib/lyrics-ai";
 import { smartJoinCompletion } from "../../../lib/lyrics-join";
-import { sanitizeLyricsOutput } from "../../../lib/lyrics-sanitize";
+import {
+  sanitizeLyricsOutput,
+  sanitizePartialLyricsOutput,
+  trimRepeatedTail,
+} from "../../../lib/lyrics-sanitize";
 import {
   LruCache,
   createDebouncer,
@@ -475,7 +479,12 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               cache: streamCache,
               onToken: (accumulated) => {
                 if (!isCurrent()) return;
-                setGhostText(accumulated);
+                // A light, streaming-safe sanitize so the ghost text never
+                // flashes a label/quote/fence and then jumps once the full
+                // reply lands — the final value below is still the real
+                // sanitizeLyricsOutput() result, this only smooths the
+                // preview (#79).
+                setGhostText(sanitizePartialLyricsOutput(accumulated));
                 setStatus("streaming");
               },
             });
@@ -487,9 +496,17 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
             }
             // Shared with the eval runner (scripts/lyrics-eval/runner.ts) so
             // what's shown/inserted here is what gets scored there.
-            const suggestion = result.value
+            let suggestion = result.value
               ? sanitizeLyricsOutput(result.value, mode)
               : "";
+            if (suggestion && mode === "completion") {
+              // #79: don't let a completion duplicate text the writer
+              // already has after the cursor on this line.
+              const afterCursor = currentLine.slice(
+                lineTextBeforeCursor.length,
+              );
+              suggestion = trimRepeatedTail(suggestion, afterCursor);
+            }
             if (suggestion) {
               setGhostText(suggestion);
               setCurrentSuggestion(suggestion);

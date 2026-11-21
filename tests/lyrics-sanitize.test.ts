@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeLyricsOutput } from "../src/lib/lyrics-sanitize";
+import {
+  sanitizeLyricsOutput,
+  sanitizePartialLyricsOutput,
+  trimRepeatedTail,
+} from "../src/lib/lyrics-sanitize";
 import { smartJoinCompletion } from "../src/lib/lyrics-join";
 
 describe("sanitizeLyricsOutput", () => {
@@ -180,5 +184,100 @@ describe("sanitizeLyricsOutput", () => {
     expect(
       sanitizeLyricsOutput("Walking ⟨CURSOR⟩into tomorrow", "next_line"),
     ).toBe("Walking into tomorrow");
+  });
+});
+
+// ── sanitizePartialLyricsOutput (#79: streaming ghost text) ────────────────
+
+describe("sanitizePartialLyricsOutput", () => {
+  it("passes a clean partial straight through", () => {
+    expect(sanitizePartialLyricsOutput("Walking into")).toBe("Walking into");
+  });
+
+  it("strips an echoed cursor marker immediately", () => {
+    expect(sanitizePartialLyricsOutput("Walking ⟨CURSOR⟩into")).toBe(
+      "Walking into",
+    );
+  });
+
+  it("strips a leading opening quote as soon as it appears, with no close needed yet", () => {
+    expect(sanitizePartialLyricsOutput('"Walking into')).toBe("Walking into");
+    expect(sanitizePartialLyricsOutput("“Walking into")).toBe("Walking into");
+  });
+
+  it("never strips a leading apostrophe (not a wrapping-quote character)", () => {
+    expect(sanitizePartialLyricsOutput("'Cause I'm runnin")).toBe(
+      "'Cause I'm runnin",
+    );
+  });
+
+  it("holds back a label until it either resolves or disproves itself", () => {
+    // "Complet" could still become "Completion: ..." — hold back rather
+    // than flash it.
+    expect(sanitizePartialLyricsOutput("Complet")).toBe("");
+    // Once the colon lands, the label is confirmed and stripped.
+    expect(sanitizePartialLyricsOutput("Completion: aw")).toBe("aw");
+    // "Complex" diverges from every known label word — stop holding back.
+    expect(sanitizePartialLyricsOutput("Complex")).toBe("Complex");
+  });
+
+  it("holds back numbering until the separator lands", () => {
+    expect(sanitizePartialLyricsOutput("1")).toBe("");
+    expect(sanitizePartialLyricsOutput("1. Walking")).toBe("Walking");
+  });
+
+  it("drops a fully-streamed leading header/fence line", () => {
+    expect(sanitizePartialLyricsOutput("[Verse 2]\nWalking into")).toBe(
+      "Walking into",
+    );
+    expect(sanitizePartialLyricsOutput("```\nWalking into")).toBe(
+      "Walking into",
+    );
+  });
+
+  it("holds back a still-open header/fence line", () => {
+    expect(sanitizePartialLyricsOutput("[Ver")).toBe("");
+    expect(sanitizePartialLyricsOutput("```")).toBe("");
+  });
+
+  it("combines label and quote stripping once both resolve", () => {
+    expect(sanitizePartialLyricsOutput('Completion: "away')).toBe("away");
+  });
+});
+
+// ── trimRepeatedTail (#79: don't repeat text after the cursor) ────────────
+
+describe("trimRepeatedTail", () => {
+  it("trims a trailing duplicate of the after-cursor text", () => {
+    expect(
+      trimRepeatedTail(" through the dark alone tonight", "alone tonight"),
+    ).toBe(" through the dark");
+  });
+
+  it("is case-insensitive", () => {
+    expect(trimRepeatedTail(" into the Night", "night")).toBe(" into the");
+  });
+
+  it("returns empty when the suggestion IS the after-cursor text", () => {
+    expect(trimRepeatedTail(" alone tonight", "alone tonight")).toBe("");
+  });
+
+  it("leaves the suggestion untouched when there's no overlap", () => {
+    expect(trimRepeatedTail("away into the dark", "tonight")).toBe(
+      "away into the dark",
+    );
+  });
+
+  it("leaves the suggestion untouched when there's no after-cursor text", () => {
+    expect(trimRepeatedTail("away into the dark", "")).toBe(
+      "away into the dark",
+    );
+    expect(trimRepeatedTail("away into the dark", "   ")).toBe(
+      "away into the dark",
+    );
+  });
+
+  it("leaves an empty suggestion untouched", () => {
+    expect(trimRepeatedTail("", "alone tonight")).toBe("");
   });
 });
