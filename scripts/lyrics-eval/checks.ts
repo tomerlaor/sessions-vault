@@ -61,6 +61,16 @@ export interface CheckContext {
 const HEBREW_RE = /[\u05D0-\u05EA\uFB1D-\uFB4F]/;
 const HEBREW_LETTER_G = /[\u05D0-\u05EA\uFB1D-\uFB4F]/g;
 const LATIN_LETTER_G = /[A-Za-z]/g;
+// Niqud (vowel points, dagesh, sheva, cantillation): U+0591-U+05C7.
+const HEBREW_NIQUD_G = /[\u0591-\u05C7]/g;
+
+// Strips niqud so a Hebrew syllable comparison never scores one side
+// (reference lines, always written unpointed) against the pointed-aware
+// count and the other side (model output, which may come back with
+// niqud) against the unpointed estimate. See checkSyllables.
+function stripNiqud(text: string): string {
+  return text.replace(HEBREW_NIQUD_G, "");
+}
 
 export function isHebrewText(text: string): boolean {
   return HEBREW_RE.test(text);
@@ -255,8 +265,15 @@ export function checkSyllables(
   expect: EvalExpect,
   ctx: CheckContext,
 ): CheckResult {
-  const target =
+  const joined =
     ctx.mode === "completion" ? joinCompletion(ctx.linePrefix, output) : output;
+  // Reference lines and expect.syllables ranges are always tuned against
+  // unpointed text. If the model answers with niqud, scoring its output
+  // through the pointed-aware path while the other side of the comparison
+  // is unpointed compares two different counting methods, not two
+  // different lines — strip niqud from both sides first so they always go
+  // through the same (unpointed) estimator.
+  const target = ctx.lang === "he" ? stripNiqud(joined) : joined;
 
   if (expect.syllables) {
     const [min, max] = expect.syllables;
@@ -275,8 +292,10 @@ export function checkSyllables(
     ctx.referenceLine &&
     ctx.referenceLine.trim().length > 0
   ) {
+    const referenceLine =
+      ctx.lang === "he" ? stripNiqud(ctx.referenceLine) : ctx.referenceLine;
     const count = countSyllables(target, ctx.lang);
-    const refCount = countSyllables(ctx.referenceLine, ctx.lang);
+    const refCount = countSyllables(referenceLine, ctx.lang);
     if (Math.abs(count - refCount) > 2) {
       return {
         status: "fail",

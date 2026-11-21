@@ -324,6 +324,47 @@ describe("checkSyllables", () => {
     expect(fail.status).toBe("fail");
   });
 
+  it("scores a pointed Hebrew output the same way as its unpointed form (apples to apples)", () => {
+    // Reference lines are always written unpointed; if the model answers
+    // with niqud, counting its output through the pointed-aware path
+    // while a fixed expect.syllables range (or the referenceLine
+    // fallback) was tuned against the unpointed estimate compares two
+    // different counting methods, not two different lines. Both must go
+    // through the same (unpointed) estimator, so a pointed answer and its
+    // unpointed equivalent get the same verdict.
+    const pointedOutput = "וְדַלְתַיִם נִשְׁמְרוּ בִזְכרוֹן בּוֹ";
+    const unpointedOutput = "ודלתים נשמרו בזכרון בו";
+    const range = { syllables: [11, 13] as [number, number] };
+
+    const pointedResult = checkSyllables(
+      pointedOutput,
+      range,
+      ctx({ lang: "he" }),
+    );
+    const unpointedResult = checkSyllables(
+      unpointedOutput,
+      range,
+      ctx({ lang: "he" }),
+    );
+
+    expect(pointedResult.status).toBe("pass");
+    expect(unpointedResult.status).toBe("pass");
+  });
+
+  it("strips niqud from the next_line referenceLine fallback too", () => {
+    const pointedOutput = "וְדַלְתַיִם נִשְׁמְרוּ בִזְכרוֹן בּוֹ";
+    const result = checkSyllables(
+      pointedOutput,
+      {},
+      ctx({
+        mode: "next_line",
+        lang: "he",
+        referenceLine: "ודלתים נשמרו בזכרון בו",
+      }),
+    );
+    expect(result.status).toBe("pass");
+  });
+
   it("compares against the last written line, not the line before it", () => {
     // Cursor-at-end-of-lyrics case: the last written line is short and
     // the line before it is long. A short candidate must pass when the
