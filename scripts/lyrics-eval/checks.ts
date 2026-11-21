@@ -14,6 +14,7 @@ import {
   countSyllables as engineCountSyllables,
   rhymes as engineRhymeDetail,
 } from "../../src/lib/prosody";
+import { smartJoinCompletion } from "../../src/lib/lyrics-join";
 
 export type EvalLang = "en" | "he";
 export type EvalMode = "next_line" | "completion" | "next_word" | "alternative";
@@ -74,13 +75,14 @@ export function lastWord(text: string): string {
 }
 
 // Joins a completion's typed prefix with the model's output for scoring
-// (syllables/rhyme). Adds a separating space only when neither side already
-// has adjoining whitespace, so a genuinely glued reply like "walk"+"away"
-// still gets a word boundary, but "I "+"walk" doesn't end up "I  walk".
+// (syllables/rhyme) exactly the way the app joins them for insertion — both
+// delegate to smartJoinCompletion (src/lib/lyrics-join.ts), the #102 fix so
+// the eval and the app can never disagree about where a space belongs. A
+// genuinely glued reply like "I walk"+"away" still gets a word boundary,
+// "I "+"walk" doesn't end up "I  walk", and a valid mid-word completion
+// like "tomor"+"row" stays glued as "tomorrow".
 export function joinCompletion(prefix: string, output: string): string {
-  if (prefix.length === 0 || output.length === 0) return prefix + output;
-  if (/\s$/.test(prefix) || /^\s/.test(output)) return prefix + output;
-  return `${prefix} ${output}`;
+  return prefix + smartJoinCompletion(prefix, output);
 }
 
 // Counts syllables across a whole string (line or output), word by word.
@@ -180,15 +182,22 @@ export function checkFormat(
     }
   }
 
-  if (
-    ctx.mode === "completion" &&
-    ctx.linePrefix.length > 0 &&
-    output.length > 0 &&
-    !/\s$/.test(ctx.linePrefix) &&
-    !/^\s/.test(output)
-  ) {
-    return { status: "fail", detail: "glued to prefix" };
-  }
+  // #102: this used to fail ANY completion whose raw output sat directly
+  // against linePrefix with no whitespace on either side — including a
+  // valid mid-word continuation like "tomor" + "row", which must stay
+  // glued to read as "tomorrow". The app never inserts a completion's raw
+  // text verbatim any more: every completion goes through the same
+  // smartJoinCompletion() this check now delegates to (via joinCompletion,
+  // src/lib/lyrics-join.ts), which decides per-case whether a leading
+  // space belongs there before insertion. So judge the output the way the
+  // app actually renders it — glued only when that's genuinely correct
+  // (a dictionary word, or a punctuation rule) — rather than failing on
+  // raw adjacency alone. A genuinely glued-wrong reply like "I walk" +
+  // "away" is simply repaired to "I walk away" by joinCompletion, so it no
+  // longer fails this check; it's not a new acceptance of garbled output.
+  // The raw-adjacency signal itself isn't thrown away though — see
+  // checkOmittedLeadingSpace() below, which reports it as a non-failing
+  // diagnostic instead.
 
   if (ctx.mode === "next_word") {
     const words = trimmed.split(/\s+/).filter(Boolean);
@@ -214,6 +223,31 @@ export function checkFormat(
   }
 
   return { status: "pass" };
+}
+
+// Diagnostic only — returns a plain boolean, never a CheckResult, so it can
+// never fail a trial or move the pass rate. This is the #102 root-cause
+// signal checkFormat used to fail on directly (see the comment above): a
+// completion-mode trial where the typed prefix ends with no whitespace and
+// the model's raw output starts with no whitespace either, i.e. the model
+// omitted the leading space a human would have typed. #102 established that
+// raw adjacency alone isn't a defect in the *inserted* text — joinCompletion
+// repairs it correctly before insertion in the common case — but it's still
+// useful to know how often the model is relying on that repair rather than
+// producing a naturally-joinable reply. Reported as "model omitted leading
+// space" in the eval summary/report, as a rate alongside (not inside) the
+// pass/fail checks.
+export function checkOmittedLeadingSpace(
+  output: string,
+  ctx: CheckContext,
+): boolean {
+  return (
+    ctx.mode === "completion" &&
+    ctx.linePrefix.length > 0 &&
+    output.length > 0 &&
+    !/\s$/.test(ctx.linePrefix) &&
+    !/^\s/.test(output)
+  );
 }
 
 export function checkSyllables(

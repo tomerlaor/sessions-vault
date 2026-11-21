@@ -152,6 +152,57 @@ describe("runTrial: normal trials still score", () => {
     expect(trial.checks.format.status).not.toBe("skip");
   });
 
+  it("flags omittedLeadingSpace (#102 diagnostic) for a glued completion-mode trial", async () => {
+    streamLyricsSuggestionMock.mockImplementation(async function* (
+      _cfg: AIConfig,
+      _system: string,
+      _prompt: string,
+      _signal: AbortSignal | undefined,
+      onMetrics?: (m: unknown) => void,
+    ) {
+      onMetrics?.({ ttftMs: 5, totalMs: 20, usage: {}, finishReason: "stop" });
+      yield "away";
+    });
+
+    const trial = await runTrial(
+      cfg,
+      fixture({
+        mode: "completion",
+        lyrics: "I walk",
+        cursor: 6,
+      }),
+    );
+
+    expect(trial.error).toBeUndefined();
+    expect(trial.omittedLeadingSpace).toBe(true);
+    // The diagnostic is independent from pass/fail — format still passes.
+    expect(trial.checks.format.status).toBe("pass");
+  });
+
+  it("does not flag omittedLeadingSpace when the prefix already ends in whitespace", async () => {
+    streamLyricsSuggestionMock.mockImplementation(async function* (
+      _cfg: AIConfig,
+      _system: string,
+      _prompt: string,
+      _signal: AbortSignal | undefined,
+      onMetrics?: (m: unknown) => void,
+    ) {
+      onMetrics?.({ ttftMs: 5, totalMs: 20, usage: {}, finishReason: "stop" });
+      yield "away";
+    });
+
+    const trial = await runTrial(
+      cfg,
+      fixture({
+        mode: "completion",
+        lyrics: "I walk ",
+        cursor: 7,
+      }),
+    );
+
+    expect(trial.omittedLeadingSpace).toBe(false);
+  });
+
   it("scores a non-empty next_word trial normally", async () => {
     generateNextWordOptionsMock.mockImplementation(
       async (

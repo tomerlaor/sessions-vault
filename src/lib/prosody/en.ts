@@ -149,6 +149,15 @@ function lookupEntry(word: string): DictEntry | null {
   return dict.get(key) ?? null;
 }
 
+// Synchronous dictionary membership check for callers (e.g. the lyrics
+// smart-join helper, src/lib/lyrics-join.ts) that need to know whether a
+// word is real before the full async syllable/rhyme pipeline is relevant.
+// Returns false — never throws — if the dictionary hasn't resolved yet
+// (see loadEnglishDict) or the word just isn't in it.
+export function isKnownEnglishWord(word: string): boolean {
+  return lookupEntry(word) !== null;
+}
+
 export function countSyllables(wordOrLine: string): number {
   const words = wordOrLine.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return 0;
