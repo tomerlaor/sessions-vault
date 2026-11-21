@@ -4,6 +4,7 @@ import {
   checkFormat,
   checkLanguage,
   checkNoCopy,
+  checkOmittedLeadingSpace,
   checkRhyme,
   checkSyllables,
   countSyllables,
@@ -171,13 +172,17 @@ describe("checkFormat", () => {
     expect(checkFormat("אמרתי: לא", ctx({ lang: "he" })).status).toBe("pass");
   });
 
-  it("fails when a completion is glued to the prefix with no space", () => {
+  it("no longer fails a completion glued to the prefix with no space (#102)", () => {
+    // Pre-fix this failed with detail "glued to prefix". The app now runs
+    // every completion through the same smartJoinCompletion the eval's
+    // joinCompletion() delegates to (src/lib/lyrics-join.ts), which adds
+    // the missing space before insertion ("I walk" + "away" -> "I walk
+    // away") — so raw adjacency alone is no longer treated as a defect.
     const result = checkFormat(
       "away",
       ctx({ mode: "completion", linePrefix: "I walk" }),
     );
-    expect(result.status).toBe("fail");
-    expect(result.detail).toBe("glued to prefix");
+    expect(result.status).toBe("pass");
   });
 
   it("passes a completion separated from the prefix by whitespace", () => {
@@ -186,6 +191,85 @@ describe("checkFormat", () => {
       ctx({ mode: "completion", linePrefix: "I walk " }),
     );
     expect(result.status).toBe("pass");
+  });
+
+  it("passes a valid glued mid-word completion ('tomor' + 'row')", () => {
+    // This is the case the old blanket "glued to prefix" rule got wrong:
+    // "row" must stay glued to "tomor" to read as "tomorrow", so it should
+    // never have failed format scoring in the first place.
+    const result = checkFormat(
+      "row",
+      ctx({ mode: "completion", linePrefix: "tomor" }),
+    );
+    expect(result.status).toBe("pass");
+  });
+});
+
+describe("checkOmittedLeadingSpace (#102 diagnostic, never fails)", () => {
+  it("flags a completion glued to the prefix with no whitespace on either side", () => {
+    expect(
+      checkOmittedLeadingSpace(
+        "away",
+        ctx({ mode: "completion", linePrefix: "I walk" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not flag when the prefix already ends in whitespace", () => {
+    expect(
+      checkOmittedLeadingSpace(
+        "away",
+        ctx({ mode: "completion", linePrefix: "I walk " }),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not flag when the output already starts with whitespace", () => {
+    expect(
+      checkOmittedLeadingSpace(
+        " away",
+        ctx({ mode: "completion", linePrefix: "I walk" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not flag a valid glued mid-word completion either — it's still just the raw signal", () => {
+    expect(
+      checkOmittedLeadingSpace(
+        "row",
+        ctx({ mode: "completion", linePrefix: "tomor" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not flag non-completion modes", () => {
+    expect(
+      checkOmittedLeadingSpace(
+        "away",
+        ctx({ mode: "next_line", linePrefix: "I walk" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not flag an empty prefix or empty output", () => {
+    expect(
+      checkOmittedLeadingSpace(
+        "away",
+        ctx({ mode: "completion", linePrefix: "" }),
+      ),
+    ).toBe(false);
+    expect(
+      checkOmittedLeadingSpace(
+        "",
+        ctx({ mode: "completion", linePrefix: "I walk" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("never fails checkFormat for the same case it flags", () => {
+    const c = ctx({ mode: "completion", linePrefix: "I walk" });
+    expect(checkOmittedLeadingSpace("away", c)).toBe(true);
+    expect(checkFormat("away", c).status).toBe("pass");
   });
 });
 
@@ -398,6 +482,10 @@ describe("joinCompletion", () => {
 
   it("adds a space between glued Hebrew words", () => {
     expect(joinCompletion("הלכתי", "לבד")).toBe("הלכתי לבד");
+  });
+
+  it("keeps a valid mid-word completion glued (delegates to smartJoinCompletion)", () => {
+    expect(joinCompletion("tomor", "row")).toBe("tomorrow");
   });
 
   it("returns the other side unchanged when one side is empty", () => {

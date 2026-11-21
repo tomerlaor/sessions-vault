@@ -17,7 +17,7 @@ import {
   rhymes as heRhymes,
 } from "./he";
 
-export { loadEnglishDict } from "./en";
+export { loadEnglishDict, isKnownEnglishWord } from "./en";
 export {
   cleanLine,
   currentSection,
