@@ -33,17 +33,17 @@ describe("smartJoinCompletion", () => {
     expect(join("I ", " walk")).toBe("I  walk");
   });
 
-  describe("Latin mid-word completions stay glued", () => {
-    it('"to" + "morrow" -> "tomorrow"', () => {
-      expect(join("to", "morrow")).toBe("tomorrow");
+  describe("Latin mid-word completions stay glued (fragment is not itself a word)", () => {
+    it('"tomor" + "row" -> "tomorrow"', () => {
+      expect(join("tomor", "row")).toBe("tomorrow");
     });
 
-    it('"to" + "gether" -> "together"', () => {
-      expect(join("to", "gether")).toBe("together");
+    it('"toget" + "her" -> "together"', () => {
+      expect(join("toget", "her")).toBe("together");
     });
 
-    it('"I wan" + "na" -> "I wanna" (documented: "wanna" is a known word)', () => {
-      expect(join("I wan", "na")).toBe("I wanna");
+    it('"beauti" + "ful" -> "beautiful"', () => {
+      expect(join("beauti", "ful")).toBe("beautiful");
     });
   });
 
@@ -56,6 +56,40 @@ describe("smartJoinCompletion", () => {
 
     it('"Of every" + "word" -> adds a space', () => {
       expect(join("Of every", "word")).toBe("Of every word");
+    });
+
+    it('"it won\'t be" + "long" -> adds a space ("be" is already a word)', () => {
+      expect(join("it won't be", "long")).toBe("it won't be long");
+    });
+
+    it('"so" + "me" -> adds a space ("so" is already a word)', () => {
+      expect(join("so", "me")).toBe("so me");
+    });
+
+    it('"in" + "to" -> adds a space ("in" is already a word)', () => {
+      expect(join("in", "to")).toBe("in to");
+    });
+
+    it('"for" + "ever" -> adds a space ("for" is already a word)', () => {
+      expect(join("for", "ever")).toBe("for ever");
+    });
+
+    it('"no" + "thing" -> adds a space ("no" is already a word)', () => {
+      expect(join("no", "thing")).toBe("no thing");
+    });
+
+    it('"to" + "gether" -> adds a space ("to" is already a word)', () => {
+      expect(join("to", "gether")).toBe("to gether");
+    });
+  });
+
+  describe("accepted trade-off: a complete-word fragment that was actually mid-word still gets a space", () => {
+    it('"to" + "morrow" -> "to morrow" (rarer than the common case above, visible in the ghost preview)', () => {
+      expect(join("to", "morrow")).toBe("to morrow");
+    });
+
+    it('"I wan" + "na" -> "I wan na" ("wan" is itself a known word)', () => {
+      expect(join("I wan", "na")).toBe("I wan na");
     });
   });
 
@@ -147,9 +181,9 @@ describe("ghost text matches what accept inserts (#102)", () => {
   });
 
   it("holds for a glued mid-word completion too", () => {
-    const draft = "to";
+    const draft = "tomor";
     const selectionStart = draft.length;
-    const suggestion = "morrow";
+    const suggestion = "row";
     const prefix = draft.slice(0, selectionStart);
 
     const ghostPreview = prefix + smartJoinCompletion(prefix, suggestion);

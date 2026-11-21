@@ -23,22 +23,38 @@
 //     before the next word.
 //  7. Latin mid-word completion: completion mode is only picked when the
 //     cursor follows a letter (pickInlineMode in lyrics-ai.ts), so the
-//     model may be continuing a partial word ("to" + "morrow") or starting
-//     a new one after a finished word ("could not" + "say"). We tell these
-//     apart with the local English dictionary (src/lib/prosody/en.ts):
-//     join the prefix's trailing letter-run with the suggestion's leading
-//     letter-run ("to" + "morrow" -> "tomorrow") and check
-//     isKnownEnglishWord() on the result. A known word means the model was
-//     finishing that word -> glue, no space. Otherwise -> add a space.
-//     Until loadEnglishDict() resolves, isKnownEnglishWord() always
-//     returns false, so this conservatively adds a space for every such
-//     boundary rather than risk re-gluing two real words — the dictionary
-//     lookup is what lets "to"+"morrow" stay glued; without it we fall
-//     back to the safer (if occasionally over-eager) default.
-//     Known limitation: a prefix fragment + suggestion token that
-//     *happens* to spell a different real word (e.g. "a" + "part" ->
-//     "apart") will be glued even though the model likely meant two
-//     separate words. This is a heuristic, not a parser.
+//     model may be continuing a partial word ("tomor" + "row") or starting
+//     a new one after a finished word ("could not" + "say", "so" + "me").
+//     We tell these apart with the local English dictionary
+//     (src/lib/prosody/en.ts), checking the prefix's trailing letter-run
+//     (the "fragment") FIRST: if the fragment is ITSELF a known word
+//     (isKnownEnglishWord(fragment)) the writer already finished typing
+//     it, so the suggestion starts a new word -> add a space ("so" + "me"
+//     -> "so me", "in" + "to" -> "in to"). This is the common case — by
+//     far most of what a writer types right before a suggestion lands is
+//     a complete word — and the ghost-text preview always shows the
+//     result before it's committed, so a wrong guess here is visible and
+//     cheap to reject with a keystroke. Only when the fragment is NOT a
+//     known word do we fall through to the old check: join the fragment
+//     with the suggestion's leading letter-run ("tomor" + "row" ->
+//     "tomorrow") and check isKnownEnglishWord() on THAT. A known word
+//     there means the model was finishing a word the fragment only
+//     started -> glue, no space. Otherwise -> add a space. Single-letter
+//     fragments like "a" or "I" are themselves known words, so they get a
+//     space too ("a" + "part" -> "a part"), which is almost always what's
+//     meant since a lone "a"/"I" is essentially never a word-in-progress.
+//     Accepted trade-off: a genuine mid-word continuation of a string that
+//     also happens to be a complete word on its own still gets a space
+//     ("to" + "morrow" -> "to morrow", "I wan" + "na" -> "I wan na") — rarer
+//     than the common case above, and still visible/correctable in the
+//     ghost preview before it's committed. Until loadEnglishDict()
+//     resolves, isKnownEnglishWord() always returns false for both checks,
+//     so this conservatively adds a space for every such boundary rather
+//     than risk gluing two real words together. A proper fix needs a
+//     prompt-side rule where the model restates the partial word it's
+//     completing and the app replaces that restated fragment rather than
+//     appending after it — tracked as a follow-up issue, since it needs
+//     prompt changes, not just this join heuristic.
 //  8. Hebrew: Hebrew has no dictionary here, and mid-word completions are
 //     rare in practice, so two adjacent Hebrew letters/niqqud always get a
 //     space ("חושב על כל הדברים שלא" + "נאמרו" -> a space). A prefix ending
@@ -92,9 +108,10 @@ export function smartJoinCompletion(
     LATIN_LETTER_END_RE.test(prefix) &&
     LATIN_LETTER_START_RE.test(suggestion)
   ) {
-    const combined = (
-      trailingLatinFragment(prefix) + leadingLatinToken(suggestion)
-    ).toLowerCase();
+    const fragment = trailingLatinFragment(prefix).toLowerCase();
+    if (isKnownEnglishWord(fragment)) return ` ${suggestion}`;
+
+    const combined = fragment + leadingLatinToken(suggestion).toLowerCase();
     return isKnownEnglishWord(combined) ? suggestion : ` ${suggestion}`;
   }
 

@@ -80,7 +80,7 @@ export function lastWord(text: string): string {
 // the eval and the app can never disagree about where a space belongs. A
 // genuinely glued reply like "I walk"+"away" still gets a word boundary,
 // "I "+"walk" doesn't end up "I  walk", and a valid mid-word completion
-// like "to"+"morrow" stays glued as "tomorrow".
+// like "tomor"+"row" stays glued as "tomorrow".
 export function joinCompletion(prefix: string, output: string): string {
   return prefix + smartJoinCompletion(prefix, output);
 }
@@ -184,7 +184,7 @@ export function checkFormat(
 
   // #102: this used to fail ANY completion whose raw output sat directly
   // against linePrefix with no whitespace on either side — including a
-  // valid mid-word continuation like "to" + "morrow", which must stay
+  // valid mid-word continuation like "tomor" + "row", which must stay
   // glued to read as "tomorrow". The app never inserts a completion's raw
   // text verbatim any more: every completion goes through the same
   // smartJoinCompletion() this check now delegates to (via joinCompletion,

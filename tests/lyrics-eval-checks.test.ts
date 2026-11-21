@@ -192,13 +192,13 @@ describe("checkFormat", () => {
     expect(result.status).toBe("pass");
   });
 
-  it("passes a valid glued mid-word completion ('to' + 'morrow')", () => {
+  it("passes a valid glued mid-word completion ('tomor' + 'row')", () => {
     // This is the case the old blanket "glued to prefix" rule got wrong:
-    // "morrow" must stay glued to "to" to read as "tomorrow", so it should
+    // "row" must stay glued to "tomor" to read as "tomorrow", so it should
     // never have failed format scoring in the first place.
     const result = checkFormat(
-      "morrow",
-      ctx({ mode: "completion", linePrefix: "to" }),
+      "row",
+      ctx({ mode: "completion", linePrefix: "tomor" }),
     );
     expect(result.status).toBe("pass");
   });
@@ -416,7 +416,7 @@ describe("joinCompletion", () => {
   });
 
   it("keeps a valid mid-word completion glued (delegates to smartJoinCompletion)", () => {
-    expect(joinCompletion("to", "morrow")).toBe("tomorrow");
+    expect(joinCompletion("tomor", "row")).toBe("tomorrow");
   });
 
   it("returns the other side unchanged when one side is empty", () => {
