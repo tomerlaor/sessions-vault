@@ -332,9 +332,14 @@ describe("checkSyllables", () => {
     // different counting methods, not two different lines. Both must go
     // through the same (unpointed) estimator, so a pointed answer and its
     // unpointed equivalent get the same verdict.
+    //
+    // The range is a single exact value (not a wide [8,12] window) so this
+    // actually proves the two counts are equal -- a wide window would let
+    // both sides "pass" while landing on different counts and silently
+    // defeat the point of the test.
     const pointedOutput = "וְדַלְתַיִם נִשְׁמְרוּ בִזְכרוֹן בּוֹ";
     const unpointedOutput = "ודלתים נשמרו בזכרון בו";
-    const range = { syllables: [8, 12] as [number, number] };
+    const range = { syllables: [10, 10] as [number, number] };
 
     const pointedResult = checkSyllables(
       pointedOutput,
@@ -348,7 +353,43 @@ describe("checkSyllables", () => {
     );
 
     expect(pointedResult.status).toBe("pass");
-    expect(unpointedResult.status).toBe("pass");
+    expect(unpointedResult.status).toBe(pointedResult.status);
+  });
+
+  it("treats a maqaf-joined pair as a word break, same as the spaced form", () => {
+    // #124 round 2: stripNiqud used to strip maqaf (U+05BE) along with real
+    // niqud, which glues the words on either side together instead of
+    // leaving a word break -- "אני־הוא" repeated 3 times miscounted as 3
+    // words instead of 6. Both forms must land on the same exact count.
+    const maqafJoined = "אֲנִי־הוּא אֲנִי־הוּא אֲנִי־הוּא";
+    const spaced = "אֲנִי הוּא אֲנִי הוּא אֲנִי הוּא";
+    const range = { syllables: [12, 12] as [number, number] };
+
+    const maqafResult = checkSyllables(maqafJoined, range, ctx({ lang: "he" }));
+    const spacedResult = checkSyllables(spaced, range, ctx({ lang: "he" }));
+
+    expect(maqafResult.status).toBe("pass");
+    expect(spacedResult.status).toBe(maqafResult.status);
+  });
+
+  it("counts a presentation-form letter (e.g. precomposed shin+shin-dot) like its plain form", () => {
+    // U+FB2A (HEBREW LETTER SHIN WITH SHIN DOT) is a single precomposed
+    // codepoint in the presentation-forms block. Without NFD-normalizing
+    // first, it passes through the niqud strip untouched and the engine
+    // sees an unrecognized character instead of a plain shin.
+    const presentationForm = "שׁלום";
+    const plainForm = "שלום";
+    const range = { syllables: [2, 2] as [number, number] };
+
+    const presentationResult = checkSyllables(
+      presentationForm,
+      range,
+      ctx({ lang: "he" }),
+    );
+    const plainResult = checkSyllables(plainForm, range, ctx({ lang: "he" }));
+
+    expect(presentationResult.status).toBe("pass");
+    expect(plainResult.status).toBe(presentationResult.status);
   });
 
   it("strips niqud from the next_line referenceLine fallback too", () => {
