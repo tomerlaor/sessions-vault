@@ -69,10 +69,13 @@ describe("buildLyricsSuggestionPrompt", () => {
   });
 
   it("asks next_line mode for a new line given the entire lyrics", () => {
+    const lyrics = "verse one\nverse two\n";
     const { system, prompt } = buildLyricsSuggestionPrompt({
       ...base,
-      lyrics: "verse one\nverse two\n",
+      lyrics,
       currentLine: "verse two",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
       mode: "next_line",
     });
     expect(system).toContain("write the next line");
@@ -487,5 +490,336 @@ describe("next_word options", () => {
       kind: "continuation" as const,
     }));
     expect(normalizeNextWordOptions(many, "x ")).toHaveLength(5);
+  });
+});
+
+// ─── R6 (#79): cursor marker, section context, explicit targets ───────────
+
+describe("R6: cursor marker is present in the lyrics sent to the model", () => {
+  const lyrics =
+    "I walk alone through the empty street\nThinking of all the things I could not";
+  const inputBase = {
+    lyrics,
+    currentLine: "Thinking of all the things I could not",
+    textBeforeCursor: "Thinking of all the things I could not",
+    title: "T",
+    bpm: null,
+    key: null,
+    timeSignature: null,
+    globalProfile: null,
+    projectProfile: null,
+    recentAccepted: [],
+  };
+
+  it("completion", () => {
+    const { prompt } = buildLyricsSuggestionPrompt({
+      ...inputBase,
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      mode: "completion",
+    });
+    expect(prompt).toContain("⟨CURSOR⟩");
+  });
+
+  it("next_line", () => {
+    const { prompt } = buildLyricsSuggestionPrompt({
+      ...inputBase,
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      mode: "next_line",
+    });
+    expect(prompt).toContain("⟨CURSOR⟩");
+  });
+
+  it("alternative", () => {
+    const lineEnd = lyrics.indexOf("\n");
+    const { prompt } = buildLyricsSuggestionPrompt({
+      ...inputBase,
+      selectionStart: 0,
+      selectionEnd: lineEnd,
+      mode: "alternative",
+    });
+    expect(prompt).toContain("⟨CURSOR⟩");
+  });
+
+  it("next_word", () => {
+    const wordLyrics = "I walk alone\nthrough the empty ";
+    const { prompt } = buildNextWordOptionsPrompt({
+      ...inputBase,
+      lyrics: wordLyrics,
+      currentLine: "through the empty ",
+      textBeforeCursor: "through the empty ",
+      selectionStart: wordLyrics.length,
+      selectionEnd: wordLyrics.length,
+    });
+    expect(prompt).toContain("⟨CURSOR⟩");
+  });
+
+  it("includes the text after the cursor too", () => {
+    const full =
+      "[Verse]\nI walk alone\nthrough the empty street\n[Chorus]\nWe rise again\n";
+    const cursor = full.indexOf("through the empty street");
+    const { prompt } = buildLyricsSuggestionPrompt({
+      ...inputBase,
+      lyrics: full,
+      currentLine: "through the empty street",
+      textBeforeCursor: "",
+      selectionStart: cursor,
+      selectionEnd: cursor,
+      mode: "completion",
+    });
+    expect(prompt).toContain("We rise again");
+  });
+});
+
+describe("R6: lyrics sent to the model strip chords/remarks but keep section headers", () => {
+  it("strips a bare chord line and inline chord/remark tokens", () => {
+    const lyrics =
+      "[Verse]\nC G Am\nI walk [C]alone (whisper) down the street\n";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "I walk [C]alone (whisper) down the street",
+      textBeforeCursor: "I walk [C]alone (whisper) down the street",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "next_line",
+    });
+    expect(prompt).toContain("[Verse]");
+    expect(prompt).not.toContain("C G Am");
+    expect(prompt).not.toContain("[C]");
+    expect(prompt).not.toContain("(whisper)");
+    expect(prompt).toContain("I walk alone down the street");
+  });
+});
+
+describe("R6: no contradictory explain/question instructions in any lyrics system prompt", () => {
+  const baseEn = {
+    lyrics: "I walk alone\nthrough the city lights\n",
+    currentLine: "through the city lights",
+    textBeforeCursor: "through the city lights",
+    selectionStart: 10,
+    selectionEnd: 10,
+    title: "T",
+    bpm: null,
+    key: null,
+    timeSignature: null,
+    globalProfile: "x",
+    projectProfile: "y",
+    recentAccepted: ["walking down the empty road"],
+  };
+  const baseHe = {
+    ...baseEn,
+    lyrics: "אני הולך לבד\nברחוב האורות\n",
+    currentLine: "ברחוב האורות",
+  };
+
+  function assertClean(system: string) {
+    const lower = system.toLowerCase();
+    expect(lower).not.toContain("explain");
+    expect(lower).not.toContain("question");
+  }
+
+  it("inline prompts, every mode, EN+HE", () => {
+    for (const mode of ["completion", "next_line", "alternative"] as const) {
+      assertClean(buildLyricsSuggestionPrompt({ ...baseEn, mode }).system);
+      assertClean(buildLyricsSuggestionPrompt({ ...baseHe, mode }).system);
+    }
+  });
+
+  it("popup prompt, EN+HE", () => {
+    const modes = [
+      "completion",
+      "next_line",
+      "alternative",
+      "next_word",
+    ] as const;
+    assertClean(
+      buildLyricsPopupPrompt({ ...baseEn, enabledModes: [...modes] }).system,
+    );
+    assertClean(
+      buildLyricsPopupPrompt({ ...baseHe, enabledModes: [...modes] }).system,
+    );
+  });
+
+  it("next_word prompt, EN+HE", () => {
+    assertClean(buildNextWordOptionsPrompt(baseEn).system);
+    assertClean(buildNextWordOptionsPrompt(baseHe).system);
+  });
+});
+
+describe("R6: empty-draft language rule follows songContext/title when the draft itself is empty", () => {
+  const emptyBase = {
+    lyrics: "",
+    currentLine: "",
+    textBeforeCursor: "",
+    selectionStart: 0,
+    selectionEnd: 0,
+    title: "Eval Song",
+    bpm: null,
+    key: null,
+    timeSignature: null,
+    globalProfile: null,
+    projectProfile: null,
+    recentAccepted: [],
+    mode: "next_line" as const,
+  };
+
+  it("picks the Hebrew prompt and opening-line rule when songContext is Hebrew", () => {
+    const { system } = buildLyricsSuggestionPrompt({
+      ...emptyBase,
+      songContext: "שיר פתיחה על התחלה חדשה.",
+    });
+    expect(system).toContain("כתוב שורת פתיחה אחת חזקה בעברית");
+  });
+
+  it("stays English when nothing in lyrics/currentLine/songContext/title is Hebrew", () => {
+    const { system } = buildLyricsSuggestionPrompt({
+      ...emptyBase,
+      songContext: "An opening song about a new beginning.",
+    });
+    expect(system).toContain("write one striking opening line in English");
+  });
+});
+
+describe("R6: completion gets a remaining-syllable target, not the full line length", () => {
+  it("EN: states a shorter remaining budget than the full line target", () => {
+    const lyrics =
+      "The city lights flicker like a dying flame\nEvery corner holds a memory I can't reclaim\nAnd still I find myself walking back to the same old";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "And still I find myself walking back to the same old",
+      textBeforeCursor: "And still I find myself walking back to the same old",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toMatch(
+      /Add about \d+-\d+ more syllables to finish the line\./,
+    );
+  });
+
+  it("HE version", () => {
+    const lyrics = "ועדיין אני מוצא את עצמי חוזר\nלאותו מקום שאהבתי\nאני ";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "אני ",
+      textBeforeCursor: "אני ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toMatch(/השלם בעוד \d+-\d+ הברות בערך כדי לסיים את השורה\./);
+  });
+});
+
+describe("R6: explicit rhyme target in the task text when a scheme is established", () => {
+  it("completion", () => {
+    const lyrics =
+      "[Chorus]\nYou were the only light in a town gone dark\nAnd I was just a boy chasing a spark\nNow the streets are quiet, and I carry the mark\nOf every";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "Of every",
+      textBeforeCursor: "Of every",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain('rhyme with: "mark"');
+  });
+
+  it("next_line", () => {
+    const lyrics =
+      "I walked down a street in the rain\nTrying to shake off the pain\nI found an old coat by the door";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "I found an old coat by the door",
+      textBeforeCursor: "I found an old coat by the door",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "next_line",
+    });
+    expect(prompt).toContain('rhymes with: "door"');
+  });
+});
+
+describe("R6: current section and line position", () => {
+  it("names the section and flags a repeated chorus", () => {
+    const lyrics =
+      "[Verse]\nI packed my bags before the sun came up\n[Chorus]\nWe are the fire that never burns out\n[Chorus]\nWe are the fire that never burns out\nWe are";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "We are",
+      textBeforeCursor: "We are",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toContain("Current section: Chorus");
+    expect(prompt).toContain("repeated chorus");
+  });
+});
+
+describe("R6: recentAccepted drops single-word examples", () => {
+  it("keeps only accepted lines with 3+ words, capped at 5", () => {
+    const { system } = buildLyricsSuggestionPrompt({
+      lyrics: "verse one\n",
+      currentLine: "verse one",
+      textBeforeCursor: "verse one",
+      selectionStart: 9,
+      selectionEnd: 9,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: ["fire", "the quiet night", "burning like the sun above"],
+      mode: "completion",
+    });
+    expect(system).not.toContain("- fire\n");
+    expect(system).toContain("the quiet night");
+    expect(system).toContain("burning like the sun above");
   });
 });
