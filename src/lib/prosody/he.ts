@@ -16,9 +16,13 @@
 //   - a vav carrying only a dagesh (no other vowel point) is read as shuruk
 //     (the vowel "u"), not a doubled consonant.
 // Syllables (unpointed text): there's no reliable algorithm without niqud.
-// We approximate with round(letterCount / 2), which tracks typical CV
-// Hebrew syllable shape closely enough for line-length comparison. Real
-// counts can still differ, especially for loanwords and very short words.
+// We approximate from the written letters: a table of common one-syllable
+// function words, a table of fixed-syllable-count suffixes (plural/dual/
+// possessive endings), and — for whatever stem is left — a letter-based
+// estimate that discounts matres lectionis (ו/י used as vowel markers
+// rather than consonants) and folds one remaining letter in as a coda.
+// See estimateStemSyllables below for the details. Real counts can still
+// differ, especially for loanwords and very short words.
 //
 // Rhyme: rhymeKey strips niqud and prefixes/suffixes down to the final
 // letters, with a small table of common Hebrew endings (plural ים/ות,
@@ -171,14 +175,17 @@ const ONE_SYLLABLE_WORDS = new Set([
   "אין",
   "עוד",
   "כך",
-  "פה",
 ]);
 
 // Longest-match-first; each entry is [suffix letters, syllables it adds].
-// The dual/pair ending (עיניים, ידיים, רגליים) is two syllables; the
-// ordinary plural/possessive endings are one.
+// The dual/pair ending (עיניים, ידיים, רגליים, חיים) is spelled with an
+// extra "י" before the ordinary ים, but that extra letter is the fused
+// final consonant of the stem (e.g. "חי" + "ים" -> "חיים"), not a second
+// suffix syllable — so it's deliberately *not* matched as its own [יים, 2]
+// entry. Falling through to the ordinary ["ים", 1] rule below leaves that
+// letter in the stem, where estimateStemSyllables' mater handling already
+// accounts for it; special-casing יים to a flat +2 double-counted it.
 const SYLLABLE_SUFFIXES: [string, number][] = [
-  ["יים", 2],
   ["ים", 1],
   ["ות", 1],
   ["תי", 1],
@@ -266,8 +273,12 @@ function countSyllablesWord(word: string): number {
     : countUnpointedSyllables(word);
 }
 
+// A maqaf (־, U+05BE) joins words in writing (e.g. תל־אביב) but is a word
+// break for syllable purposes — it carries no vowel of its own.
+const WORD_BREAK_RE = /[\s־]+/;
+
 export function countSyllables(wordOrLine: string): number {
-  const words = wordOrLine.trim().split(/\s+/).filter(Boolean);
+  const words = wordOrLine.trim().split(WORD_BREAK_RE).filter(Boolean);
   if (words.length === 0) return 0;
   return words.reduce((sum, w) => sum + countSyllablesWord(w), 0);
 }

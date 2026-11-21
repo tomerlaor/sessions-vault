@@ -137,11 +137,40 @@ describe("countSyllables (he, unpointed) — calibration", () => {
     expect(newWithin1).toBeGreaterThan(oldWithin1);
   });
 
-  it("fixes the motivating false-fail case: a short line within 2 of a 13-syllable reference", () => {
-    // analysis-4.5.md: he-next-line-abab t1 output, scored 10 vs 13 by the
-    // old heuristic (outside the checker's +/-2 window). A hand count is
-    // close to 13, so the improved estimate should land inside the window.
+  it("fixes the motivating false-fail case: a short line within 1 of its 11-syllable hand count", () => {
+    // analysis-4.5.md: he-next-line-abab t1 output, scored 10 by the old
+    // letters/2 heuristic. A careful hand count of this line (ba-che-der
+    // sh'lo nig'u bo ya-da-yim = 3+2+2+1+3) is 11, not the 13 this test
+    // previously asserted against — the improved estimate should land
+    // close to that correct count.
     const count = countSyllables("בחדר שלא נגעו בו ידיים");
-    expect(Math.abs(count - 13)).toBeLessThanOrEqual(2);
+    expect(Math.abs(count - 11)).toBeLessThanOrEqual(1);
+  });
+
+  it("treats a maqaf (־) as a word break", () => {
+    // תל־אביב (Tel Aviv) is written with a maqaf joining the two words;
+    // it should count the same as if they were space-separated (tel-a-viv).
+    expect(countSyllables("תל־אביב")).toBe(3);
+    expect(countSyllables("תל־אביב")).toBe(countSyllables("תל אביב"));
+  });
+
+  it("doesn't double-count the stem's last consonant for the יים dual ending", () => {
+    // The old ["יים", 2] rule stripped all 3 letters of the dual ending and
+    // added a flat 2, double-counting the stem's final consonant (which is
+    // the same letter the dual ending's leading mater fuses with in
+    // writing, e.g. חי + ים -> חיים). Falling through to the ordinary
+    // ["ים", 1] rule leaves that letter as part of the stem instead.
+    expect(countSyllables("חיים")).toBe(2); // kha-YIM
+    expect(countSyllables("עיניים")).toBe(3); // ei-NA-yim
+    expect(countSyllables("רגליים")).toBe(3); // rag-LA-yim
+    expect(countSyllables("אזניים")).toBe(3); // oz-NA-yim
+    expect(countSyllables("שמיים")).toBe(3); // sha-MA-yim
+    // פעמיים is truly pa-a-MA-yim = 4 (the guttural ע after a bare
+    // consonant takes its own vowel, same as in נעליים/פעמיים-type nouns)
+    // but nothing in this letter-counting heuristic models that guttural
+    // vowel-insertion rule, so the general fix lands on 3 here, one short
+    // of the true count. Documented as a known miss rather than
+    // special-cased away.
+    expect(countSyllables("פעמיים")).toBe(3);
   });
 });
