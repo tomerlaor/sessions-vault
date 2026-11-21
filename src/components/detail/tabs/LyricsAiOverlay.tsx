@@ -36,6 +36,7 @@ import {
   normalizeNextWordOptions,
   PROMPT_VERSION,
 } from "../../../lib/lyrics-ai";
+import { smartJoinCompletion } from "../../../lib/lyrics-join";
 import {
   LruCache,
   createDebouncer,
@@ -663,7 +664,15 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
 
     const handleAccept = useCallback(
       async (text: string, mode: LyricSuggestionMode) => {
-        onInsert(text, mode);
+        // Completion suggestions are raw model text and may need a space
+        // added (or not) where they meet what the writer already typed —
+        // see src/lib/lyrics-join.ts. next_word suggestions are already
+        // normalized via normalizeNextWord before they ever reach here.
+        const toInsert =
+          mode === "completion"
+            ? smartJoinCompletion(draft.slice(0, selectionStart), text)
+            : text;
+        onInsert(toInsert, mode);
         setGhostText("");
         setCurrentSuggestion(null);
         setStatus("idle");
@@ -689,7 +698,13 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
         await triggerProfileRegenIfNeeded(null);
         await triggerProfileRegenIfNeeded(project.id);
       },
-      [onInsert, project.id, triggerProfileRegenIfNeeded],
+      [
+        draft,
+        selectionStart,
+        onInsert,
+        project.id,
+        triggerProfileRegenIfNeeded,
+      ],
     );
 
     const handleReject = useCallback(
@@ -803,6 +818,13 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
       );
     }
 
+    // Mirrors handleAccept's completion-mode join exactly, so what's shown
+    // here as ghost text is always what Tab/accept would actually insert.
+    const displayGhostText =
+      currentMode === "completion"
+        ? smartJoinCompletion(draft.slice(0, selectionStart), ghostText)
+        : ghostText;
+
     return (
       <>
         {cfg.mode === "inline" && (
@@ -828,7 +850,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               )}
               {ghostText && (
                 <span style={{ color: "var(--accent)", opacity: 0.4 }}>
-                  {ghostText}
+                  {displayGhostText}
                 </span>
               )}
             </div>

@@ -58,7 +58,10 @@ function trial(
   };
 }
 
-function runWith(trials: TrialOutcome[]): EvalRunResult {
+function runWith(
+  trials: TrialOutcome[],
+  mode: EvalRunResult["cases"][number]["mode"] = "next_line",
+): EvalRunResult {
   return {
     meta: {
       model: "typesafe/jev-1.14",
@@ -72,7 +75,7 @@ function runWith(trials: TrialOutcome[]): EvalRunResult {
       {
         id: "en-next-line-aabb",
         lang: "en",
-        mode: "next_line",
+        mode,
         expect: { rhymeWith: "door" },
         trials,
       },
@@ -260,5 +263,68 @@ describe("error kind split and mean reasoning tokens", () => {
     const run = runWith([trial([candidate("a", 0, [], true)], 0)]);
     expect(computeStats(run).tokens.meanReasoning).toBeNull();
     expect(buildMarkdownReport(run)).toContain("mean reasoning: n/a");
+  });
+});
+
+describe("omitted leading space diagnostic (#102)", () => {
+  it("counts flagged trials and computes a rate, scoped to completion-mode trials", () => {
+    const run = runWith(
+      [
+        {
+          ...trial([candidate("a", 0, [], true)], 0),
+          omittedLeadingSpace: true,
+        },
+        {
+          ...trial([candidate("b", 0, [], true)], 0),
+          omittedLeadingSpace: false,
+        },
+      ],
+      "completion",
+    );
+    const stats = computeStats(run);
+    expect(stats.omittedLeadingSpace).toEqual({
+      count: 1,
+      eligibleTrials: 2,
+      rate: 0.5,
+    });
+    // Does not affect pass rate — both trials above pass all their checks.
+    expect(stats.overallTrialPassRate).toBe(1);
+
+    const md = buildMarkdownReport(run);
+    expect(md).toContain(
+      "Model omitted leading space (diagnostic, does not affect pass rate): 1/2 completion trials (50.0%)",
+    );
+  });
+
+  it("ignores non-completion-mode trials and error trials", () => {
+    const run = runWith(
+      [
+        {
+          ...trial([candidate("a", 0, [], true)], 0),
+          omittedLeadingSpace: true,
+        },
+      ],
+      "next_line",
+    );
+    expect(computeStats(run).omittedLeadingSpace).toEqual({
+      count: 0,
+      eligibleTrials: 0,
+      rate: null,
+    });
+    expect(buildMarkdownReport(run)).toContain(
+      "Model omitted leading space (diagnostic, does not affect pass rate): 0/0 completion trials (n/a)",
+    );
+  });
+
+  it("is false/undefined by default when a trial doesn't report it", () => {
+    const run = runWith(
+      [trial([candidate("a", 0, [], true)], 0)],
+      "completion",
+    );
+    expect(computeStats(run).omittedLeadingSpace).toEqual({
+      count: 0,
+      eligibleTrials: 1,
+      rate: 0,
+    });
   });
 });
