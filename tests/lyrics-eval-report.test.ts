@@ -360,6 +360,37 @@ describe("formatRaw diagnostic", () => {
   });
 });
 
+describe("noCopyRaw diagnostic", () => {
+  it("aggregates pass/fail independently of the guarded noCopy check", () => {
+    const run = runWith([
+      {
+        ...trial([candidate("a", 0, [], true)], 0),
+        noCopyRaw: { status: "fail", detail: "repeats an existing line" },
+      },
+      {
+        ...trial([candidate("b", 0, [], true)], 0),
+        noCopyRaw: { status: "pass" },
+      },
+    ]);
+    const stats = computeStats(run);
+    expect(stats.noCopyRaw).toEqual({ pass: 1, fail: 1, skip: 0 });
+
+    const md = buildMarkdownReport(run);
+    expect(md).toContain(
+      "Pre-guard noCopy pass rate (diagnostic, does not affect pass rate): 1/2 (50.0%)",
+    );
+  });
+
+  it("ignores trials that didn't report noCopyRaw", () => {
+    const run = runWith([trial([candidate("a", 0, [], true)], 0)]);
+    expect(computeStats(run).noCopyRaw).toEqual({
+      pass: 0,
+      fail: 0,
+      skip: 0,
+    });
+  });
+});
+
 describe("prompt version metadata", () => {
   it("includes the prompt version in the report header when present", () => {
     const run = runWith([trial([candidate("a", 0, [], true)], 0)]);

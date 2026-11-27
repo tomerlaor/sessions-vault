@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  applyCopyGuard,
+  isCopyOfExistingLine,
   sanitizeLyricsOutput,
   sanitizePartialLyricsOutput,
   trimRepeatedTail,
@@ -292,6 +294,23 @@ describe("sanitizePartialLyricsOutput", () => {
       'Walking into tomorrow"',
     );
   });
+
+  it("stays on the first lyric line once it's done streaming, dropping a self-correction that follows (R6 review §7.3)", () => {
+    const raw =
+      "night I told you I'd leave, and didn't\n\n" +
+      'Wait, that\'s not a rhyme with "mark." Corrected:\n\n' +
+      "dark";
+    for (let i = 1; i <= raw.length; i++) {
+      const partial = sanitizePartialLyricsOutput(raw.slice(0, i));
+      expect(partial).not.toContain("Wait");
+      expect(partial).not.toContain("Corrected");
+      // Once the first line's own newline has streamed in, the preview is
+      // exactly that line — nothing from later in the reply leaks through.
+      if (raw.slice(0, i).includes("\n")) {
+        expect(partial).toBe("night I told you I'd leave, and didn't");
+      }
+    }
+  });
 });
 
 // ── trimRepeatedTail (#79: don't repeat text after the cursor) ────────────
@@ -341,5 +360,134 @@ describe("trimRepeatedTail", () => {
     // The kept text "wait" ends in a letter, but the overlap ", really"
     // starts with punctuation — that's still a real word boundary.
     expect(trimRepeatedTail("wait, really", ", really")).toBe("wait");
+  });
+});
+
+// ── Client-side noCopy guard (R6 review §7.1) ───────────────────────────────
+
+describe("isCopyOfExistingLine", () => {
+  const lyrics = "[Chorus]\nWe rise again when the morning comes\n";
+
+  it("flags a verbatim copy", () => {
+    expect(
+      isCopyOfExistingLine("We rise again when the morning comes", lyrics, {
+        mode: "next_line",
+      }),
+    ).toBe(true);
+  });
+
+  it("flags a copy that only differs by niqqud", () => {
+    const heLyrics = "אנחנו קמים כשהבוקר מגיע\n";
+    // Every base letter followed by a patach (U+05B7) — same word, pointed.
+    const pointed = "אַנַחַנַוַ קַמַיַםַ כַשַהַבַוַקַרַ מַגַיַעַ";
+    expect(isCopyOfExistingLine(pointed, heLyrics, { mode: "next_line" })).toBe(
+      true,
+    );
+  });
+
+  it("flags a copy that only differs by punctuation and case", () => {
+    expect(
+      isCopyOfExistingLine("WE RISE AGAIN, WHEN THE MORNING COMES!", lyrics, {
+        mode: "next_line",
+      }),
+    ).toBe(true);
+  });
+
+  it("passes a genuinely new line", () => {
+    expect(
+      isCopyOfExistingLine("A brand new thought I've never sung", lyrics, {
+        mode: "next_line",
+      }),
+    ).toBe(false);
+  });
+
+  it("completion: compares the WHOLE resulting line, not the suffix alone", () => {
+    const completionLyrics = "I walk alone through the empty street\n";
+    // The suffix alone isn't itself an existing line, but prefix + suffix
+    // together reconstructs one.
+    expect(
+      isCopyOfExistingLine("through the empty street", completionLyrics, {
+        mode: "completion",
+        linePrefix: "I walk alone ",
+      }),
+    ).toBe(true);
+    // A suffix that doesn't reconstruct an existing line isn't a copy.
+    expect(
+      isCopyOfExistingLine("through the quiet night", completionLyrics, {
+        mode: "completion",
+        linePrefix: "I walk alone ",
+      }),
+    ).toBe(false);
+  });
+
+  it("the chorus-mirror allow exemption lets the explicitly-mirrored line through", () => {
+    const mirrorLyrics =
+      "[Chorus]\nWe rise again\nWhen the night is long\n[Chorus]\nWe rise again\n";
+    expect(
+      isCopyOfExistingLine("When the night is long", mirrorLyrics, {
+        mode: "next_line",
+        allow: "When the night is long",
+      }),
+    ).toBe(false);
+    // Without the exemption, the same line is a copy.
+    expect(
+      isCopyOfExistingLine("When the night is long", mirrorLyrics, {
+        mode: "next_line",
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("applyCopyGuard", () => {
+  const lyrics = "[Chorus]\nWe rise again when the morning comes\n";
+
+  it("returns the sanitized suggestion when it isn't a copy", () => {
+    expect(
+      applyCopyGuard("A brand new thought I've never sung", "next_line", {
+        lyrics,
+      }),
+    ).toBe("A brand new thought I've never sung");
+  });
+
+  it("drops a verbatim copy when there's nothing left in the raw reply to rescue from", () => {
+    expect(
+      applyCopyGuard("We rise again when the morning comes", "next_line", {
+        lyrics,
+      }),
+    ).toBe("");
+  });
+
+  it("rescues from the next line in the raw reply when the first line is a copy", () => {
+    const raw =
+      "We rise again when the morning comes\nWe rise and we carry the fire";
+    expect(applyCopyGuard(raw, "next_line", { lyrics })).toBe(
+      "We rise and we carry the fire",
+    );
+  });
+
+  it("drops when the rescued line is also a copy", () => {
+    const raw =
+      "We rise again when the morning comes\nWe rise again when the morning comes";
+    expect(applyCopyGuard(raw, "next_line", { lyrics })).toBe("");
+  });
+
+  it("the chorus-mirror allow exemption passes the mirrored line through without a rescue", () => {
+    expect(
+      applyCopyGuard("We rise again when the morning comes", "next_line", {
+        lyrics,
+        allow: "We rise again when the morning comes",
+      }),
+    ).toBe("We rise again when the morning comes");
+  });
+
+  it("completion: rescue re-sanitizes the remainder and re-checks the whole joined line", () => {
+    const completionLyrics = "I walk alone through the empty street\n";
+    const raw = "through the empty street\nthrough the quiet night";
+    expect(
+      applyCopyGuard(raw, "completion", {
+        lyrics: completionLyrics,
+        linePrefix: "I walk alone ",
+      }),
+    ).toBe("through the quiet night");
   });
 });

@@ -27,6 +27,7 @@ import {
   buildLyricsSuggestionPrompt,
   buildLyricsPopupPrompt,
   buildNextWordOptionsPrompt,
+  chorusMirrorLine,
   determineSuggestionMode,
   isHebrew,
   lyricsInlinePromptId,
@@ -38,7 +39,7 @@ import {
 } from "../../../lib/lyrics-ai";
 import { smartJoinCompletion } from "../../../lib/lyrics-join";
 import {
-  sanitizeLyricsOutput,
+  applyCopyGuard,
   sanitizePartialLyricsOutput,
   trimRepeatedTail,
 } from "../../../lib/lyrics-sanitize";
@@ -509,6 +510,7 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               sanitizePopupSuggestions(
                 result.value.suggestions,
                 lineTextBeforeCursor,
+                draft,
               ),
             );
             setStatus("ready");
@@ -589,8 +591,22 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
             }
             // Shared with the eval runner (scripts/lyrics-eval/runner.ts) so
             // what's shown/inserted here is what gets scored there.
+            // applyCopyGuard also catches a verbatim repeat of an existing
+            // lyric line (R6 review §7.1) — the model's own no-repeat rule
+            // can lose to a stronger instruction (e.g. a repeated-chorus
+            // note), and the guard is the safety net for that. `allow`
+            // exempts the one line the prompt explicitly told it to mirror
+            // (sectionContextLine's chorus-mirror wording, lyrics-ai.ts).
             let suggestion = result.value
-              ? sanitizeLyricsOutput(result.value, mode)
+              ? applyCopyGuard(result.value, mode, {
+                  lyrics: draft,
+                  linePrefix: lineTextBeforeCursor,
+                  allow: chorusMirrorLine(
+                    draft,
+                    selectionStart,
+                    mode === "next_line",
+                  ),
+                })
               : "";
             if (suggestion && mode === "completion") {
               // #79: don't let a completion duplicate text the writer

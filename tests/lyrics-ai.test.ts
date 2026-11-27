@@ -9,10 +9,19 @@ import {
   sanitizePopupSuggestions,
 } from "../src/lib/lyrics-ai";
 import { loadEnglishDict } from "../src/lib/prosody";
+import { loadFixtures } from "../scripts/lyrics-eval/fixtures";
+import type { EvalFixture } from "../scripts/lyrics-eval/types";
 
 beforeAll(async () => {
   await loadEnglishDict();
 });
+
+const fixtures = loadFixtures();
+function fixture(id: string): EvalFixture {
+  const f = fixtures.find((x) => x.id === id);
+  if (!f) throw new Error(`missing fixture ${id}`);
+  return f;
+}
 
 describe("buildLyricsSuggestionPrompt", () => {
   const base = {
@@ -874,12 +883,16 @@ describe("R6: empty-draft language rule follows songContext/title when the draft
 
 describe("R6: completion gets a remaining-syllable target, not the full line length", () => {
   it("EN: states a shorter remaining budget than the full line target", () => {
+    // Not the en-completion-long eval fixture — its remaining budget is
+    // small enough (<=3 syllables) to trigger the F2 short-finish wording
+    // instead (see the dedicated describe block below); this fixture has
+    // more room left on the line so it still gets the generic wording.
     const lyrics =
-      "The city lights flicker like a dying flame\nEvery corner holds a memory I can't reclaim\nAnd still I find myself walking back to the same old";
+      "The city lights flicker like a dying flame\nEvery corner holds a memory I can't reclaim\nAnd still I find myself walking back to";
     const { prompt } = buildLyricsSuggestionPrompt({
       lyrics,
-      currentLine: "And still I find myself walking back to the same old",
-      textBeforeCursor: "And still I find myself walking back to the same old",
+      currentLine: "And still I find myself walking back to",
+      textBeforeCursor: "And still I find myself walking back to",
       selectionStart: lyrics.length,
       selectionEnd: lyrics.length,
       title: "T",
@@ -914,6 +927,63 @@ describe("R6: completion gets a remaining-syllable target, not the full line len
       mode: "completion",
     });
     expect(prompt).toMatch(/השלם בעוד \d+-\d+ הברות בערך כדי לסיים את השורה\./);
+  });
+});
+
+describe("R6 review F2: short-finish wording when almost nothing is left", () => {
+  function promptForFixture(id: string) {
+    const f = fixture(id);
+    const lineStart = f.lyrics.lastIndexOf("\n", f.cursor - 1) + 1;
+    const currentLine = f.lyrics.slice(lineStart, f.cursor);
+    return buildLyricsSuggestionPrompt({
+      lyrics: f.lyrics,
+      currentLine,
+      textBeforeCursor: currentLine,
+      selectionStart: f.cursor,
+      selectionEnd: f.cursor,
+      title: "T",
+      bpm: f.bpm ?? null,
+      key: f.key ?? null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      songContext: f.songContext ?? null,
+      mode: "completion",
+    });
+  }
+
+  it("en-completion-long: finish-in-a-word-or-two wording, and no forced rhyme target (flame/reclaim is a genuine closed couplet)", () => {
+    const { prompt } = promptForFixture("en-completion-long");
+    expect(prompt).toMatch(
+      /The line is almost complete: finish it in one or two words \(about \d+-\d+ syllables\) — don't start a new clause\./,
+    );
+    // "reclaim" is in the lyrics block itself (it's a real line of the
+    // fixture) — the thing that must be absent is a forced rhyme target.
+    expect(prompt).not.toMatch(/rhyme with: "reclaim"/);
+  });
+
+  it("a short Hebrew remaining budget gets the Hebrew finish-in-a-word-or-two wording", () => {
+    const lyrics =
+      "אורות העיר מרצדים כמו להבה גוועת\nכל פינה מחזיקה זיכרון שאיני יכול לשכוח\nועדיין אני מוצא את עצמי חוזר לאותו מקום הישן והחם";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "ועדיין אני מוצא את עצמי חוזר לאותו מקום הישן והחם",
+      textBeforeCursor: "ועדיין אני מוצא את עצמי חוזר לאותו מקום הישן והחם",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "completion",
+    });
+    expect(prompt).toMatch(
+      /השורה כמעט שלמה: סיים אותה במילה אחת או שתיים \(בערך \d+-\d+ הברות\) — אל תתחיל משפט חדש\./,
+    );
   });
 });
 
@@ -1484,6 +1554,70 @@ describe("R6: current section and line position", () => {
   });
 });
 
+describe("R6 review fix 1: a repeated chorus line is a refrain, not something to copy", () => {
+  function promptForFixture(id: string) {
+    const f = fixture(id);
+    const lineStart = f.lyrics.lastIndexOf("\n", f.cursor - 1) + 1;
+    const currentLine = f.lyrics.slice(lineStart);
+    return buildLyricsSuggestionPrompt({
+      lyrics: f.lyrics,
+      currentLine,
+      textBeforeCursor: currentLine,
+      selectionStart: f.cursor,
+      selectionEnd: f.cursor,
+      title: "T",
+      bpm: f.bpm ?? null,
+      key: f.key ?? null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      songContext: f.songContext ?? null,
+      mode: "next_line",
+    });
+  }
+
+  it('en-edge-chords-chorus: targets "comes" and tells the model to extend, not repeat', () => {
+    const { prompt } = promptForFixture("en-edge-chords-chorus");
+    expect(prompt).toContain('rhymes with: "comes"');
+    expect(prompt).toContain(
+      "This repeated chorus is already as long as the earlier one; write a new line that extends it. Don't repeat an existing line.",
+    );
+  });
+
+  it('he-edge-chords-chorus: targets "מגיע" and tells the model (in Hebrew) to extend, not repeat', () => {
+    const { prompt } = promptForFixture("he-edge-chords-chorus");
+    expect(prompt).toContain('מתחרזת עם: "מגיע"');
+    expect(prompt).toContain(
+      "הפזמון החוזר כבר באורך של הפזמון הקודם; כתוב שורה חדשה שמרחיבה אותו. אל תחזור על שורה קיימת.",
+    );
+  });
+
+  it("mirrors the earlier chorus's line when it HAS a line at this position", () => {
+    const lyrics =
+      "[Chorus]\nWe rise again\nWhen the night is long\n[Chorus]\nWe rise again\n";
+    const { prompt } = buildLyricsSuggestionPrompt({
+      lyrics,
+      currentLine: "",
+      textBeforeCursor: "",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      mode: "next_line",
+    });
+    expect(prompt).toContain(
+      'The earlier chorus has this line here: "When the night is long" — mirror it.',
+    );
+    expect(prompt).not.toContain("already as long as the earlier one");
+  });
+});
+
 describe("#79: punctuation awareness for completion", () => {
   const base = {
     title: "T",
@@ -1671,6 +1805,7 @@ describe("fix: sanitizePopupSuggestions cleans popup items the same way ghost te
         { mode: "alternative" as const, text: "'a quiet leaving'" },
       ],
       "",
+      "",
     );
     expect(out).toEqual([
       { mode: "completion", text: "away" },
@@ -1685,6 +1820,7 @@ describe("fix: sanitizePopupSuggestions cleans popup items the same way ghost te
     const out = sanitizePopupSuggestions(
       [{ mode: "next_word" as const, text: "  world  " }],
       "hello",
+      "",
     );
     expect(out).toEqual([{ mode: "next_word", text: " world" }]);
   });
@@ -1695,6 +1831,7 @@ describe("fix: sanitizePopupSuggestions cleans popup items the same way ghost te
         { mode: "next_line" as const, text: "```" },
         { mode: "completion" as const, text: "away" },
       ],
+      "",
       "",
     );
     expect(out).toEqual([{ mode: "completion", text: "away" }]);
@@ -1710,9 +1847,54 @@ describe("fix: sanitizePopupSuggestions cleans popup items the same way ghost te
         },
       ],
       "",
+      "",
     );
     expect(out).toEqual([
       { mode: "next_line", text: "a line", label: "rhyme" },
+    ]);
+  });
+
+  it("drops a next_line/completion/alternative item that's a verbatim copy of an existing lyric line", () => {
+    const lyrics = "[Chorus]\nWe rise again when the morning comes\n";
+    const out = sanitizePopupSuggestions(
+      [
+        {
+          mode: "next_line" as const,
+          text: "We rise again when the morning comes",
+        },
+        { mode: "next_line" as const, text: "A brand new thought" },
+      ],
+      "",
+      lyrics,
+    );
+    expect(out).toEqual([{ mode: "next_line", text: "A brand new thought" }]);
+  });
+
+  it("does not drop a next_word item even if it happens to match a whole existing line", () => {
+    const lyrics = "comes\n";
+    const out = sanitizePopupSuggestions(
+      [{ mode: "next_word" as const, text: "comes" }],
+      "",
+      lyrics,
+    );
+    expect(out).toEqual([{ mode: "next_word", text: "comes" }]);
+  });
+
+  it("the chorus-mirror allow exemption keeps the mirrored line", () => {
+    const lyrics = "[Chorus]\nWe rise again when the morning comes\n";
+    const out = sanitizePopupSuggestions(
+      [
+        {
+          mode: "next_line" as const,
+          text: "We rise again when the morning comes",
+        },
+      ],
+      "",
+      lyrics,
+      "We rise again when the morning comes",
+    );
+    expect(out).toEqual([
+      { mode: "next_line", text: "We rise again when the morning comes" },
     ]);
   });
 });

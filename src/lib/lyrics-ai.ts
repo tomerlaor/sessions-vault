@@ -9,6 +9,7 @@ import {
 } from "./prosody";
 import {
   CURSOR_MARKER,
+  isCopyOfExistingLine,
   sanitizeLyricsOutput,
   type SanitizeMode,
 } from "./lyrics-sanitize";
@@ -496,6 +497,50 @@ function sectionPositionAt(
   return { name, lineNumber: completed + 1, isChorusRepeat };
 }
 
+// R6 review (fix 1b): the line (if any) that the earlier occurrence of this
+// same chorus has at the exact position the cursor is about to write —
+// used both to tell the model to mirror it (sectionContextLine) and, by the
+// client-side copy guard (lyrics-sanitize.ts), as the one existing line
+// that's legitimately allowed to come back verbatim. Returns undefined when
+// the cursor isn't in a repeated chorus, or the earlier occurrence doesn't
+// reach this far (e.g. it only has 2 lines and this would be its 3rd).
+export function chorusMirrorLine(
+  lyrics: string,
+  cursor: number,
+  countCursorLineIfFinished: boolean,
+): string | undefined {
+  const info = sectionPositionAt(lyrics, cursor, countCursorLineIfFinished);
+  if (!info.isChorusRepeat || info.name === null) return undefined;
+
+  const rawLines = lyrics.split("\n");
+  const at = clampIndex(cursor, lyrics.length);
+  const cursorLine = lineIndexAtOffset(rawLines, at);
+
+  let currentHeaderIndex = -1;
+  for (let i = cursorLine; i >= 0; i--) {
+    if (headerName(rawLines[i]) === info.name) {
+      currentHeaderIndex = i;
+      break;
+    }
+  }
+  let earlierHeaderIndex = -1;
+  for (let i = currentHeaderIndex - 1; i >= 0; i--) {
+    if (headerName(rawLines[i]) === info.name) {
+      earlierHeaderIndex = i;
+      break;
+    }
+  }
+  if (earlierHeaderIndex === -1) return undefined;
+
+  const earlierLines: string[] = [];
+  for (let i = earlierHeaderIndex + 1; i < rawLines.length; i++) {
+    if (headerName(rawLines[i]) !== null) break;
+    const cleaned = cleanLine(rawLines[i] ?? "");
+    if (cleaned.length > 0) earlierLines.push(cleaned);
+  }
+  return earlierLines[info.lineNumber - 1];
+}
+
 function sectionContextLine(
   lyrics: string,
   cursor: number,
@@ -514,9 +559,19 @@ function sectionContextLine(
     ? `החלק הנוכחי: ${name} (שורה ${info.lineNumber} בחלק זה)`
     : `Current section: ${name} (line ${info.lineNumber} of it)`;
   if (!info.isChorusRepeat) return base;
+  // R6 review (fix 1b): "keep it consistent with the earlier chorus" read as
+  // "repeat it" once the chorus's own rhyme target (scheme.ts's refrain
+  // guard) stopped giving the model a concrete job — so either point it at
+  // the exact earlier line to mirror, or tell it this is new ground to cover.
+  const mirror = chorusMirrorLine(lyrics, cursor, countCursorLineIfFinished);
+  if (mirror) {
+    return hebrew
+      ? `${base}. בפזמון הקודם בשורה הזו כתוב: "${mirror}" — שקף אותו.`
+      : `${base}. The earlier chorus has this line here: "${mirror}" — mirror it.`;
+  }
   return hebrew
-    ? `${base}. זהו פזמון חוזר — שמור על עקביות עם הפזמון שנכתב קודם.`
-    : `${base}. This is a repeated chorus — keep it consistent with the earlier chorus.`;
+    ? `${base}. הפזמון החוזר כבר באורך של הפזמון הקודם; כתוב שורה חדשה שמרחיבה אותו. אל תחזור על שורה קיימת.`
+    : `${base}. This repeated chorus is already as long as the earlier one; write a new line that extends it. Don't repeat an existing line.`;
 }
 
 // Completion's remaining-syllable budget: the full target line length (R4's
@@ -713,10 +768,20 @@ function buildInlineUserPrompt(
     }
 
     if (remaining) {
+      // R6 review (F2): when almost nothing is left, "add about X-Y
+      // syllables" reads as "write more" and invites a whole new clause.
+      // A short, explicit word-count instruction is the length anchor here
+      // instead — not a rhyme target, which would be wrong when the line
+      // above it closed a couplet (see scheme.ts's refrain/couplet fix).
+      const almostDone = remaining[1] <= 3;
       lines.push(
         hebrew
-          ? `השלם בעוד ${remaining[0]}-${remaining[1]} הברות בערך כדי לסיים את השורה.`
-          : `Add about ${remaining[0]}-${remaining[1]} more syllables to finish the line.`,
+          ? almostDone
+            ? `השורה כמעט שלמה: סיים אותה במילה אחת או שתיים (בערך ${remaining[0]}-${remaining[1]} הברות) — אל תתחיל משפט חדש.`
+            : `השלם בעוד ${remaining[0]}-${remaining[1]} הברות בערך כדי לסיים את השורה.`
+          : almostDone
+            ? `The line is almost complete: finish it in one or two words (about ${remaining[0]}-${remaining[1]} syllables) — don't start a new clause.`
+            : `Add about ${remaining[0]}-${remaining[1]} more syllables to finish the line.`,
       );
     }
     const rhymeTarget = impliedRhymeTarget(draft, cursor);
@@ -856,7 +921,7 @@ const MODE_INSTRUCTIONS_HE: Record<LyricSuggestionMode, string> = {
 // Stamped on every span's promptVersion (T1, #89) so later prompt rewrites
 // are comparable by version in the eval report. Bump this — and only
 // this — when prompt wording changes; it is not tied to app releases.
-export const PROMPT_VERSION = "2026-11-21.2";
+export const PROMPT_VERSION = "2026-11-21.3";
 
 // Stable id for a span's promptId, e.g. "lyrics.inline.next_line.he". Mirrors
 // the (mode, language) pair buildLyricsSuggestionPrompt already branches on,
@@ -1108,17 +1173,36 @@ export function normalizeNextWordOptions(
 // mode (completion/next_line/alternative) via the shared sanitizer — so a
 // labeled/quoted/fenced reply doesn't reach the popup list unsanitized the
 // way the inline path's result already is. Drops anything that sanitizes
-// down to nothing rather than showing an empty suggestion.
+// down to nothing rather than showing an empty suggestion, and (R6 review
+// §7.1) drops anything that's just a verbatim copy of an existing lyric
+// line — next_word items are single words/short phrases, so the copy guard
+// doesn't apply to them. `allow` is the chorus-mirror exemption (see
+// chorusMirrorLine above); the popup prompt doesn't currently give that
+// instruction, so callers can omit it.
 export function sanitizePopupSuggestions<
   T extends { mode: LyricSuggestionMode; text: string },
->(suggestions: T[], textBeforeCursor: string): T[] {
+>(
+  suggestions: T[],
+  textBeforeCursor: string,
+  lyrics: string,
+  allow?: string,
+): T[] {
   return suggestions
     .map((s) =>
       s.mode === "next_word"
         ? { ...s, text: normalizeNextWord(s.text, textBeforeCursor) }
         : { ...s, text: sanitizeLyricsOutput(s.text, s.mode as SanitizeMode) },
     )
-    .filter((s) => s.text.trim().length > 0);
+    .filter((s) => s.text.trim().length > 0)
+    .filter(
+      (s) =>
+        s.mode === "next_word" ||
+        !isCopyOfExistingLine(s.text, lyrics, {
+          mode: s.mode as SanitizeMode,
+          linePrefix: textBeforeCursor,
+          allow,
+        }),
+    );
 }
 
 export function determineSuggestionMode(

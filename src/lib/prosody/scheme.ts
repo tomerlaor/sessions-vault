@@ -138,6 +138,14 @@ function lastWordOf(line: string): string {
   return words[words.length - 1] ?? "";
 }
 
+// Case/width-insensitive comparison for two line-ending words, used to tell
+// a genuine rhyme (different words that happen to sound alike) apart from a
+// refrain or epistrophe (the SAME word or line repeated verbatim, e.g. a
+// chorus line that's just typed twice) — the latter is not a closed couplet.
+function norm(word: string): string {
+  return word.normalize("NFKC").toLowerCase();
+}
+
 // A single line is never enough to invent a scheme from. Two lines that
 // actually rhyme are treated as the start of an AABB couplet (the simplest,
 // most common case); telling AABB apart from ABAB (alternating) at all
@@ -209,14 +217,23 @@ export function nextLineTargets(
     // target. Genuine two-line couplets (A A B B, where the third-from-last
     // line breaks the rhyme) still get no target. If the couplet is open --
     // including when there's only one line so far -- target the last
-    // finished line.
+    // finished line. An identical end word (or identical line) between the
+    // two -- a repeated chorus line, not a rhyme -- is a refrain/epistrophe,
+    // never a couplet: `doRhyme` is skipped entirely in that case so it
+    // can't close the pair (nor extend a monorhyme run).
     const rhymeFn = rhymesFor(lang);
     const last = lastWordOf(lines[lines.length - 1]);
     const prev = lines.length >= 2 ? lastWordOf(lines[lines.length - 2]) : "";
     const prev2 = lines.length >= 3 ? lastWordOf(lines[lines.length - 3]) : "";
-    const lastPairRhymes = lines.length >= 2 && doRhyme(rhymeFn, prev, last);
+    const lastPairRhymes =
+      lines.length >= 2 &&
+      norm(prev) !== norm(last) &&
+      doRhyme(rhymeFn, prev, last);
     const monorhymeRun =
-      lastPairRhymes && lines.length >= 3 && doRhyme(rhymeFn, prev2, prev);
+      lastPairRhymes &&
+      lines.length >= 3 &&
+      norm(prev2) !== norm(prev) &&
+      doRhyme(rhymeFn, prev2, prev);
     const closed = lastPairRhymes && !monorhymeRun;
     rhymeWith = closed ? undefined : last || undefined;
   } else if (scheme === "ABAB" && lines.length >= 2) {

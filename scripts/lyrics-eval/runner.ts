@@ -14,6 +14,7 @@ import {
 import {
   buildLyricsSuggestionPrompt,
   buildNextWordOptionsPrompt,
+  chorusMirrorLine,
   normalizeNextWord,
   normalizeNextWordOptions,
   PROMPT_VERSION,
@@ -23,7 +24,10 @@ import {
 import type { AIConfig } from "../../src/types";
 import { rawTextFromObjectError } from "../../src/lib/parse-ai-json";
 import { currentSection, loadEnglishDict } from "../../src/lib/prosody";
-import { sanitizeLyricsOutput } from "../../src/lib/lyrics-sanitize";
+import {
+  applyCopyGuard,
+  sanitizeLyricsOutput,
+} from "../../src/lib/lyrics-sanitize";
 import {
   checkCliche,
   checkFormat,
@@ -78,6 +82,13 @@ export interface TrialOutcome {
   // pass rate. Undefined for next_word (no single raw string to score) and
   // error trials.
   formatRaw?: CheckResult;
+  // noCopy, scored against the pre-guard sanitized text — a diagnostic
+  // alongside `checks.noCopy` (which scores the text after the client-side
+  // copy guard has already dropped/rescued a copy, per the R6 review's
+  // §7.1 fix — so `checks.noCopy` is close to always-pass by construction).
+  // This is what would have failed without the guard. Never affects the
+  // pass rate. Undefined for next_word and error trials.
+  noCopyRaw?: CheckResult;
   // Present only when `model` is an OpenRouter decisions model — see
   // src/lib/ai.ts's "generate, then decide" pipeline.
   generator?: LyricsGeneratorStageMetrics;
@@ -225,7 +236,7 @@ function scoreText(
     format: checkFormat(text, ctx, fixture.expect),
     syllables: checkSyllables(text, fixture.expect, ctx),
     rhyme: checkRhyme(text, fixture.expect, ctx),
-    noCopy: checkNoCopy(text, fixture.lyrics),
+    noCopy: checkNoCopy(text, fixture.lyrics, ctx),
     language: checkLanguage(text, fixture.lang),
     cliche: checkCliche(text, fixture.expect.rhymeWith),
   };
@@ -373,7 +384,7 @@ export async function runTrial(
           ),
           rhyme: aggregateRhymeForNextWord(options, fixture.expect, ctx),
           noCopy: aggregateOptionChecks(options, (t) =>
-            checkNoCopy(t, fixture.lyrics),
+            checkNoCopy(t, fixture.lyrics, ctx),
           ),
           language: aggregateOptionChecks(options, (t) =>
             checkLanguage(t, fixture.lang),
@@ -426,12 +437,26 @@ export async function runTrial(
       fixture,
       ctx,
     );
-    // Score the sanitized text (same cleanup the app applies before display/
-    // insertion — see src/lib/lyrics-sanitize.ts) so the eval measures what
-    // the writer would actually see, not raw labels/quotes/header artifacts.
-    // rawOutput and the #102 omittedLeadingSpace diagnostic stay on the
-    // unsanitized stream.
+    // Score the guarded text (sanitizeLyricsOutput + the client-side noCopy
+    // guard, same as the app — see src/lib/lyrics-sanitize.ts) so the eval
+    // measures what the writer would actually see, not raw labels/quotes/
+    // header artifacts, and not a copy the guard would have dropped/
+    // rescued. rawOutput and the #102 omittedLeadingSpace diagnostic stay
+    // on the unsanitized stream; noCopyRaw below is pre-guard.
     const sanitized = sanitizeLyricsOutput(output, fixture.mode);
+    // The chorus-mirror exemption (lyrics-ai.ts's chorusMirrorLine): the one
+    // line the guard must NOT treat as a copy, matching the prompt's own
+    // "mirror it" instruction (F1b).
+    const allow = chorusMirrorLine(
+      fixture.lyrics,
+      fixture.cursor,
+      fixture.mode === "next_line",
+    );
+    const guarded = applyCopyGuard(output, fixture.mode, {
+      lyrics: fixture.lyrics,
+      linePrefix: ctx.linePrefix,
+      allow,
+    });
     return {
       rawOutput: output,
       ttftMs: metrics?.ttftMs ?? null,
@@ -445,13 +470,14 @@ export async function runTrial(
       pickedIndex: scored?.pickedIndex,
       omittedLeadingSpace: checkOmittedLeadingSpace(output, ctx),
       formatRaw: checkFormat(output, ctx, fixture.expect),
+      noCopyRaw: checkNoCopy(sanitized, fixture.lyrics, ctx, allow),
       checks: {
-        format: checkFormat(sanitized, ctx, fixture.expect),
-        syllables: checkSyllables(sanitized, fixture.expect, ctx),
-        rhyme: checkRhyme(sanitized, fixture.expect, ctx),
-        noCopy: checkNoCopy(sanitized, fixture.lyrics),
-        language: checkLanguage(sanitized, fixture.lang),
-        cliche: checkCliche(sanitized, fixture.expect.rhymeWith),
+        format: checkFormat(guarded, ctx, fixture.expect),
+        syllables: checkSyllables(guarded, fixture.expect, ctx),
+        rhyme: checkRhyme(guarded, fixture.expect, ctx),
+        noCopy: checkNoCopy(guarded, fixture.lyrics, ctx, allow),
+        language: checkLanguage(guarded, fixture.lang),
+        cliche: checkCliche(guarded, fixture.expect.rhymeWith),
       },
     };
   } catch (e) {

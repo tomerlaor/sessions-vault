@@ -94,6 +94,10 @@ export interface EvalStats {
   // own, before the shared sanitizer cleans anything up. Never affects
   // overallTrialPassRate (that uses the sanitized `checks.format`).
   formatRaw: PassFailSkip;
+  // Diagnostic (see TrialOutcome.noCopyRaw) — the noCopy pass rate before
+  // the client-side copy guard drops/rescues a copy. Never affects
+  // overallTrialPassRate (that uses the guarded `checks.noCopy`).
+  noCopyRaw: PassFailSkip;
 }
 
 export interface PickerAccuracy {
@@ -238,6 +242,7 @@ export function computeStats(run: EvalRunResult): EvalStats {
   let omittedLeadingSpaceCount = 0;
   let omittedLeadingSpaceEligible = 0;
   const formatRaw = emptyPFS();
+  const noCopyRaw = emptyPFS();
 
   for (const c of run.cases) {
     byMode[c.mode] ??= emptyPFS();
@@ -257,6 +262,7 @@ export function computeStats(run: EvalRunResult): EvalStats {
         if (trial.omittedLeadingSpace) omittedLeadingSpaceCount++;
       }
       if (trial.formatRaw) addResult(formatRaw, trial.formatRaw.status);
+      if (trial.noCopyRaw) addResult(noCopyRaw, trial.noCopyRaw.status);
 
       const passed = trialPassed(trial);
       if (passed) passedTrials++;
@@ -346,6 +352,7 @@ export function computeStats(run: EvalRunResult): EvalStats {
           : null,
     },
     formatRaw,
+    noCopyRaw,
   };
 }
 
@@ -390,6 +397,10 @@ export function buildMarkdownReport(run: EvalRunResult): string {
   lines.push(
     `- Model omitted leading space (diagnostic, does not affect pass rate): ` +
       `${stats.omittedLeadingSpace.count}/${stats.omittedLeadingSpace.eligibleTrials} completion trials (${pct(stats.omittedLeadingSpace.rate)})`,
+  );
+  lines.push(
+    `- Pre-guard noCopy pass rate (diagnostic, does not affect pass rate): ` +
+      `${stats.noCopyRaw.pass}/${stats.noCopyRaw.pass + stats.noCopyRaw.fail} (${pct(passRate(stats.noCopyRaw))})`,
   );
   lines.push("");
 

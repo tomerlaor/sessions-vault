@@ -4,6 +4,8 @@
 // formatting artifacts (a label, wrapping quotes, a stray section header
 // before the real line), not a substitute for the prompt asking for a
 // single bare line (src/lib/lyrics-ai.ts's LINE_ONLY rules).
+import { smartJoinCompletion } from "./lyrics-join";
+
 export type SanitizeMode = "completion" | "next_line" | "alternative";
 
 // The marker buildCursorMarkedLyrics (lyrics-ai.ts) inserts at the cursor —
@@ -232,6 +234,16 @@ export function sanitizePartialLyricsOutput(raw: string): string {
     }
   }
 
+  // All four inline modes are a single line — once the first line has
+  // content and a newline has arrived (so it's done streaming), drop
+  // whatever the model writes after it. Without this, a self-correction
+  // reply ("...\n\nWait, that's not a rhyme. Corrected:\n\ndark") flashes
+  // its own chatter in the ghost text before the final sanitize/accept
+  // path (which only ever keeps the first line anyway) replaces it.
+  if (firstLineEnd !== -1 && cleanedFirst.length > 0) {
+    return cleanedFirst;
+  }
+
   return cleanedFirst + rest;
 }
 
@@ -270,4 +282,115 @@ export function trimRepeatedTail(
   if (!atWordBoundary) return suggestion;
 
   return kept.replace(/\s+$/, "");
+}
+
+// ─── Client-side noCopy guard (R6 review §7.1) ─────────────────────────────
+// A safety net for when the prompt's own no-repeat rule loses to a stronger
+// instruction (e.g. a repeated-chorus note) and the model just echoes a
+// line that's already in the draft. Normalizes harder than
+// sanitizeLyricsOutput — niqqud, chords/headers and punctuation can all
+// differ between two lines that are really the same line — so the eval
+// (checkNoCopy) and the app agree on what counts as a copy.
+// Maqaf, paseq, sof pasuq, nun hafukha (U+05BE, U+05C0, U+05C3, U+05C6) are
+// word-break marks, not niqqud — mapped to a space so the words on either
+// side don't glue together. ASCII \u escapes, like lyrics-join.ts's
+// HEBREW_RE, so this can't be mangled by source-encoding normalization.
+const WORD_BREAK_PUNCTUATION_RE = /[\u05BE\u05C0\u05C3\u05C6]/g;
+// Niqqud / cantillation (vowel points, dagesh, sheva, etc): U+0591-U+05C7.
+const NIQQUD_RE = /[\u0591-\u05C7]/g;
+
+function normLine(l: string): string {
+  return l
+    .normalize("NFKC")
+    .replace(/\[[^\]]*]/g, " ") // chords / [Section headers]
+    .replace(WORD_BREAK_PUNCTUATION_RE, " ")
+    .replace(NIQQUD_RE, "")
+    .toLowerCase()
+    .replace(/[\p{P}\p{S}]/gu, "") // punctuation, quotes, dashes
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export type CopyGuardMode = SanitizeMode | "next_word";
+
+export interface CopyGuardOptions {
+  mode: CopyGuardMode;
+  // completion: the text already typed on the current line, up to the
+  // cursor — needed to build the whole resulting line the writer would
+  // actually see (linePrefix + smartJoinCompletion(linePrefix, candidate)).
+  linePrefix?: string;
+  // A line that's allowed to match verbatim despite being "already in the
+  // draft" — the chorus-mirror exemption (lyrics-ai.ts's chorusMirrorLine):
+  // when the model is explicitly told to mirror the earlier chorus's line
+  // at this position, that's the one copy that's actually correct.
+  allow?: string;
+}
+
+// The line the writer would actually end up with for `candidate`, the same
+// way the app and the eval both render/insert it — completion's candidate
+// is only ever a suffix, so comparing it alone against existing lines would
+// miss a prefix+candidate combination that duplicates one.
+function wholeLineFor(candidate: string, opts: CopyGuardOptions): string {
+  if (opts.mode !== "completion") return candidate;
+  const prefix = opts.linePrefix ?? "";
+  return prefix + smartJoinCompletion(prefix, candidate);
+}
+
+export function isCopyOfExistingLine(
+  candidate: string,
+  lyrics: string,
+  opts: CopyGuardOptions,
+): boolean {
+  if (!candidate.trim()) return false;
+  const wholeNorm = normLine(wholeLineFor(candidate, opts));
+  if (!wholeNorm) return false;
+  if (opts.allow !== undefined && normLine(opts.allow) === wholeNorm) {
+    return false;
+  }
+  return lyrics
+    .split("\n")
+    .map(normLine)
+    .filter((l) => l.length > 0)
+    .includes(wholeNorm);
+}
+
+export interface ApplyCopyGuardOptions {
+  lyrics: string;
+  linePrefix?: string;
+  allow?: string;
+}
+
+// sanitizeLyricsOutput + the copy guard, with a rescue: if the kept line is
+// a copy, look for it in the raw reply and re-sanitize whatever the model
+// wrote after it (the model's own "no, that's not right — actually:" self-
+// correction, or a second attempt further down the reply) before giving up
+// entirely. Shared by the overlay's final path, sanitizePopupSuggestions
+// (lyrics-ai.ts) and the eval runner, so all three drop/rescue the same way.
+export function applyCopyGuard(
+  raw: string,
+  mode: SanitizeMode,
+  opts: ApplyCopyGuardOptions,
+): string {
+  const sug = sanitizeLyricsOutput(raw, mode);
+  if (!sug) return sug;
+  const guardOpts: CopyGuardOptions = {
+    mode,
+    linePrefix: opts.linePrefix,
+    allow: opts.allow,
+  };
+  if (!isCopyOfExistingLine(sug, opts.lyrics, guardOpts)) return sug;
+
+  const sugNorm = normLine(sug);
+  const rawLines = raw.split("\n");
+  const matchIndex = rawLines.findIndex((l) => normLine(l) === sugNorm);
+  if (matchIndex === -1) return "";
+
+  const retry = sanitizeLyricsOutput(
+    rawLines.slice(matchIndex + 1).join("\n"),
+    mode,
+  );
+  if (!retry || isCopyOfExistingLine(retry, opts.lyrics, guardOpts)) {
+    return "";
+  }
+  return retry;
 }

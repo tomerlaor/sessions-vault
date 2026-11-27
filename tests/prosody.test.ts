@@ -346,19 +346,25 @@ describe("nextLineTargets", () => {
     expect(targets.scheme).toBe("free");
   });
 
-  it("does not jump the section boundary on a repeated chorus (en)", () => {
+  it("does not jump the section boundary on a repeated chorus, and the repeated line is a refrain, not a closed couplet (en)", () => {
     const f = fixture("en-edge-chords-chorus");
     const targets = nextLineTargets(f.lyrics, f.cursor);
     // Only the 2 lines of the *current* chorus repeat are in-section (not
     // the earlier repeat before the second [Chorus] header) — if the
     // scheme detector jumped the boundary it would see a header/chord
     // word instead of "comes" and AABB wouldn't trigger at all. The 2
-    // in-section lines form one complete, closed couplet (they actually
-    // rhyme — same word, "comes"), so the line after them starts a fresh
-    // pair and gets no forced rhyme (R6 fix — AABB no longer always
-    // targets the last line, and no longer relies on count parity either).
+    // in-section lines are the SAME line typed twice ("comes"/"comes") —
+    // a refrain/epistrophe, not a genuine rhyme — so it must not count as
+    // a closed couplet: the next line still targets "comes".
     expect(targets.scheme).toBe("AABB");
-    expect(targets.rhymeWith).toBeUndefined();
+    expect(targets.rhymeWith).toBe("comes");
+  });
+
+  it("does not jump the section boundary on a repeated chorus, and the repeated line is a refrain, not a closed couplet (he)", () => {
+    const f = fixture("he-edge-chords-chorus");
+    const targets = nextLineTargets(f.lyrics, f.cursor);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBe("מגיע");
   });
 
   it("omits rhymeWith and syllables for empty lyrics", () => {

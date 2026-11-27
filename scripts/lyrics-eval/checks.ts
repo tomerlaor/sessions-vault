@@ -15,6 +15,7 @@ import {
   rhymes as engineRhymeDetail,
 } from "../../src/lib/prosody";
 import { smartJoinCompletion } from "../../src/lib/lyrics-join";
+import { isCopyOfExistingLine } from "../../src/lib/lyrics-sanitize";
 
 export type EvalLang = "en" | "he";
 export type EvalMode = "next_line" | "completion" | "next_word" | "alternative";
@@ -131,19 +132,6 @@ export function rhymes(a: string, b: string, lang: EvalLang): boolean {
 // callers that want "perfect" vs "slant" (rather than the boolean above)
 // don't need to import src/lib/prosody directly.
 export const rhymeDetail = engineRhymeDetail;
-
-// A line made up only of chord tokens (e.g. "C G Am F", "Dm7 G7 Cmaj7") or a
-// bare [Section] header — not a real lyric line, so no-copy shouldn't flag it.
-function isChordOrHeaderLine(line: string): boolean {
-  const trimmed = line.trim();
-  if (/^\[.*]$/.test(trimmed)) return true;
-  const tokens = trimmed.split(/\s+/);
-  return tokens.every((t) =>
-    /^[A-G](#|b)?(maj|min|dim|aug|sus\d?|add\d?|m)?\d*(\/[A-G](#|b)?)?$/.test(
-      t,
-    ),
-  );
-}
 
 // ── checks ────────────────────────────────────────────────────────────────
 
@@ -346,29 +334,33 @@ export function checkRhyme(
   return { status: "pass" };
 }
 
-export function checkNoCopy(output: string, lyrics: string): CheckResult {
-  const normalize = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
-
-  const existingLines = new Set(
-    lyrics
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0 && !isChordOrHeaderLine(l))
-      .map(normalize),
-  );
-
-  const outputLines = output
-    .split("\n")
-    .map(normalize)
-    .filter((l) => l.length > 0);
-
-  for (const line of outputLines) {
-    if (existingLines.has(line)) {
-      return {
-        status: "fail",
-        detail: `repeats an existing line verbatim: "${line}"`,
-      };
-    }
+// Delegates to the same isCopyOfExistingLine the app's client-side copy
+// guard uses (src/lib/lyrics-sanitize.ts), so the eval and the app agree on
+// what counts as a copy: niqqud, chords/headers and punctuation differences
+// are normalized away, and completion is judged by the whole resulting line
+// (ctx.linePrefix + the joined candidate), not the suffix alone. `allow` is
+// the chorus-mirror exemption (lyrics-ai.ts's chorusMirrorLine) — a line the
+// model was explicitly told to mirror is not a copy. next_word candidates
+// are single words/short phrases, never a whole line, so the guard doesn't
+// apply to them.
+export function checkNoCopy(
+  output: string,
+  lyrics: string,
+  ctx: Pick<CheckContext, "mode" | "linePrefix">,
+  allow?: string,
+): CheckResult {
+  if (ctx.mode === "next_word") return { status: "pass" };
+  if (
+    isCopyOfExistingLine(output, lyrics, {
+      mode: ctx.mode,
+      linePrefix: ctx.linePrefix,
+      allow,
+    })
+  ) {
+    return {
+      status: "fail",
+      detail: `repeats an existing line verbatim: "${output.trim()}"`,
+    };
   }
   return { status: "pass" };
 }
