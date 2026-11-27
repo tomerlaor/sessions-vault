@@ -69,6 +69,10 @@ export function createTracingMiddleware(
 
   function recordAttempt(record: Omit<AttemptRecord, "spanId">): void {
     ctx.span.attempts = attemptCounter;
+    // Same write-time liveness check as safeWrite (M1, #118): the store was
+    // resolved when the model call started, so re-check it right before
+    // writing instead of trusting that snapshot.
+    if (ctx.store?.isActive && !ctx.store.isActive()) return;
     try {
       ctx.store?.writeAttempt({ spanId: ctx.spanId, ...record });
     } catch {
@@ -122,6 +126,7 @@ export function createTracingMiddleware(
     async wrapStream({
       doStream,
       model,
+      params,
     }: WrapStreamOptions): Promise<StreamResult> {
       attemptCounter += 1;
       const attempt = attemptCounter;
@@ -132,49 +137,112 @@ export function createTracingMiddleware(
         const result = await doStream();
         let ttftRecorded = false;
         let responseId: string | undefined;
-        let streamError: ClassifiedCallError | null = null;
+        let recorded = false;
 
-        const transform = new TransformStream<StreamPart, StreamPart>({
-          transform(chunk, controller) {
-            if (
-              !ttftRecorded &&
-              (chunk.type === "text-delta" ||
-                chunk.type === "reasoning-delta" ||
-                chunk.type === "tool-input-delta")
-            ) {
-              ttftRecorded = true;
-              ctx.span.ttftMs = Date.now() - startedAt;
+        // Records the attempt exactly once no matter which terminal path
+        // gets there first (normal "done", a mid-stream "error" chunk, a
+        // reader.read() rejection, or abort) — `recorded` guards against a
+        // race between e.g. the abortSignal firing and the stream finishing
+        // around the same time.
+        function finishOnce(
+          status: SpanStatus,
+          extra?: { errorType?: string; errorMessage?: string },
+        ): void {
+          if (recorded) return;
+          recorded = true;
+          if (extra) {
+            ctx.span.status = status;
+            ctx.span.errorType = extra.errorType;
+            ctx.span.errorMessage = extra.errorMessage;
+          }
+          recordAttempt({
+            attempt,
+            startedAt,
+            durationMs: Date.now() - startedAt,
+            ttftMs: ctx.span.ttftMs ?? null,
+            status,
+            errorType: extra?.errorType,
+            responseId,
+          });
+        }
+
+        function finishOnAbort(): void {
+          const reason = params.abortSignal?.reason;
+          const isTimeout =
+            reason instanceof Error && reason.name === "TimeoutError";
+          finishOnce(isTimeout ? "timeout" : "cancelled", {
+            errorType: "abort",
+          });
+        }
+
+        const reader = result.stream.getReader();
+        // The AI SDK's own high-level stream processing does not reliably
+        // call `.cancel()` on this stream when the user's abortSignal
+        // fires — it can simply stop forwarding chunks downstream while
+        // still draining us in the background. Listening to the signal
+        // directly is the only path guaranteed to fire promptly.
+        params.abortSignal?.addEventListener("abort", finishOnAbort);
+        const disposeAbortListener = () =>
+          params.abortSignal?.removeEventListener("abort", finishOnAbort);
+
+        const wrapped = new ReadableStream<StreamPart>({
+          async pull(controller) {
+            try {
+              const { done, value: chunk } = await reader.read();
+              if (done) {
+                disposeAbortListener();
+                finishOnce("ok");
+                controller.close();
+                return;
+              }
+              if (
+                !ttftRecorded &&
+                (chunk.type === "text-delta" ||
+                  chunk.type === "reasoning-delta" ||
+                  chunk.type === "tool-input-delta")
+              ) {
+                ttftRecorded = true;
+                ctx.span.ttftMs = Date.now() - startedAt;
+              }
+              if (chunk.type === "response-metadata") {
+                if (chunk.modelId) ctx.span.responseModel = chunk.modelId;
+                if (chunk.id) responseId = chunk.id;
+              }
+              if (chunk.type === "finish") {
+                ctx.span.finishReason = chunk.finishReason.unified;
+                applyUsage(ctx, chunk.usage);
+              }
+              if (chunk.type === "error") {
+                const classified = classifyCallError(chunk.error);
+                disposeAbortListener();
+                finishOnce(classified.status, {
+                  errorType: classified.errorType,
+                  errorMessage: classified.errorMessage,
+                });
+              }
+              controller.enqueue(chunk);
+            } catch (err) {
+              disposeAbortListener();
+              const classified = classifyCallError(err);
+              finishOnce(classified.status, {
+                errorType: classified.errorType,
+                errorMessage: classified.errorMessage,
+              });
+              controller.error(err);
             }
-            if (chunk.type === "response-metadata") {
-              if (chunk.modelId) ctx.span.responseModel = chunk.modelId;
-              if (chunk.id) responseId = chunk.id;
-            }
-            if (chunk.type === "finish") {
-              ctx.span.finishReason = chunk.finishReason.unified;
-              applyUsage(ctx, chunk.usage);
-            }
-            if (chunk.type === "error") {
-              streamError = classifyCallError(chunk.error);
-              ctx.span.status = streamError.status;
-              ctx.span.errorType = streamError.errorType;
-              ctx.span.errorMessage = streamError.errorMessage;
-            }
-            controller.enqueue(chunk);
           },
-          flush() {
-            recordAttempt({
-              attempt,
-              startedAt,
-              durationMs: Date.now() - startedAt,
-              ttftMs: ctx.span.ttftMs ?? null,
-              status: streamError?.status ?? "ok",
-              errorType: streamError?.errorType,
-              responseId,
+          async cancel(reason) {
+            disposeAbortListener();
+            await reader.cancel(reason).catch(() => {});
+            const isTimeout =
+              reason instanceof Error && reason.name === "TimeoutError";
+            finishOnce(isTimeout ? "timeout" : "cancelled", {
+              errorType: "abort",
             });
           },
         });
 
-        return { ...result, stream: result.stream.pipeThrough(transform) };
+        return { ...result, stream: wrapped };
       } catch (err) {
         const classified = classifyCallError(err);
         ctx.span.status = classified.status;
