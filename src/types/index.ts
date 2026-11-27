@@ -255,6 +255,14 @@ export interface LyricsAIConfig {
   cloudConsentProvider?: AIProvider;
 }
 
+// The opt-in, metadata-only AI activity log (tracing T2, #90). Off by
+// default — no span is ever written until the user turns this on. Stored
+// the same way as LyricsAIConfig (a backup_configs JSON row), not tied to
+// the lyrics feature.
+export interface AiActivityConfig {
+  keepAiActivityLog: boolean;
+}
+
 export type ProjectFileKind = "mix_project" | "master_project" | "export";
 export type ExportType =
   "mix" | "master" | "stems" | "instrumental" | "alternate";

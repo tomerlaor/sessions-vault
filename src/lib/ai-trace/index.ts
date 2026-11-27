@@ -14,6 +14,7 @@ export type {
   UsageSource,
 } from "./types";
 export { MemoryTraceStore } from "./memory-store";
+export { SqliteTraceStore } from "./sqlite-store";
 export { hashPrompt } from "./hash";
 export { scrubError } from "./scrub";
 export type { ScrubbedError } from "./scrub";
@@ -91,9 +92,16 @@ function classifyOperationError(err: unknown): Pick<
 
 async function safeWrite(ctx: TraceContext): Promise<void> {
   if (!ctx.store) return;
+  // The store was resolved at call start; if the operation ran long enough
+  // for the user to disable logging in the meantime, it must write nothing
+  // (M1, #118) — checked here, at write time, not against whatever the
+  // setting was when the call began.
+  if (ctx.store.isActive && !ctx.store.isActive()) return;
   try {
+    // Enqueue only — the store batches on its own 2s/50-record policy (plus
+    // a beforeunload flush), so a span write here shouldn't force an
+    // immediate round trip to disk for every single call (item 4, #118).
     await ctx.store.write(ctx.span);
-    await ctx.store.flush();
   } catch {
     // a tracing failure must never break the caller
   }

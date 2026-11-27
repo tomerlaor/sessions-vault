@@ -201,17 +201,25 @@ async function* streamTextChunks(
   for await (const chunk of result.textStream) yield chunk;
 }
 
-describe("scrubError", () => {
-  it("redacts secrets and long quoted strings, and truncates to ~200 chars", () => {
+describe("scrubError — allowlist (L4, #118)", () => {
+  // Only transport-level error types (abort/network/cors/http_*) ever keep
+  // (redacted, truncated) free text — everything else is replaced outright
+  // with a fixed string, because those are exactly the families (schema/
+  // parse failures, anything unclassified) that can carry arbitrary model
+  // output in `.message`.
+
+  it("keeps redacted, truncated (<=80 char) free text for an allowlisted type (network)", () => {
     const secret = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789";
     const longQuote = "y".repeat(60);
     const err = new Error(
-      `failed Bearer ${secret} body: "${longQuote}" ${"z".repeat(300)}`,
+      `network error: fetch failed, Bearer ${secret} body: "${longQuote}" ${"z".repeat(300)}`,
     );
-    const { errorMessage } = scrubError(err);
+    const { errorType, errorMessage } = scrubError(err);
+    expect(errorType).toBe("network");
     expect(errorMessage).not.toContain(secret);
     expect(errorMessage).not.toContain(longQuote);
-    expect(errorMessage.length).toBeLessThanOrEqual(201);
+    expect(errorMessage.length).toBeLessThanOrEqual(81);
+    expect(errorMessage).toContain("network error");
   });
 
   it("classifies abort-named errors as errorType 'abort'", () => {
@@ -223,6 +231,84 @@ describe("scrubError", () => {
   it("classifies an http status from a statusCode field", () => {
     const err = Object.assign(new Error("failed"), { statusCode: 429 });
     expect(scrubError(err).errorType).toBe("http_429");
+  });
+
+  it("keeps an http_* message's free text, still cut at a 'Response:' marker so a quoted provider body can't leak model output", () => {
+    const err = Object.assign(
+      new Error("Upstream said: Response: SECRET_LYRIC_HTTP about rain"),
+      { statusCode: 500 },
+    );
+    const { errorType, errorMessage } = scrubError(err);
+    expect(errorType).toBe("http_500");
+    expect(errorMessage).not.toContain("SECRET_LYRIC_HTTP");
+    expect(errorMessage).toContain("Upstream said:");
+  });
+
+  it("drops free text to a fixed string for a non-allowlisted (unknown) error", () => {
+    const err = new Error("something unexpected happened");
+    const { errorType, errorMessage } = scrubError(err);
+    expect(errorType).toBe("unknown");
+    expect(errorMessage).toBe("error");
+  });
+
+  it("falls back to <ErrorName> for a named, non-allowlisted error with no fixed-message mapping", () => {
+    const err = new Error("some weird parse hiccup with content: LEAKED_TEXT");
+    err.name = "WeirdCustomError";
+    const { errorMessage } = scrubError(err);
+    expect(errorMessage).toBe("<WeirdCustomError>");
+    expect(errorMessage).not.toContain("LEAKED_TEXT");
+  });
+
+  it("the marker regex is case-insensitive — a lowercase 'raw text:' still cuts, and a non-allowlisted type still drops to a fixed string", () => {
+    const err = new Error(
+      "could not generate output. raw text: SECRET_LYRIC_LOWER about rain",
+    );
+    const { errorMessage } = scrubError(err);
+    expect(errorMessage).not.toContain("SECRET_LYRIC_LOWER");
+    expect(errorMessage).toBe("error");
+  });
+
+  it("also cuts at a 'Response:' marker", () => {
+    const err = new Error(
+      "Model returned a bad response. Response: SECRET_LYRIC_RESP about rain",
+    );
+    const { errorMessage } = scrubError(err);
+    expect(errorMessage).not.toContain("SECRET_LYRIC_RESP");
+  });
+
+  it("also cuts at an 'output:' marker", () => {
+    const err = new Error(
+      "Model returned invalid output: SECRET_LYRIC_OUT about rain",
+    );
+    const { errorMessage } = scrubError(err);
+    expect(errorMessage).not.toContain("SECRET_LYRIC_OUT");
+  });
+
+  it("replaces AI_NoObjectGeneratedError's message with a fixed string, never inspecting it", () => {
+    const err = new Error("No object generated: could not parse the response.");
+    err.name = "AI_NoObjectGeneratedError";
+    expect(scrubError(err).errorMessage).toBe("no object generated");
+  });
+
+  it("replaces AI_JSONParseError's message (which embeds the raw model text) with a fixed string", () => {
+    const lyricLine = "SECRET_LYRIC_9f1 wandering under the rain";
+    const err = new Error(
+      `JSON parsing failed: Text: ${lyricLine}.\nError message: Unexpected token`,
+    );
+    err.name = "AI_JSONParseError";
+    const { errorMessage } = scrubError(err);
+    expect(errorMessage).toBe("JSON parse error");
+    expect(errorMessage).not.toContain(lyricLine);
+  });
+
+  it("replaces AI_TypeValidationError's message (which embeds the parsed value) with a fixed string", () => {
+    const err = new Error(
+      `Type validation failed: Value: ${JSON.stringify({ lyric: "SECRET_LYRIC_X" })}.\nError message: invalid`,
+    );
+    err.name = "AI_TypeValidationError";
+    const { errorMessage } = scrubError(err);
+    expect(errorMessage).toBe("type validation error");
+    expect(errorMessage).not.toContain("SECRET_LYRIC_X");
   });
 });
 
@@ -289,6 +375,41 @@ describe("traced()", () => {
       async () => "ok",
     );
     expect(result).toBe("ok");
+  });
+
+  it("enqueues the span but never calls flush() itself — batching is the store's job (item 4, #118)", async () => {
+    const writeSpy = vi.fn();
+    const flushSpy = vi.fn(() => Promise.resolve());
+    const store: TraceStore = {
+      write: writeSpy,
+      writeAttempt: () => {},
+      flush: flushSpy,
+    };
+    const result = await traced(
+      { operation: "test_connection", store },
+      async () => "ok",
+    );
+    expect(result).toBe("ok");
+    expect(writeSpy).toHaveBeenCalledTimes(1);
+    expect(flushSpy).not.toHaveBeenCalled();
+  });
+
+  it("skips writing entirely when the store reports isActive() === false (disabled mid-flight, M1, #118)", async () => {
+    const writeSpy = vi.fn();
+    const flushSpy = vi.fn(() => Promise.resolve());
+    const store: TraceStore & { isActive(): boolean } = {
+      write: writeSpy,
+      writeAttempt: () => {},
+      flush: flushSpy,
+      isActive: () => false,
+    };
+    const result = await traced(
+      { operation: "test_connection", store },
+      async () => "ok",
+    );
+    expect(result).toBe("ok");
+    expect(writeSpy).not.toHaveBeenCalled();
+    expect(flushSpy).not.toHaveBeenCalled();
   });
 
   it("derives status cache_hit when fn marks the span cacheHit", async () => {

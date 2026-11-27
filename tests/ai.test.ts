@@ -56,6 +56,7 @@ import {
   resolveAiLogEnv,
   NEXT_WORD_MAX_OUTPUT_TOKENS,
 } from "../src/lib/ai";
+import { traced, MemoryTraceStore } from "../src/lib/ai-trace";
 import type { AIConfig } from "../src/types";
 
 const cfg: AIConfig = {
@@ -213,7 +214,7 @@ describe("lyrics AI call sites in ai.ts", () => {
     expect(opts.system).toContain("Return only a single JSON object");
   });
 
-  it("includes the raw model text when structured output cannot be parsed", async () => {
+  it("keeps the raw model text off err.message, only on err.text (H1, #118)", async () => {
     generateObjectMock.mockRejectedValueOnce(
       new Error("No object generated: could not parse the response."),
     );
@@ -231,10 +232,48 @@ describe("lyrics AI call sites in ai.ts", () => {
       (e: unknown) => e as Error & { text?: string },
     );
     expect(err.message).toContain("could not parse the response");
-    expect(err.message).toContain(
+    expect(err.message).not.toContain(
       "I am just going to talk about lyrics instead.",
     );
     expect(err.text).toBe("I am just going to talk about lyrics instead.");
+  });
+
+  it("end-to-end through traced(): a failing generateTabStructure never leaks model output into the trace's errorMessage", async () => {
+    const secretWord = "PINEAPPLE_LYRIC_7f3c";
+    generateObjectMock.mockRejectedValueOnce(
+      new Error("No object generated: could not parse the response."),
+    );
+    generateTextMock.mockResolvedValueOnce({
+      text: `${secretWord} wandering through the night`,
+      usage: {},
+      finishReason: "stop",
+      response: { modelId: "mock" },
+    });
+
+    const store = new MemoryTraceStore();
+    await expect(
+      traced(
+        { feature: "tab_agent", operation: "tab_structure", store },
+        (ctx) =>
+          generateTabStructure(
+            cfg,
+            {
+              sectionName: "Verse",
+              instruments: ["guitar"],
+              chords: "C G",
+              bars: 4,
+              timeSignature: "4/4",
+              styleNote: "",
+            },
+            undefined,
+            { trace: ctx },
+          ),
+      ),
+    ).rejects.toThrow();
+
+    expect(store.spans).toHaveLength(1);
+    expect(store.spans[0].errorMessage).toBeDefined();
+    expect(store.spans[0].errorMessage).not.toContain(secretWord);
   });
 
   it("generatePopupSuggestions passes maxOutputTokens: 300, maxRetries: 1, and the abort signal", async () => {

@@ -11,6 +11,8 @@ import {
   chatWithTabAgent,
   resolveFeatureConfig,
 } from "../../lib/ai";
+import { traced } from "../../lib/ai-trace";
+import { getActiveTraceStore } from "../../lib/ai-trace/runtime";
 import { parseLyricsStructure } from "../../lib/lyrics-structure";
 import {
   isCloudProvider,
@@ -104,6 +106,19 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
   const [chatInput, setChatInput] = useState("");
   const [chatSending, setChatSending] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
+  // One AbortController per real mount: aborted on close/unmount so a
+  // generate or chat call in flight doesn't keep running (or get traced as
+  // "ok") after the user has already left. Created inside the effect, not
+  // as the useRef initializer — React StrictMode mounts, cleans up, and
+  // re-mounts the same component instance (same ref) during dev; a
+  // controller built once outside the effect would already be aborted by
+  // the first cleanup by the time the second mount's handlers read it.
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    abortRef.current = controller;
+    return () => controller.abort();
+  }, []);
 
   const addAgent = (text: string) =>
     setMessages((m) => [...m, { role: "agent", text }]);
@@ -397,15 +412,33 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
     if (!aiCfg || project.aiOptOut) return;
     setStep("generating");
     addAgent("Generating your tab structure…");
+    const signal = abortRef.current!.signal;
     try {
-      const result = await generateTabStructure(aiCfg, {
-        sectionName: wizard.sectionName,
-        instruments: wizard.instruments,
-        chords: wizard.chords,
-        bars: wizard.bars,
-        timeSignature: wizard.timeSignature,
-        styleNote: wizard.styleNote,
-      });
+      const { store, salt } = await getActiveTraceStore();
+      const result = await traced(
+        {
+          feature: "tab_agent",
+          operation: "tab_structure",
+          trigger: "manual",
+          projectRef: project.id,
+          store,
+          salt,
+        },
+        (ctx) =>
+          generateTabStructure(
+            aiCfg,
+            {
+              sectionName: wizard.sectionName,
+              instruments: wizard.instruments,
+              chords: wizard.chords,
+              bars: wizard.bars,
+              timeSignature: wizard.timeSignature,
+              styleNote: wizard.styleNote,
+            },
+            signal,
+            { trace: ctx },
+          ),
+      );
 
       const parts: TabPart[] = result.parts.map((p) => ({
         id: crypto.randomUUID(),
@@ -418,6 +451,7 @@ export default function TabAgentModal({ project, onInsert, onClose }: Props) {
       addAgent(`Done! Here's a preview of the generated structure.`);
       setStep("preview");
     } catch (e) {
+      if (signal.aborted) return; // modal closed mid-request
       setErrorMsg(e instanceof Error ? e.message : String(e));
       setStep("error");
     }
@@ -459,9 +493,24 @@ If the user asks a question rather than requesting generation, answer concisely.
           content: m.text,
         }));
       history.push({ role: "user", content: text });
-      const reply = await chatWithTabAgent(aiCfg, system, history);
+      const signal = abortRef.current!.signal;
+      const { store, salt } = await getActiveTraceStore();
+      const reply = await traced(
+        {
+          feature: "tab_agent",
+          operation: "tab_chat",
+          trigger: "user_send",
+          projectRef: project.id,
+          store,
+          salt,
+        },
+        (ctx) =>
+          chatWithTabAgent(aiCfg, system, history, signal, { trace: ctx }),
+      );
+      if (signal.aborted) return; // modal closed mid-request
       addAgent(reply);
     } catch (e) {
+      if (abortRef.current!.signal.aborted) return; // modal closed mid-request
       addAgent(`Error: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setChatSending(false);

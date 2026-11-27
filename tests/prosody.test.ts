@@ -74,6 +74,15 @@ describe("countSyllables (he)", () => {
   it("returns 0 for empty text", () => {
     expect(countSyllables("", "he")).toBe(0);
   });
+
+  it("treats a maqaf (־) as a word break", () => {
+    // תל־אביב (Tel Aviv) is written with a maqaf joining the two words;
+    // it should count the same as if they were space-separated.
+    expect(countSyllables("תל־אביב", "he")).toBe(3);
+    expect(countSyllables("תל־אביב", "he")).toBe(
+      countSyllables("תל אביב", "he"),
+    );
+  });
 });
 
 describe("rhymeKey (en)", () => {
