@@ -127,8 +127,12 @@ function countSyllablesWord(word: string): number {
     : countUnpointedSyllables(word);
 }
 
+// A maqaf (־, U+05BE) joins words in writing (e.g. תל־אביב) but is a word
+// break for syllable purposes — it carries no vowel of its own.
+const WORD_BREAK_RE = /[\s־]+/;
+
 export function countSyllables(wordOrLine: string): number {
-  const words = wordOrLine.trim().split(/\s+/).filter(Boolean);
+  const words = wordOrLine.trim().split(WORD_BREAK_RE).filter(Boolean);
   if (words.length === 0) return 0;
   return words.reduce((sum, w) => sum + countSyllablesWord(w), 0);
 }
