@@ -1,4 +1,4 @@
-# SessionsVault
+# SeshKi
 
 > Your DAW projects, organized.
 
@@ -6,7 +6,7 @@
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 ![Status](https://img.shields.io/badge/status-pre--development-orange.svg)
 
-SessionsVault is a local-first desktop app for music creators to organize, search, tag, and back up DAW projects. Instead of hunting through folders named `song_idea_v7_FINAL_actual_final`, you get a searchable, tagged library with project metadata (key, BPM), attached lyrics and tab files, and backups to a local folder or Google Drive.
+SeshKi is a local-first desktop app for music creators to organize, search, tag, and back up DAW projects. Instead of hunting through folders named `song_idea_v7_FINAL_actual_final`, you get a searchable, tagged library with project metadata (key, BPM), attached lyrics and tab files, and backups to a local folder or Google Drive.
 
 ---
 
@@ -20,12 +20,12 @@ SessionsVault is a local-first desktop app for music creators to organize, searc
 
 Download the latest `.dmg` from the [Releases page](https://github.com/tomerlaor/sessions-vault/releases).
 
-1. Open the `.dmg` and drag **SessionsVault** to your Applications folder
-2. On first launch, macOS may show _"SessionsVault can't be opened because it is from an unidentified developer"_
+1. Open the `.dmg` and drag **SeshKi** to your Applications folder
+2. On first launch, macOS may show _"SeshKi can't be opened because it is from an unidentified developer"_
 3. To bypass: right-click the app icon → **Open** → **Open** again in the dialog
 4. You only need to do this once — subsequent launches work normally
 
-> SessionsVault is open source (Apache 2.0). The app is not yet notarized with Apple. [View the source](https://github.com/tomerlaor/sessions-vault) if you'd like to verify it yourself or build from source.
+> SeshKi is open source (Apache 2.0). The app is not yet notarized with Apple. [View the source](https://github.com/tomerlaor/sessions-vault) if you'd like to verify it yourself or build from source.
 
 ---
 

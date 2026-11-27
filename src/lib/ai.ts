@@ -245,7 +245,7 @@ function buildProviderModel(
       return createOpenAI({
         baseURL: OPENROUTER_BASE_URL,
         apiKey: cfg.apiKey,
-        headers: { "X-Title": "Sessions" },
+        headers: { "X-Title": "SeshKi" },
         // OpenRouter's stable API is chat completions, not the Responses API
         // that createOpenAI(...)(model) targets by default.
         fetch: createOpenRouterFetch({

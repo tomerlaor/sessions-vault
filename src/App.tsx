@@ -319,7 +319,7 @@ export default function App() {
               color: "var(--text-0)",
             }}
           >
-            Sessions
+            Sesh
           </span>
           <span
             style={{
@@ -329,7 +329,7 @@ export default function App() {
               color: "#ff5a00",
             }}
           >
-            Vault
+            Ki
           </span>
         </div>
         <div className="search">

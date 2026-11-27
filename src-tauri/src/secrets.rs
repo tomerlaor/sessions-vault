@@ -246,7 +246,7 @@ pub fn delete(key: &str) -> Result<(), String> {
 // ── macOS ─────────────────────────────────────────────────────────────────────
 // On every store() we delete the existing item and recreate it with an ACL
 // that names our binary as the only trusted caller. That way get() never shows
-// the "SessionsVault wants to use your confidential information" dialog.
+// the "SeshKi wants to use your confidential information" dialog.
 //
 // SecAccessCreate / SecTrustedApplicationCreateFromPath / SecKeychainItemSetAccess
 // are legacy (pre-Data-Protection) keychain APIs that the security-framework Rust
@@ -314,7 +314,7 @@ mod platform {
             return;
         }
 
-        let descriptor = CFString::new("SessionsVault");
+        let descriptor = CFString::new("SeshKi");
         let mut access: CFTypeRef = ptr::null();
         let status = SecAccessCreate(descriptor.as_CFTypeRef(), array as CFTypeRef, &mut access);
         CFRelease(array as _);

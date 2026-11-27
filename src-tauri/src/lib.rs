@@ -19,8 +19,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             secrets::init_dev_store(app.path().app_data_dir()?);
-            let about_item =
-                MenuItem::with_id(app, "about", "About SessionsVault", true, None::<&str>)?;
+            let about_item = MenuItem::with_id(app, "about", "About SeshKi", true, None::<&str>)?;
             let help_menu = Submenu::with_items(app, "Help", true, &[&about_item])?;
             let menu = Menu::default(app.handle())?;
             menu.append(&help_menu)?;

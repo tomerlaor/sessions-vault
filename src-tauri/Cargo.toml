@@ -1,7 +1,7 @@
 [package]
 name = "sessions-vault"
 version = "0.2.0"
-description = "SessionsVault — Your DAW projects, organized."
+description = "SeshKi — Your DAW projects, organized."
 authors = ["Tomer Laor"]
 edition = "2021"
 

@@ -91,7 +91,7 @@ describe("callOpenRouterDecisions", () => {
     expect(init.method).toBe("POST");
     expect(init.headers).toMatchObject({
       Authorization: "Bearer test-key",
-      "X-Title": "Sessions",
+      "X-Title": "SeshKi",
       "Content-Type": "application/json",
     });
     const body = JSON.parse(init.body as string);
