@@ -203,6 +203,31 @@ describe("checkFormat", () => {
     );
     expect(result.status).toBe("pass");
   });
+
+  // ── commentary/preamble lines (R6-fix) ──────────────────────────────────
+
+  it("fails a kept EN commentary preamble via isCommentaryLine, not just META_PHRASES", () => {
+    const result = checkFormat(
+      "The lyrics are empty, so I'll offer one striking opening line.",
+      ctx(),
+    );
+    expect(result.status).toBe("fail");
+    expect(result.detail).toContain("commentary");
+  });
+
+  it("fails a kept HE commentary preamble via isCommentaryLine", () => {
+    const result = checkFormat(
+      "שיר פתיחה על התחלה חדשה, ואין עדיין אף שורה. אז הנה שורת פתיחה:",
+      ctx({ lang: "he" }),
+    );
+    expect(result.status).toBe("fail");
+    expect(result.detail).toContain("commentary");
+  });
+
+  it("still passes real EN/HE lyric lines that merely start like a commentary opener", () => {
+    expect(checkFormat("Wait for me", ctx()).status).toBe("pass");
+    expect(checkFormat("הנה אני", ctx({ lang: "he" })).status).toBe("pass");
+  });
 });
 
 describe("checkOmittedLeadingSpace (#102 diagnostic, never fails)", () => {
