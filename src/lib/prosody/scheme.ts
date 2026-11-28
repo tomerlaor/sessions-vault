@@ -28,6 +28,19 @@ function countSyllablesFor(lang: Lang) {
   return lang === "he" ? heCountSyllables : enCountSyllables;
 }
 
+// Shared "do these two line-ending words rhyme" check, used both to detect
+// a scheme from a whole section and to test whether a specific couplet has
+// closed. "slant" counts as a rhyme here, same threshold detectScheme uses.
+function doRhyme(
+  rhymeFn: (a: string, b: string) => "perfect" | "slant" | "none",
+  a: string,
+  b: string,
+): boolean {
+  if (!a || !b) return false;
+  const r = rhymeFn(a, b);
+  return r === "perfect" || r === "slant";
+}
+
 // A bracketed token: a [Section] header like [Verse]/[Chorus]/[בית]/[פזמון],
 // or an inline chord annotation like [C]/[Am]/[F#m7]. Both are written the
 // same way, so stripping every [...] span handles both at once — a
@@ -125,6 +138,14 @@ function lastWordOf(line: string): string {
   return words[words.length - 1] ?? "";
 }
 
+// Case/width-insensitive comparison for two line-ending words, used to tell
+// a genuine rhyme (different words that happen to sound alike) apart from a
+// refrain or epistrophe (the SAME word or line repeated verbatim, e.g. a
+// chorus line that's just typed twice) — the latter is not a closed couplet.
+function norm(word: string): string {
+  return word.normalize("NFKC").toLowerCase();
+}
+
 // A single line is never enough to invent a scheme from. Two lines that
 // actually rhyme are treated as the start of an AABB couplet (the simplest,
 // most common case); telling AABB apart from ABAB (alternating) at all
@@ -136,17 +157,12 @@ export function detectScheme(sectionLines: string[]): Scheme {
   const lang = detectLang(lines.join(" "));
   const rhymeFn = rhymesFor(lang);
   const ends = lines.map(lastWordOf);
-  const doRhyme = (a: string, b: string): boolean => {
-    if (!a || !b) return false;
-    const r = rhymeFn(a, b);
-    return r === "perfect" || r === "slant";
-  };
 
   for (let i = 0; i + 1 < ends.length; i++) {
-    if (doRhyme(ends[i], ends[i + 1])) return "AABB";
+    if (doRhyme(rhymeFn, ends[i], ends[i + 1])) return "AABB";
   }
   for (let i = 0; i + 2 < ends.length; i++) {
-    if (doRhyme(ends[i], ends[i + 2])) return "ABAB";
+    if (doRhyme(rhymeFn, ends[i], ends[i + 2])) return "ABAB";
   }
   return "free";
 }
@@ -189,7 +205,37 @@ export function nextLineTargets(
 
   let rhymeWith: string | undefined;
   if (scheme === "AABB" && lines.length >= 1) {
-    rhymeWith = lastWordOf(lines[lines.length - 1]) || undefined;
+    // AABB couplet state is decided by whether the two most recently
+    // finished lines actually rhyme with each other, not by their count's
+    // parity -- a section with an unpaired line (e.g. a 1-line intro ahead
+    // of couplets) desyncs parity from the real pairing. If the couplet is
+    // already closed (last two lines rhyme), the next line starts a fresh
+    // pair and gets no target. The one exception is a monorhyme run: if the
+    // line before THAT also rhymes with the closed pair (three or more
+    // lines all rhyming -- AAA, not AABB), it's not a fresh couplet
+    // boundary at all, so the run continues and the last line stays the
+    // target. Genuine two-line couplets (A A B B, where the third-from-last
+    // line breaks the rhyme) still get no target. If the couplet is open --
+    // including when there's only one line so far -- target the last
+    // finished line. An identical end word (or identical line) between the
+    // two -- a repeated chorus line, not a rhyme -- is a refrain/epistrophe,
+    // never a couplet: `doRhyme` is skipped entirely in that case so it
+    // can't close the pair (nor extend a monorhyme run).
+    const rhymeFn = rhymesFor(lang);
+    const last = lastWordOf(lines[lines.length - 1]);
+    const prev = lines.length >= 2 ? lastWordOf(lines[lines.length - 2]) : "";
+    const prev2 = lines.length >= 3 ? lastWordOf(lines[lines.length - 3]) : "";
+    const lastPairRhymes =
+      lines.length >= 2 &&
+      norm(prev) !== norm(last) &&
+      doRhyme(rhymeFn, prev, last);
+    const monorhymeRun =
+      lastPairRhymes &&
+      lines.length >= 3 &&
+      norm(prev2) !== norm(prev) &&
+      doRhyme(rhymeFn, prev2, prev);
+    const closed = lastPairRhymes && !monorhymeRun;
+    rhymeWith = closed ? undefined : last || undefined;
   } else if (scheme === "ABAB" && lines.length >= 2) {
     rhymeWith = lastWordOf(lines[lines.length - 2]) || undefined;
   }

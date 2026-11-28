@@ -500,17 +500,50 @@ describe("checkNoCopy", () => {
   const lyrics = "[Chorus]\nC G Am F\nWe rise again when the morning comes\n";
 
   it("fails when the output repeats an existing line verbatim", () => {
-    const result = checkNoCopy("We rise again when the morning comes", lyrics);
+    const result = checkNoCopy(
+      "We rise again when the morning comes",
+      lyrics,
+      ctx({ mode: "next_line" }),
+    );
     expect(result.status).toBe("fail");
   });
 
-  it("ignores section headers and chord-only lines", () => {
-    const result = checkNoCopy("[Chorus]", lyrics);
+  it("ignores section headers", () => {
+    const result = checkNoCopy("[Chorus]", lyrics, ctx({ mode: "next_line" }));
     expect(result.status).toBe("pass");
   });
 
   it("passes for a genuinely new line", () => {
-    const result = checkNoCopy("A brand new thought I've never sung", lyrics);
+    const result = checkNoCopy(
+      "A brand new thought I've never sung",
+      lyrics,
+      ctx({ mode: "next_line" }),
+    );
+    expect(result.status).toBe("pass");
+  });
+
+  it("completion: uses the whole joined line (linePrefix + output), not the suffix alone", () => {
+    const completionLyrics = "I walk alone through the empty street\n";
+    const result = checkNoCopy(
+      "through the empty street",
+      completionLyrics,
+      ctx({ mode: "completion", linePrefix: "I walk alone " }),
+    );
+    expect(result.status).toBe("fail");
+  });
+
+  it("the chorus-mirror allow exemption passes the mirrored line", () => {
+    const result = checkNoCopy(
+      "We rise again when the morning comes",
+      lyrics,
+      ctx({ mode: "next_line" }),
+      "We rise again when the morning comes",
+    );
+    expect(result.status).toBe("pass");
+  });
+
+  it("skips the guard for next_word (single words, never a whole line)", () => {
+    const result = checkNoCopy("comes", lyrics, ctx({ mode: "next_word" }));
     expect(result.status).toBe("pass");
   });
 });

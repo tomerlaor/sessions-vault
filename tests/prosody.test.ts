@@ -254,6 +254,58 @@ describe("nextLineTargets", () => {
     expect(targets.rhymeWith).toBe("shine");
   });
 
+  it("AABB: a closed 2-line couplet gets no target for the line that starts the next one", () => {
+    // "flame"/"reclaim" are the only two lines — a complete, closed
+    // couplet (they actually rhyme) — so the next line should start a
+    // fresh pair, not be forced to extend this one into an unintended AAA
+    // run (the last-line bias this R6 fix removes).
+    const lyrics =
+      "The city lights flicker like a dying flame\nEvery corner holds a memory I can't reclaim";
+    const targets = nextLineTargets(lyrics, lyrics.length);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBeUndefined();
+  });
+
+  it("AABB: a monorhyme run (3+ lines all rhyming) keeps targeting the last line", () => {
+    // "dark"/"spark"/"mark" all actually rhyme with each other -- an AAA
+    // run, not a closed 2-line couplet -- so the line that follows should
+    // still target "mark", not fall silent (en-completion-chorus-rhyme eval
+    // fixture).
+    const lyrics =
+      "You were the only light in a town gone dark\nAnd I was just a boy chasing a spark\nNow the streets are quiet, and I carry the mark";
+    const targets = nextLineTargets(lyrics, lyrics.length);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBe("mark");
+  });
+
+  it("AABB: an unpaired intro line ahead of a closed couplet still gets no target (parity would misfire here)", () => {
+    // "sky" is an unpaired intro line that doesn't rhyme with anything; the
+    // couplet is "door"/"floor", which actually rhyme and close the pair.
+    // 3 finished lines is an odd count, so the old line-count-parity rule
+    // would have wrongly forced a target onto the line that starts the
+    // next pair — the real fix checks whether lines[n-1] and lines[n-2]
+    // actually rhyme, not whether the count is odd or even.
+    const lyrics =
+      "Alone beneath a quiet sky\nI found an old coat by the door\nEvery lonely step led to the floor";
+    const targets = nextLineTargets(lyrics, lyrics.length);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBeUndefined();
+  });
+
+  it("AABB: an unpaired intro line ahead of an open couplet DOES target the last line (parity would misfire here too)", () => {
+    // Same intro + closed "door"/"floor" couplet as above, plus one more
+    // line ("holds") that doesn't rhyme with "floor" — an open couplet
+    // waiting for its partner. 4 finished lines is an even count, so the
+    // old parity rule would have wrongly reported no target; the real
+    // rhyme check sees "floor"/"holds" don't rhyme and correctly targets
+    // "holds".
+    const lyrics =
+      "Alone beneath a quiet sky\nI found an old coat by the door\nEvery lonely step led to the floor\nNow I wonder what tomorrow holds";
+    const targets = nextLineTargets(lyrics, lyrics.length);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBe("holds");
+  });
+
   it("targets the AABB rhyme word (he)", () => {
     const f = fixture("he-next-line-aabb");
     const targets = nextLineTargets(f.lyrics, f.cursor);
@@ -266,6 +318,17 @@ describe("nextLineTargets", () => {
     const targets = nextLineTargets(f.lyrics, f.cursor);
     expect(targets.scheme).toBe("ABAB");
     expect(targets.rhymeWith).toBe("זוכרים");
+  });
+
+  it("AABB: a monorhyme run (3+ lines all rhyming) keeps targeting the last line (he)", () => {
+    // הזמן/ישן/הסימן all share the -ן ending and actually rhyme with each
+    // other (he-completion-chorus-rhyme eval fixture) -- an AAA run, not a
+    // closed 2-line couplet.
+    const lyrics =
+      "היית האור היחיד בעיר שאיבדה את הזמן\nואני הייתי רק ילד שרדף אחרי חלום ישן\nעכשיו הרחובות שקטים ואני נושא את הסימן";
+    const targets = nextLineTargets(lyrics, lyrics.length);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBe("הסימן");
   });
 
   it("finds the genuine ABAB slant (return/burns share the stressed vowel)", () => {
@@ -283,15 +346,25 @@ describe("nextLineTargets", () => {
     expect(targets.scheme).toBe("free");
   });
 
-  it("does not jump the section boundary on a repeated chorus (en)", () => {
+  it("does not jump the section boundary on a repeated chorus, and the repeated line is a refrain, not a closed couplet (en)", () => {
     const f = fixture("en-edge-chords-chorus");
     const targets = nextLineTargets(f.lyrics, f.cursor);
     // Only the 2 lines of the *current* chorus repeat are in-section (not
-    // the earlier repeat before the second [Chorus] header). They're
-    // identical, so they trivially rhyme (AABB) — but critically, the
-    // target must be "comes" (the lyric), never a header/chord word.
+    // the earlier repeat before the second [Chorus] header) — if the
+    // scheme detector jumped the boundary it would see a header/chord
+    // word instead of "comes" and AABB wouldn't trigger at all. The 2
+    // in-section lines are the SAME line typed twice ("comes"/"comes") —
+    // a refrain/epistrophe, not a genuine rhyme — so it must not count as
+    // a closed couplet: the next line still targets "comes".
     expect(targets.scheme).toBe("AABB");
     expect(targets.rhymeWith).toBe("comes");
+  });
+
+  it("does not jump the section boundary on a repeated chorus, and the repeated line is a refrain, not a closed couplet (he)", () => {
+    const f = fixture("he-edge-chords-chorus");
+    const targets = nextLineTargets(f.lyrics, f.cursor);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBe("מגיע");
   });
 
   it("omits rhymeWith and syllables for empty lyrics", () => {
@@ -311,9 +384,12 @@ describe("nextLineTargets", () => {
 
   it("excludes the in-progress line when the caller passes a truncated draft", () => {
     // Simulates next_word's wiring: without truncation, the unfinished
-    // line being typed gets treated as a finished AABB reference and the
-    // target becomes its own last (partial) word — useless. The caller
-    // must pass a draft cut back to just before that line instead.
+    // line being typed gets treated as a 4th finished AABB reference.
+    // "door" (line 3) and "the" (the in-progress line's last typed word)
+    // don't rhyme, so the real rhyme check reports the fragment "the" as
+    // the target — useless, same as the pre-R6 bug, just for a different
+    // reason. Either way it's wrong; the caller must pass a draft cut back
+    // to just before that line instead.
     const priorLines =
       "I walked down a street in the rain\n" +
       "Trying to shake off the pain\n" +

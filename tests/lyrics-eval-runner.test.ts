@@ -203,6 +203,28 @@ describe("runTrial: normal trials still score", () => {
     expect(trial.omittedLeadingSpace).toBe(false);
   });
 
+  it("scores formatRaw against the raw reply, separately from the sanitized format check", async () => {
+    // A labeled, quoted reply fails format on the raw text but passes once
+    // sanitizeLyricsOutput cleans it up — formatRaw must reflect the raw
+    // (pre-sanitize) model behavior, not the same pass the sanitized check
+    // already reports.
+    streamLyricsSuggestionMock.mockImplementation(async function* (
+      _cfg: AIConfig,
+      _system: string,
+      _prompt: string,
+      _signal: AbortSignal | undefined,
+      onMetrics?: (m: unknown) => void,
+    ) {
+      onMetrics?.({ ttftMs: 5, totalMs: 20, usage: {}, finishReason: "stop" });
+      yield 'Next line: "down the empty road"';
+    });
+
+    const trial = await runTrial(cfg, fixture());
+
+    expect(trial.formatRaw?.status).toBe("fail");
+    expect(trial.checks.format.status).toBe("pass");
+  });
+
   it("scores a non-empty next_word trial normally", async () => {
     generateNextWordOptionsMock.mockImplementation(
       async (

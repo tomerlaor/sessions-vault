@@ -77,11 +77,12 @@
     "id": "he-completion-chorus-rhyme",
     "lang": "he",
     "mode": "completion",
-    "lyrics": "[פזמון]\nהיית האור היחיד בעיר שכבתה\nואני הייתי רק ילד רודף ניצוץ\nעכשיו הרחובות שקטים ואני נושא את הסימן\nשל כל",
-    "cursor": 108,
+    "lyrics": "[פזמון]\nהיית האור היחיד בעיר שאיבדה את הזמן\nואני הייתי רק ילד שרדף אחרי חלום ישן\nעכשיו הרחובות שקטים ואני נושא את הסימן\nשל כל",
+    "cursor": 125,
     "expect": {
       "rhymeWith": "הסימן"
-    }
+    },
+    "notes": "Lyrics/cursor/expect rewritten 3x during the R6 review (913c513, 22e48b3, 9802db0) to fix rhyme-scheme-detection bugs in the fixture text itself, not the prompt. Pass-rate deltas on this case against a report generated before 9802db0 aren't a like-for-like comparison."
   },
   {
     "id": "he-next-word-1",

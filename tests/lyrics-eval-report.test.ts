@@ -328,3 +328,111 @@ describe("omitted leading space diagnostic (#102)", () => {
     });
   });
 });
+
+describe("formatRaw diagnostic", () => {
+  it("aggregates pass/fail independently of the sanitized format check", () => {
+    const run = runWith([
+      {
+        ...trial([candidate("a", 0, [], true)], 0),
+        formatRaw: { status: "fail", detail: "starts with a label" },
+      },
+      {
+        ...trial([candidate("b", 0, [], true)], 0),
+        formatRaw: { status: "pass" },
+      },
+    ]);
+    const stats = computeStats(run);
+    expect(stats.formatRaw).toEqual({ pass: 1, fail: 1, skip: 0 });
+
+    const md = buildMarkdownReport(run);
+    expect(md).toContain(
+      "Raw (pre-sanitize) format pass rate (diagnostic, does not affect pass rate): 1/2 (50.0%)",
+    );
+  });
+
+  it("ignores trials that didn't report formatRaw", () => {
+    const run = runWith([trial([candidate("a", 0, [], true)], 0)]);
+    expect(computeStats(run).formatRaw).toEqual({
+      pass: 0,
+      fail: 0,
+      skip: 0,
+    });
+  });
+});
+
+describe("noCopyRaw diagnostic", () => {
+  it("aggregates pass/fail independently of the guarded noCopy check", () => {
+    const run = runWith([
+      {
+        ...trial([candidate("a", 0, [], true)], 0),
+        noCopyRaw: { status: "fail", detail: "repeats an existing line" },
+      },
+      {
+        ...trial([candidate("b", 0, [], true)], 0),
+        noCopyRaw: { status: "pass" },
+      },
+    ]);
+    const stats = computeStats(run);
+    expect(stats.noCopyRaw).toEqual({ pass: 1, fail: 1, skip: 0 });
+
+    const md = buildMarkdownReport(run);
+    expect(md).toContain(
+      "Pre-guard noCopy pass rate (diagnostic, does not affect pass rate): 1/2 (50.0%)",
+    );
+  });
+
+  it("ignores trials that didn't report noCopyRaw", () => {
+    const run = runWith([trial([candidate("a", 0, [], true)], 0)]);
+    expect(computeStats(run).noCopyRaw).toEqual({
+      pass: 0,
+      fail: 0,
+      skip: 0,
+    });
+  });
+});
+
+describe("prompt version metadata", () => {
+  it("includes the prompt version in the report header when present", () => {
+    const run = runWith([trial([candidate("a", 0, [], true)], 0)]);
+    run.meta.promptVersion = "2026-11-21.1";
+    expect(buildMarkdownReport(run)).toContain(
+      "Prompt version: `2026-11-21.1`",
+    );
+  });
+
+  it("omits the prompt version segment when absent", () => {
+    const run = runWith([trial([candidate("a", 0, [], true)], 0)]);
+    expect(buildMarkdownReport(run)).not.toContain("Prompt version");
+  });
+});
+
+describe("fixture notes", () => {
+  it("flags a case whose fixture carries a note", () => {
+    const run = runWith([
+      {
+        rawOutput: "a lone line",
+        ttftMs: 10,
+        totalMs: 10,
+        checks: allPass(),
+      },
+    ]);
+    run.cases[0].notes = "Rewritten to fix a scheme-detection bug (abc1234).";
+    const md = buildMarkdownReport(run);
+    expect(md).toContain("## Fixture notes");
+    expect(md).toContain(
+      "**en-next-line-aabb**: Rewritten to fix a scheme-detection bug (abc1234).",
+    );
+  });
+
+  it("omits the section when no case has a note", () => {
+    const run = runWith([
+      {
+        rawOutput: "a lone line",
+        ttftMs: 10,
+        totalMs: 10,
+        checks: allPass(),
+      },
+    ]);
+    expect(buildMarkdownReport(run)).not.toContain("## Fixture notes");
+  });
+});

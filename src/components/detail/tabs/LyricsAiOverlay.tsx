@@ -27,16 +27,22 @@ import {
   buildLyricsSuggestionPrompt,
   buildLyricsPopupPrompt,
   buildNextWordOptionsPrompt,
+  chorusMirrorLine,
   determineSuggestionMode,
   isHebrew,
   lyricsInlinePromptId,
   lyricsPopupPromptId,
   nextWordOptionsPromptId,
-  normalizeNextWord,
   normalizeNextWordOptions,
   PROMPT_VERSION,
+  sanitizePopupSuggestions,
 } from "../../../lib/lyrics-ai";
 import { smartJoinCompletion } from "../../../lib/lyrics-join";
+import {
+  applyCopyGuard,
+  sanitizePartialLyricsOutput,
+  trimRepeatedTail,
+} from "../../../lib/lyrics-sanitize";
 import {
   LruCache,
   createDebouncer,
@@ -501,13 +507,10 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               return;
             }
             setPopupItems(
-              result.value.suggestions.map((s) =>
-                s.mode === "next_word"
-                  ? {
-                      ...s,
-                      text: normalizeNextWord(s.text, lineTextBeforeCursor),
-                    }
-                  : s,
+              sanitizePopupSuggestions(
+                result.value.suggestions,
+                lineTextBeforeCursor,
+                draft,
               ),
             );
             setStatus("ready");
@@ -559,7 +562,12 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
                   trace: ctx,
                   onToken: (accumulated) => {
                     if (!isCurrent()) return;
-                    setGhostText(accumulated);
+                    // A light, streaming-safe sanitize so the ghost text never
+                    // flashes a label/quote/fence and then jumps once the full
+                    // reply lands — the final value below is still the real
+                    // sanitizeLyricsOutput() result, this only smooths the
+                    // preview (#79).
+                    setGhostText(sanitizePartialLyricsOutput(accumulated));
                     setStatus("streaming");
                   },
                 });
@@ -581,11 +589,45 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               }, 6000);
               return;
             }
-            if (result.value) {
-              setCurrentSuggestion(result.value);
+            // Shared with the eval runner (scripts/lyrics-eval/runner.ts) so
+            // what's shown/inserted here is what gets scored there.
+            // applyCopyGuard also catches a verbatim repeat of an existing
+            // lyric line (R6 review §7.1) — the model's own no-repeat rule
+            // can lose to a stronger instruction (e.g. a repeated-chorus
+            // note), and the guard is the safety net for that. `allow`
+            // exempts the one line the prompt explicitly told it to mirror
+            // (sectionContextLine's chorus-mirror wording, lyrics-ai.ts).
+            let suggestion = result.value
+              ? applyCopyGuard(result.value, mode, {
+                  lyrics: draft,
+                  linePrefix: lineTextBeforeCursor,
+                  allow: chorusMirrorLine(
+                    draft,
+                    selectionStart,
+                    mode === "next_line",
+                  ),
+                })
+              : "";
+            if (suggestion && mode === "completion") {
+              // #79: don't let a completion duplicate text the writer
+              // already has after the cursor on this line.
+              const afterCursor = currentLine.slice(
+                lineTextBeforeCursor.length,
+              );
+              suggestion = trimRepeatedTail(suggestion, afterCursor);
+            }
+            if (suggestion) {
+              setGhostText(suggestion);
+              setCurrentSuggestion(suggestion);
               setStatus("ready");
               lastSignatureRef.current = signature;
             } else {
+              // A reply that sanitizes down to nothing (e.g. just a stray
+              // quote/fence) isn't a real suggestion — go idle rather than
+              // "ready" with nothing to show, and don't record the
+              // signature so a retry on the same input can still run.
+              setGhostText("");
+              setCurrentSuggestion(null);
               setStatus("idle");
             }
           } catch (err) {

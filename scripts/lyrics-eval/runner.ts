@@ -14,14 +14,20 @@ import {
 import {
   buildLyricsSuggestionPrompt,
   buildNextWordOptionsPrompt,
+  chorusMirrorLine,
   normalizeNextWord,
   normalizeNextWordOptions,
+  PROMPT_VERSION,
   type LyricsSuggestionInput,
   type NextWordOption,
 } from "../../src/lib/lyrics-ai";
 import type { AIConfig } from "../../src/types";
 import { rawTextFromObjectError } from "../../src/lib/parse-ai-json";
 import { currentSection, loadEnglishDict } from "../../src/lib/prosody";
+import {
+  applyCopyGuard,
+  sanitizeLyricsOutput,
+} from "../../src/lib/lyrics-sanitize";
 import {
   checkCliche,
   checkFormat,
@@ -69,6 +75,20 @@ export interface TrialOutcome {
   // affects `checks` or the pass rate. Undefined for non-completion modes
   // and error trials, where the raw-adjacency signal doesn't apply.
   omittedLeadingSpace?: boolean;
+  // Format, scored against the model's RAW (unsanitized) reply — a
+  // diagnostic alongside `checks.format` (which scores the sanitized text
+  // and so measures what the writer actually sees, not whether the model
+  // followed the "bare line" instruction on its own). Never affects the
+  // pass rate. Undefined for next_word (no single raw string to score) and
+  // error trials.
+  formatRaw?: CheckResult;
+  // noCopy, scored against the pre-guard sanitized text — a diagnostic
+  // alongside `checks.noCopy` (which scores the text after the client-side
+  // copy guard has already dropped/rescued a copy, per the R6 review's
+  // §7.1 fix — so `checks.noCopy` is close to always-pass by construction).
+  // This is what would have failed without the guard. Never affects the
+  // pass rate. Undefined for next_word and error trials.
+  noCopyRaw?: CheckResult;
   // Present only when `model` is an OpenRouter decisions model — see
   // src/lib/ai.ts's "generate, then decide" pipeline.
   generator?: LyricsGeneratorStageMetrics;
@@ -83,6 +103,10 @@ export interface CaseResult {
   mode: EvalMode;
   expect: EvalExpect;
   trials: TrialOutcome[];
+  // Carried over from the fixture (see EvalFixture.notes) so the report
+  // can flag a case whose fixture changed for reasons unrelated to the
+  // model under test.
+  notes?: string;
 }
 
 export interface EvalRunResult {
@@ -95,6 +119,9 @@ export interface EvalRunResult {
     // Set only when `model` was run as a decisions model (ranker); the
     // generator produced the actual candidate text it ranked.
     generatorModel?: string;
+    // src/lib/lyrics-ai.ts's PROMPT_VERSION at run time, so a saved report
+    // can be matched back to the prompt wording that produced it.
+    promptVersion?: string;
   };
   cases: CaseResult[];
 }
@@ -209,7 +236,7 @@ function scoreText(
     format: checkFormat(text, ctx, fixture.expect),
     syllables: checkSyllables(text, fixture.expect, ctx),
     rhyme: checkRhyme(text, fixture.expect, ctx),
-    noCopy: checkNoCopy(text, fixture.lyrics),
+    noCopy: checkNoCopy(text, fixture.lyrics, ctx),
     language: checkLanguage(text, fixture.lang),
     cliche: checkCliche(text, fixture.expect.rhymeWith),
   };
@@ -229,7 +256,7 @@ function scoreUnrankedCandidates(
       const text =
         fixture.mode === "next_word"
           ? normalizeNextWord(raw, ctx.linePrefix)
-          : raw;
+          : sanitizeLyricsOutput(raw, fixture.mode);
       return {
         text,
         index,
@@ -357,7 +384,7 @@ export async function runTrial(
           ),
           rhyme: aggregateRhymeForNextWord(options, fixture.expect, ctx),
           noCopy: aggregateOptionChecks(options, (t) =>
-            checkNoCopy(t, fixture.lyrics),
+            checkNoCopy(t, fixture.lyrics, ctx),
           ),
           language: aggregateOptionChecks(options, (t) =>
             checkLanguage(t, fixture.lang),
@@ -410,6 +437,26 @@ export async function runTrial(
       fixture,
       ctx,
     );
+    // Score the guarded text (sanitizeLyricsOutput + the client-side noCopy
+    // guard, same as the app — see src/lib/lyrics-sanitize.ts) so the eval
+    // measures what the writer would actually see, not raw labels/quotes/
+    // header artifacts, and not a copy the guard would have dropped/
+    // rescued. rawOutput and the #102 omittedLeadingSpace diagnostic stay
+    // on the unsanitized stream; noCopyRaw below is pre-guard.
+    const sanitized = sanitizeLyricsOutput(output, fixture.mode);
+    // The chorus-mirror exemption (lyrics-ai.ts's chorusMirrorLine): the one
+    // line the guard must NOT treat as a copy, matching the prompt's own
+    // "mirror it" instruction (F1b).
+    const allow = chorusMirrorLine(
+      fixture.lyrics,
+      fixture.cursor,
+      fixture.mode === "next_line",
+    );
+    const guarded = applyCopyGuard(output, fixture.mode, {
+      lyrics: fixture.lyrics,
+      linePrefix: ctx.linePrefix,
+      allow,
+    });
     return {
       rawOutput: output,
       ttftMs: metrics?.ttftMs ?? null,
@@ -422,13 +469,15 @@ export async function runTrial(
       candidates: scored?.candidates,
       pickedIndex: scored?.pickedIndex,
       omittedLeadingSpace: checkOmittedLeadingSpace(output, ctx),
+      formatRaw: checkFormat(output, ctx, fixture.expect),
+      noCopyRaw: checkNoCopy(sanitized, fixture.lyrics, ctx, allow),
       checks: {
-        format: checkFormat(output, ctx, fixture.expect),
-        syllables: checkSyllables(output, fixture.expect, ctx),
-        rhyme: checkRhyme(output, fixture.expect, ctx),
-        noCopy: checkNoCopy(output, fixture.lyrics),
-        language: checkLanguage(output, fixture.lang),
-        cliche: checkCliche(output, fixture.expect.rhymeWith),
+        format: checkFormat(guarded, ctx, fixture.expect),
+        syllables: checkSyllables(guarded, fixture.expect, ctx),
+        rhyme: checkRhyme(guarded, fixture.expect, ctx),
+        noCopy: checkNoCopy(guarded, fixture.lyrics, ctx, allow),
+        language: checkLanguage(guarded, fixture.lang),
+        cliche: checkCliche(guarded, fixture.expect.rhymeWith),
       },
     };
   } catch (e) {
@@ -470,6 +519,7 @@ export async function runEval(
       mode: fixture.mode,
       expect: fixture.expect,
       trials,
+      notes: fixture.notes,
     });
   }
 
@@ -482,6 +532,7 @@ export async function runEval(
       generatedAt: new Date().toISOString(),
       fixtureCount: fixtures.length,
       generatorModel: decisions ? cfg.lyricsGeneratorModel : undefined,
+      promptVersion: PROMPT_VERSION,
     },
     cases,
   };

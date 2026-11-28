@@ -36,6 +36,12 @@ import {
   TimeoutError,
   type RunSignature,
 } from "../src/lib/lyrics-ai-request";
+import {
+  sanitizeLyricsOutput,
+  sanitizePartialLyricsOutput,
+  trimRepeatedTail,
+} from "../src/lib/lyrics-sanitize";
+import { smartJoinCompletion } from "../src/lib/lyrics-join";
 import { createTraceContext } from "../src/lib/ai-trace";
 import type { AIConfig } from "../src/types";
 
@@ -588,5 +594,67 @@ describe("requestPopupSuggestions", () => {
     });
 
     expect(generatePopupSuggestionsMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── Overlay invariant: ghost text === accepted text ─────────────────────────
+
+describe("completion ghost text equals the accepted text after sanitizing", () => {
+  // LyricsAiOverlay runs two genuinely different pipelines on the same raw
+  // model reply (see onToken/onFinish in LyricsAiOverlay.tsx): while
+  // streaming, ghost text is `sanitizePartialLyricsOutput(accumulated)`
+  // (no trimRepeatedTail); once the reply finishes, the accepted text is
+  // `sanitizeLyricsOutput(full, "completion")` then (for completion)
+  // `trimRepeatedTail`. Both are joined with `smartJoinCompletion` before
+  // display/insertion. This exercises those two real pipelines end to
+  // end, rather than calling one function twice, so they can never
+  // silently drift apart.
+  const prefix = "I walk";
+
+  function streamedGhostText(rawModelReply: string): string {
+    // By the time the last token has streamed in, onToken's `accumulated`
+    // is the full raw reply.
+    return sanitizePartialLyricsOutput(rawModelReply);
+  }
+
+  function acceptedSuggestion(
+    rawModelReply: string,
+    afterCursor: string,
+  ): string {
+    const sanitized = sanitizeLyricsOutput(rawModelReply, "completion");
+    return sanitized ? trimRepeatedTail(sanitized, afterCursor) : sanitized;
+  }
+
+  function overlayOutcome(
+    rawModelReply: string,
+    afterCursor = "",
+  ): {
+    ghostText: string;
+    accepted: string;
+  } {
+    return {
+      ghostText: smartJoinCompletion(prefix, streamedGhostText(rawModelReply)),
+      accepted: smartJoinCompletion(
+        prefix,
+        acceptedSuggestion(rawModelReply, afterCursor),
+      ),
+    };
+  }
+
+  it("matches for a clean reply", () => {
+    const { ghostText, accepted } = overlayOutcome(" away");
+    expect(ghostText).toBe(accepted);
+    expect(ghostText).toBe(" away");
+  });
+
+  it("matches for a labeled, quoted reply", () => {
+    const { ghostText, accepted } = overlayOutcome('Completion: "away"');
+    expect(ghostText).toBe(accepted);
+    expect(ghostText).toBe(" away");
+  });
+
+  it("matches for a glued mid-word reply", () => {
+    const { ghostText, accepted } = overlayOutcome("row");
+    expect(ghostText).toBe(accepted);
   });
 });
