@@ -705,6 +705,71 @@ describe("verifyNextWordRhymes", () => {
       { text: " ארון", kind: "continuation" },
     ]);
   });
+
+  it("Hebrew: downgrades a last-letter-only slant even though the engine tags it, but keeps a perfect shared-suffix rhyme (פרידות)", () => {
+    // he-next-word-context target: פרידות (rhymeKey "ות"). "הדלת"/"הבית"
+    // share only a final ת with פרידות — he.ts's rhymes() calls that
+    // "slant", but the badge is stricter than the eval checker and requires
+    // "perfect". "תמונות" shares the -ות suffix (rhymeKey match) and is
+    // "perfect", so it keeps the badge — this is the behavior change.
+    const out = verifyNextWordRhymes(
+      [
+        { text: " הדלת", kind: "rhyme" },
+        { text: " הבית", kind: "rhyme" },
+        { text: " תמונות", kind: "rhyme" },
+      ],
+      inputFromFixture("he-next-word-context"),
+    );
+    expect(out).toEqual([
+      { text: " הדלת", kind: "continuation" },
+      { text: " הבית", kind: "continuation" },
+      { text: " תמונות", kind: "rhyme" },
+    ]);
+  });
+
+  it("English: keeps the badge for a two-word option whose last word rhymes (goodbyes)", () => {
+    const out = verifyNextWordRhymes(
+      [{ text: " tired eyes", kind: "rhyme" }],
+      inputFromFixture("en-next-word-context"),
+    );
+    expect(out).toEqual([{ text: " tired eyes", kind: "rhyme" }]);
+  });
+
+  it("downgrades an empty or whitespace-only rhyme-tagged option without throwing", () => {
+    const out = verifyNextWordRhymes(
+      [
+        { text: "", kind: "rhyme" },
+        { text: "   ", kind: "rhyme" },
+      ],
+      inputFromFixture("he-next-word-context"),
+    );
+    expect(out).toEqual([
+      { text: "", kind: "continuation" },
+      { text: "   ", kind: "continuation" },
+    ]);
+  });
+
+  it("Hebrew with niqqud: keeps the badge for a pointed perfect rhyme, downgrades a pointed last-letter slant (פרידות)", () => {
+    const out = verifyNextWordRhymes(
+      [
+        { text: " תְּמוּנוֹת", kind: "rhyme" },
+        { text: " הַדֶּלֶת", kind: "rhyme" },
+      ],
+      inputFromFixture("he-next-word-context"),
+    );
+    expect(out).toEqual([
+      { text: " תְּמוּנוֹת", kind: "rhyme" },
+      { text: " הַדֶּלֶת", kind: "continuation" },
+    ]);
+  });
+
+  it("English: still keeps the badge for a slant rhyme (cold/woke), unaffected by the Hebrew tightening", () => {
+    const out = verifyNextWordRhymes(
+      [{ text: " cold", kind: "rhyme" }],
+      inputFromFixture("en-next-word-rhyme"),
+    );
+    expect(out).toEqual([{ text: " cold", kind: "rhyme" }]);
+  });
 });
 
 // ─── R6 (#79): cursor marker, section context, explicit targets ───────────

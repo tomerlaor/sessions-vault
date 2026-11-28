@@ -1169,19 +1169,27 @@ export function normalizeNextWordOptions(
   return ordered.slice(0, 5);
 }
 
-// The model's kind="rhyme" tag is unreliable (recorded evals: only ~1 in 15
-// tagged options actually rhymed) — before a caller shows the "rhyme" badge
-// for an option, re-check it against the app's own dictionary-backed rhyme
-// engine instead of trusting the model's tag. Mirrors exactly how
-// buildNextWordOptionsPrompt computes the rhyme target and the prompt
-// language, so "what was asked for" and "what's verified" never drift
-// apart. An option verifies if its last word rhymes ("perfect" or "slant")
-// with target.word or, when present, target.altWord — the same acceptance
-// scripts/lyrics-eval/checks.ts's rhymes() uses. If there is no rhyme
-// target at all (impliedRhymeTarget returned undefined), nothing can be
-// verified, so every kind="rhyme" option is downgraded. Unverified options
-// are downgraded to "continuation", not dropped, so they still show as a
-// normal option.
+// The model's kind="rhyme" tag is unreliable (recorded evals: only 4 of 27
+// tagged options actually rhymed overall, 4 of 15 in the next-word rhyme
+// trio) — before a caller shows the "rhyme" badge for an option, re-check it
+// against the app's own dictionary-backed rhyme engine instead of trusting
+// the model's tag. Mirrors exactly how buildNextWordOptionsPrompt computes
+// the rhyme target and the prompt language, so "what was asked for" and
+// "what's verified" never drift apart.
+//
+// English accepts "perfect" or "slant" (rhymes(...) !== "none"), same as
+// scripts/lyrics-eval/checks.ts's acceptance — a slant like cold/woke still
+// badges. Hebrew is stricter and only accepts "perfect" (identical word, or
+// a shared rhymeKey/suffix such as ות/ים): he.ts's "slant" is last-letter-
+// only and, for the common ה/ת suffixes, too loose to badge (e.g. הדלת/
+// פרידות share nothing but a final ת). The eval checker still scores that
+// slant as a pass — the badge is intentionally stricter than the scorer.
+// An option verifies if its last word rhymes with target.word or, when
+// present, target.altWord at the required strength for the language. If
+// there is no rhyme target at all (impliedRhymeTarget returned undefined),
+// nothing can be verified, so every kind="rhyme" option is downgraded.
+// Unverified options are downgraded to "continuation", not dropped, so they
+// still show as a normal option.
 export function verifyNextWordRhymes(
   options: NextWordOption[],
   input: Omit<LyricsSuggestionInput, "mode">,
@@ -1197,8 +1205,11 @@ export function verifyNextWordRhymes(
   return options.map((o) => {
     if (o.kind !== "rhyme") return o;
     const word = target ? stripTrailingPunct(lastWord(o.text)) : "";
-    const matches = (candidate: string) =>
-      !!word && rhymes(word, candidate, lang) !== "none";
+    const matches = (candidate: string) => {
+      if (!word) return false;
+      const result = rhymes(word, candidate, lang);
+      return hebrew ? result === "perfect" : result !== "none";
+    };
     const verified =
       !!target &&
       (matches(target.word) || (!!target.altWord && matches(target.altWord)));
