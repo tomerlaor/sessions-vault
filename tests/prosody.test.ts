@@ -388,6 +388,16 @@ describe("nextLineTargets", () => {
     expect(targets.rhymeWith).toBe("מגיע");
   });
 
+  it("AABB: a repeated chorus line is still a refrain even with maqaf-vs-space differences in the line ending (he)", () => {
+    // תל־אביב (maqaf) and תל אביב (space) are the same two words -- normLine
+    // maps maqaf to a space, so these count as the same line (a refrain),
+    // not two different lines that merely end in the same word.
+    const lyrics = "הלכתי לבד אל תל־אביב\nהלכתי לבד אל תל אביב";
+    const targets = nextLineTargets(lyrics, lyrics.length);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBe("אביב");
+  });
+
   it("AABB: two different lines that merely end in the same word close the couplet (identical rhyme, en)", () => {
     // "gone"/"gone" are the same word, but these are two genuinely
     // different lines -- a legitimate identical-rhyme couplet, not a

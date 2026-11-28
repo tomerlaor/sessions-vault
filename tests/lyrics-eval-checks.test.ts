@@ -203,6 +203,118 @@ describe("checkFormat", () => {
     );
     expect(result.status).toBe("pass");
   });
+
+  // ── commentary/preamble lines (R6-fix) ──────────────────────────────────
+
+  it("fails a kept EN commentary preamble via isCommentaryLine, not just META_PHRASES", () => {
+    const result = checkFormat(
+      "The lyrics are empty, so I'll offer one striking opening line.",
+      ctx(),
+    );
+    expect(result.status).toBe("fail");
+    expect(result.detail).toContain("commentary");
+  });
+
+  it("fails a kept HE commentary preamble via isCommentaryLine", () => {
+    const result = checkFormat(
+      "שיר פתיחה על התחלה חדשה, ואין עדיין אף שורה. אז הנה שורת פתיחה:",
+      ctx({ lang: "he" }),
+    );
+    expect(result.status).toBe("fail");
+    expect(result.detail).toContain("commentary");
+  });
+
+  it("still passes real EN/HE lyric lines that merely start like a commentary opener", () => {
+    expect(checkFormat("Wait for me", ctx()).status).toBe("pass");
+    expect(checkFormat("הנה אני", ctx({ lang: "he" })).status).toBe("pass");
+  });
+
+  it("passes a real lyric that merely contains the substring 'the lyrics are' (META_PHRASES no longer has it bare)", () => {
+    const result = checkFormat("The lyrics are written on my hands", ctx());
+    expect(result.status).toBe("pass");
+  });
+
+  it("still fails the recorded preamble shape via isCommentaryLine's strong ', so' pattern, not META_PHRASES", () => {
+    const result = checkFormat(
+      "The lyrics are empty, so I'll offer one striking opening line.",
+      ctx(),
+    );
+    expect(result.status).toBe("fail");
+    expect(result.detail).toContain("commentary");
+  });
+
+  // ── must-not-drop (R6 review §1.3/1.5): the same 31 recorded
+  // false-positive lyric lines as tests/lyrics-sanitize.test.ts's
+  // isCommentaryLine table, verbatim from /workspace/pr-prompts/fp31.txt —
+  // checkFormat must not fail any of them via the isCommentaryLine-driven
+  // commentary check (the actual bug this fix targets).
+  //
+  // 3 of the 31 ("Here's a line I never crossed", "Here is the line I
+  // draw", "I think this line is drawn in sand") still fail checkFormat —
+  // but only via the pre-existing, out-of-scope META_PHRASES bare
+  // substrings "here's"/"here is"/"this line"/"i think" (checked BEFORE
+  // isCommentaryLine in checkFormat), not via isCommentaryLine itself (see
+  // the isCommentaryLine assertion above/below: all three are false). That
+  // gap pre-dates this fix, isn't caused by SECOND_SIGNAL_RE, and is
+  // explicitly out of scope here (R6 review §1.4: "eval-only, not a product
+  // bug... the pre-existing phrases 'here is' and 'i think' already have
+  // the same gap") — Task 3 keeps those phrases as-is rather than widening
+  // changes to META_PHRASES beyond removing "the lyrics are".
+  const PRE_EXISTING_META_PHRASE_GAP = new Set([
+    "Here's a line I never crossed",
+    "Here is the line I draw",
+    "I think this line is drawn in sand",
+  ]);
+
+  it("passes checkFormat for the 31 recorded false-positive lyric lines not caught in the pre-existing META_PHRASES gap", () => {
+    const mustNotDrop = [
+      "I'll walk the line",
+      "I will walk the line",
+      "I'll draw the line tonight",
+      "I'll write a line about you",
+      "I'll find a rhyme for your name",
+      "I'll sing this verse again",
+      "I'll wait for the opening door",
+      "Wait in line for me",
+      "Wait at the end of the line",
+      "Wait for the last verse",
+      "Here's a line I never crossed",
+      "Here is the line I draw",
+      "Sure, I remember every line",
+      "Sure, this verse is mine",
+      "Okay, I'll walk the line",
+      "Let me walk the line",
+      "Let me finish this verse",
+      "I think this line is drawn in sand",
+      "Hmm, a quiet line of light",
+      "הנה מילה של אהבה",
+      "הנה מילה אחת שאמרת",
+      "הנה שורה של אור",
+      "הנה שורת זהב בלילה",
+      "רגע, מילה אחת לפני שתלכי",
+      "רגע נחשוב על מה שהיה",
+      "אוקיי, זו המילה האחרונה",
+      "בטח יש מילה שעוד לא אמרתי",
+      "אני מציע מילה טובה לדרך",
+      "אני מציע שורה בלי סוף",
+      "הנה אני בשורה הראשונה",
+      "רגע לפני השורה האחרונה",
+    ];
+    expect(mustNotDrop.length).toBe(31);
+    for (const line of mustNotDrop) {
+      if (PRE_EXISTING_META_PHRASE_GAP.has(line)) continue;
+      const lang = /[א-ת]/.test(line) ? "he" : "en";
+      expect(checkFormat(line, ctx({ lang })).status).toBe("pass");
+    }
+  });
+
+  it("the 3 pre-existing META_PHRASES collisions fail checkFormat for that reason alone, not via isCommentaryLine", () => {
+    for (const line of PRE_EXISTING_META_PHRASE_GAP) {
+      const result = checkFormat(line, ctx());
+      expect(result.status).toBe("fail");
+      expect(result.detail).toMatch(/^commentary phrase: /);
+    }
+  });
 });
 
 describe("checkOmittedLeadingSpace (#102 diagnostic, never fails)", () => {

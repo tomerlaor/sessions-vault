@@ -15,7 +15,10 @@ import {
   rhymes as engineRhymeDetail,
 } from "../../src/lib/prosody";
 import { smartJoinCompletion } from "../../src/lib/lyrics-join";
-import { isCopyOfExistingLine } from "../../src/lib/lyrics-sanitize";
+import {
+  isCommentaryLine,
+  isCopyOfExistingLine,
+} from "../../src/lib/lyrics-sanitize";
 
 export type EvalLang = "en" | "he";
 export type EvalMode = "next_line" | "completion" | "next_word" | "alternative";
@@ -137,6 +140,23 @@ export const rhymeDetail = engineRhymeDetail;
 
 const LABEL_RE =
   /^(suggestion|next line|next word|completion|option|alternative|answer|ה?(?:הצעה|השלמה|שורה הבאה|מילה הבאה|אפשרות|חלופה|תשובה))\s*:/i;
+// Plain substring phrases, checked regardless of position in the line.
+// Deliberately NOT a comprehensive list of every meta phrase mentioned in
+// the R6-fix bug report ("i'll offer", "i'll write", "so i'll", "sure,",
+// ...): those openers are also plausible real-lyric openers ("I'll write
+// your name in the sand", "So I'll wait for you", "Sure, I remember
+// everything"), so a blind substring match on them would drop real lyrics.
+// They're instead covered below via isCommentaryLine, which only flags
+// them when a second signal (a mention of the line/suggestion itself, or a
+// trailing colon) is also present — see that function's doc comment in
+// src/lib/lyrics-sanitize.ts for the full tradeoff. "the lyrics are" is
+// deliberately NOT included here even as a plain substring: isCommentaryLine
+// only treats it as strong together with a following ", so" clause, so a
+// bare substring match here would fail real lyrics the sanitizer keeps
+// ("The lyrics are written on my hands", "The lyrics are a map I can't
+// read"). The strong ", so" pattern (via isCommentaryLine below) is enough
+// to catch the actual preamble shape ("The lyrics are empty, so I'll offer
+// one striking opening line.").
 const META_PHRASES = [
   "here is",
   "here's",
@@ -188,6 +208,17 @@ export function checkFormat(
   const metaHit = META_PHRASES.find((p) => lower.includes(p));
   if (metaHit) {
     return { status: "fail", detail: `commentary phrase: "${metaHit}"` };
+  }
+
+  // Catches the EN/HE preamble/self-talk shapes isCommentaryLine knows
+  // about (src/lib/lyrics-sanitize.ts) that aren't a blind META_PHRASES
+  // substring — e.g. "The lyrics are empty, so I'll offer one striking
+  // opening line." (kept whole here because formatRaw scores the raw,
+  // unsanitized output, which can still be exactly this single line) or a
+  // Hebrew preamble like "שיר פתיחה על התחלה חדשה... אז הנה שורת פתיחה:".
+  const commentaryLine = lines.find((l) => isCommentaryLine(l));
+  if (commentaryLine) {
+    return { status: "fail", detail: `commentary line: "${commentaryLine}"` };
   }
 
   if (ctx.mode === "completion" && ctx.linePrefix.trim().length > 0) {

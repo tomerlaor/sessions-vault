@@ -72,15 +72,189 @@ function stripWrappingQuotes(s: string): string {
   return s;
 }
 
-// Keeps the first non-empty line that isn't a bare section header or a code
-// fence delimiter — used when the model answers with commentary/headers/code
-// blocks before the actual line.
+// ─── Commentary / preamble line detection ──────────────────────────────────
+// A model sometimes answers with a meta/self-talk sentence before the real
+// lyric line ("The lyrics are empty, so I'll offer one striking opening
+// line.\n\nEvery morning I wake up..."), or — on a tricky edge case — with
+// ONLY commentary and never actually gets to a real line. firstLyricLine
+// used to always keep the FIRST non-empty line, so it kept the preamble and
+// threw away the real lyric sitting right after it.
+//
+// isCommentaryLine flags a single line as that kind of preamble/self-talk,
+// for English AND Hebrew. The hard constraint: never drop a real lyric. A
+// false negative here (a kept preamble) just means checkFormat
+// (scripts/lyrics-eval/checks.ts) fails the trial honestly instead of
+// silently passing a preamble — acceptable. A false positive (treating a
+// real lyric line as commentary) would silently destroy the writer's actual
+// suggestion — not acceptable. So every pattern below is either (a) a whole
+// phrase that is essentially impossible as a genuine lyric line ("as an
+// AI...", "Note:", a line that literally talks about "the lyrics"/"the
+// word … remains"), or (b) an opener that IS a plausible lyric opener on
+// its own ("Wait for me", "Sure as the rain", "I'll write your name in the
+// sand", "Let me love you", "Hmm hmm hmm", "Okay, I'm leaving", "הנה אני",
+// "בטח שאני אוהב") and therefore requires a SECOND signal elsewhere in the
+// line before it counts as commentary.
+//
+// That second signal (SECOND_SIGNAL_RE) deliberately does NOT include bare
+// lyric vocabulary like "line(s)", "verse", "rhyme", "opening", "מילה" or
+// "שור[הת]" — those are ordinary words a real lyric uses constantly, and
+// combined with a common opener they used to over-trigger: "I'll walk the
+// line", "Wait for the last verse", "I'll find a rhyme for your name",
+// "Here's a line I never crossed", "הנה מילה של אהבה", "הנה שורה של אור",
+// "רגע נחשוב על מה שהיה" are all real lyric lines that must stay untouched
+// (see the "must not drop" table in tests/lyrics-sanitize.test.ts). Only a
+// TIGHTER meta phrase counts as a second signal: a trailing colon, one of
+// those nouns immediately followed by a colon ("line:"/"שורה:" — "Here's a
+// line: walking into tomorrow", "הנה שורה: הולך לאיבוד בלילה"), "opening
+// line"/"next line"/"שורת פתיחה", "rhymes with"/"not a rhyme" ("Wait,
+// that's not a rhyme with mark."), "נחשוב:" with a colon (self-talk, vs. the
+// plain lyric "רגע נחשוב על מה שהיה" with no colon), or "להשלים"
+// (completing-the-line phrasing). "lyrics", "suggestion", "option" and
+// "completion" stay bare signals, unneedingly tightened, because they
+// aren't ordinary lyric vocabulary the way "line"/"verse"/"rhyme" are.
+//
+// Deliberately NOT matched, by design:
+//   - "אז" ("so") alone as a second signal — far too common in ordinary
+//     Hebrew lyrics ("אז בוא", "אז למה") to safely treat as a commentary
+//     tell. "אז הנה" ("so here") is likewise not special-cased on its own
+//     for the same reason ("אז הנה אני" reads as perfectly normal lyrics);
+//     the one recorded case that needed it ("שיר פתיחה על ... אז הנה שורת
+//     פתיחה:") is instead caught by the more specific "an opening song
+//     about..." pattern below.
+//   - a trailing colon on its own, without one of the openers below — some
+//     real lyrics legitimately end a line with a colon (introducing a
+//     quoted line, a name, etc).
+//   - "sure"/"certainly"/"okay"/"wait"/"hmm"/"let me"/"i'll"/"i think"/
+//     "הנה"/"בטח"/"רגע"/"אוקיי" used WITHOUT a second signal — see the
+//     counter-examples above; these are real, common lyric openers.
+// JS's \b is defined in terms of \w (ASCII letters/digits/underscore only),
+// so it never fires at a Hebrew-letter boundary — "שירה" followed by a
+// space looks like \W\W to \b, not a word boundary. HEB_END stands in for
+// \b after a Hebrew word: "not immediately followed by another Hebrew
+// letter" (true at end-of-string too, which is what we want here since
+// every Hebrew opener below is checked against a trimmed line).
+const HEB_END = "(?![\\u05D0-\\u05EA])";
+// Bare nouns like "line(s)", "verse", "rhyme", "opening", "מילה" and
+// "שור[הת]" used to count as a second signal on their own — but they're
+// ordinary lyric vocabulary too, so combined with a common opener (I'll,
+// Wait, Here's, הנה, רגע, ...) they over-triggered on real lyrics: "I'll
+// walk the line", "Wait for the last verse", "I'll find a rhyme for your
+// name", "הנה מילה של אהבה", "הנה שורה של אור", "רגע נחשוב על מה שהיה". Only
+// a TIGHTER meta phrase counts now: a trailing colon, one of those nouns
+// immediately followed by a colon ("line:", "שורה:" — "Here's a line:
+// walking into tomorrow", "הנה שורה: הולך לאיבוד בלילה"), "opening
+// line"/"next line"/"שורת פתיחה", "rhymes with"/"not a rhyme" ("Wait,
+// that's not a rhyme with mark."), lone נחשוב followed by a colon (self-talk
+// "רגע, נחשוב: ..." vs. the plain lyric "רגע נחשוב על מה שהיה"), or
+// "להשלים" (completing-the-line phrasing). "lyrics", "suggestion", "option"
+// and "completion" stay bare — they're not ordinary lyric vocabulary, so
+// they're safe without tightening ("I'll offer a quick suggestion:", "בטח,
+// הנה הצעה לשורה הבאה").
+const SECOND_SIGNAL_RE = new RegExp(
+  ":\\s*$" +
+    "|\\b(?:lyrics?|suggestions?|options?|completion)\\b" +
+    "|\\b(?:lines?|verse|rhyme|opening)\\s*:" +
+    "|\\bopening\\s+line\\b" +
+    "|\\bnext\\s+line\\b" +
+    "|\\brhymes?\\s+with\\b" +
+    "|\\bnot\\s+a\\s+rhyme\\b" +
+    "|הצעה|השלמה" +
+    "|שור[הת]\\s*:" +
+    "|שורת\\s+פתיחה" +
+    "|נחשוב\\s*:" +
+    "|להשלים",
+  "i",
+);
+
+// Whole-phrase/opening patterns that are essentially impossible as a
+// genuine lyric line — no second signal required.
+const STRONG_COMMENTARY_RE = [
+  /^as an ai\b/i,
+  /^note\s*:/i,
+  /^explanation\s*:/i,
+  /^this (?:line|suggestion)\b/i,
+  // "The lyrics are empty, so I'll offer/write..." (recorded en-edge-empty).
+  /^the lyrics are\b.*,\s*so\b/i,
+  // "Our whole song is blank, so here is a striking opening line:" (recorded
+  // b563 en-edge-empty) — a mid-line preamble that doesn't start with any
+  // listed opener, so it needs its own standalone pattern rather than
+  // relying on AMBIGUOUS_COMMENTARY_OPENER_RE + SECOND_SIGNAL_RE. Requires
+  // BOTH the draft described as blank/empty AND the "so here's/here is" (or
+  // a trailing "opening line:") tell, so it never fires on a real lyric
+  // that merely happens to contain "so" or "here is" ("I lost my way, so
+  // here is where I stand" has no song/draft/lyrics-is-blank clause, so it
+  // stays unflagged).
+  /\b(?:song|draft|lyrics?)\b[^.\n]{0,30}\b(?:is|are)\s+(?:blank|empty)\b[^.\n]{0,40}(?:,\s*so\s+here(?:'s|\s+is)\b|opening\s+line\s*:\s*$)/i,
+  // "An opening song about a new beginning... so here's an opening line:"
+  // (recorded he-edge-empty) — a line describing the song itself, never a
+  // real lyric.
+  new RegExp(`^שיר\\s+פתיחה\\s+על${HEB_END}`),
+  // '(T)he word "…" remains before the cursor...' (recorded
+  // he-completion-long) — talking ABOUT a word/line, not writing one.
+  new RegExp(`^המילה${HEB_END}.{0,40}נשאר`),
+];
+
+// Openers that are also plausible real lyric openers — each needs a second
+// signal (SECOND_SIGNAL_RE) elsewhere in the line before it counts.
+const AMBIGUOUS_COMMENTARY_OPENER_RE = [
+  /^here(?:'s|\s+is)\b/i,
+  /^sure\b/i,
+  /^certainly\b/i,
+  /^ok(?:ay)?\b/i,
+  /^wait\b/i,
+  /^hmm+\b/i,
+  /^let\s*me\b/i,
+  /^i(?:'ll|\s*will)\b/i,
+  /^i\s*think\b/i,
+  new RegExp(`^הנה${HEB_END}`),
+  new RegExp(`^בטח${HEB_END}`),
+  new RegExp(`^רגע${HEB_END}`),
+  new RegExp(`^אוקיי${HEB_END}`),
+  new RegExp(`^אני\\s+מצי(?:ע|עה)${HEB_END}`),
+];
+
+export function isCommentaryLine(line: string): boolean {
+  // NFKC + niqud-stripped so a (rarely) pointed Hebrew preamble still
+  // matches — the same tolerance normLine (below) applies for the copy
+  // guard.
+  const normalized = line
+    .trim()
+    .normalize("NFKC")
+    .replace(WORD_BREAK_PUNCTUATION_RE, " ")
+    .replace(NIQQUD_RE, "")
+    .trim();
+  if (!normalized) return false;
+
+  if (STRONG_COMMENTARY_RE.some((re) => re.test(normalized))) return true;
+
+  const hasAmbiguousOpener = AMBIGUOUS_COMMENTARY_OPENER_RE.some((re) =>
+    re.test(normalized),
+  );
+  if (!hasAmbiguousOpener) return false;
+
+  return SECOND_SIGNAL_RE.test(normalized);
+}
+
+// Keeps the first non-empty line that isn't a bare section header, a code
+// fence delimiter, or a commentary/preamble line — used when the model
+// answers with commentary/headers/code blocks before the actual line. If
+// EVERY non-blank/header/fence line is commentary (the model never actually
+// gets to a real line, e.g. recorded he-completion-long t4), returns "" —
+// deliberately NOT falling back to the commentary text itself.
+// sanitizeLyricsOutput/applyCopyGuard already treat "" as "no suggestion"
+// (see LyricsAiOverlay.tsx: an empty guarded suggestion goes idle, no ghost
+// text, no insertion), so showing nothing here is strictly safer than
+// showing the model's self-talk as if it were a lyric. checkFormat then
+// fails the trial honestly as "empty output" rather than as a
+// passed-then-flagged commentary line — same outcome (a fail), more
+// accurate detail.
 function firstLyricLine(s: string): string {
   for (const raw of s.split("\n")) {
     const line = raw.trim();
     if (!line) continue;
     if (HEADER_LINE_RE.test(line)) continue;
     if (FENCE_LINE_RE.test(line)) continue;
+    if (isCommentaryLine(line)) continue;
     return line;
   }
   return "";
@@ -153,7 +327,8 @@ function isCompleteNoiseLine(line: string): boolean {
   return (
     trimmed === "" ||
     HEADER_LINE_RE.test(trimmed) ||
-    FENCE_LINE_RE.test(trimmed)
+    FENCE_LINE_RE.test(trimmed) ||
+    isCommentaryLine(trimmed)
   );
 }
 
@@ -207,6 +382,21 @@ export function sanitizePartialLyricsOutput(raw: string): string {
     firstLineEnd === -1 &&
     looksLikeUnresolvedPrefix(firstLine)
   ) {
+    return "";
+  }
+
+  // The still-streaming first line already satisfies isCommentaryLine — a
+  // STRONG phrase ("As an AI...", "The lyrics are empty, so...") resolves
+  // almost immediately; an ambiguous-but-real-lyric-shaped opener ("Wait",
+  // "הנה", "I'll", ...) only resolves once its required second signal has
+  // also streamed in, so a few words of it may already be visible by then.
+  // That's an accepted tradeoff (see isCommentaryLine's doc comment): a
+  // genuine lyric opener never satisfies isCommentaryLine on its own, so
+  // this never blocks normal lyrics — it only ever hides text that was
+  // already confirmed as commentary. Once the line's own newline arrives,
+  // isCompleteNoiseLine (above) drops it for good and the preview moves on
+  // to the real line underneath.
+  if (firstLineEnd === -1 && isCommentaryLine(cleanedFirst)) {
     return "";
   }
 

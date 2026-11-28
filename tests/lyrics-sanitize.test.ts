@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   applyCopyGuard,
+  isCommentaryLine,
   isCopyOfExistingLine,
   sanitizeLyricsOutput,
   sanitizePartialLyricsOutput,
@@ -209,6 +210,230 @@ describe("sanitizeLyricsOutput", () => {
   });
 });
 
+// ── commentary/preamble lines (R6-fix: en-edge-empty / he-edge-empty /
+// he-completion-long recorded raw outputs) ────────────────────────────────
+
+describe("isCommentaryLine", () => {
+  it("flags the recorded EN preambles", () => {
+    expect(
+      isCommentaryLine(
+        "The lyrics are empty, so I'll offer one striking opening line.",
+      ),
+    ).toBe(true);
+    expect(
+      isCommentaryLine(
+        "The lyrics are empty, so I'll write a striking opening line.",
+      ),
+    ).toBe(true);
+  });
+
+  it("flags the recorded HE preambles", () => {
+    expect(
+      isCommentaryLine(
+        "שיר פתיחה על התחלה חדשה, ואין עדיין אף שורה. אז הנה שורת פתיחה:",
+      ),
+    ).toBe(true);
+    expect(
+      isCommentaryLine('רגע, נחשוב: זה "אותו" + סיום, כדי להשלים לשורה שלמה. '),
+    ).toBe(true);
+    expect(
+      isCommentaryLine(
+        'המילה "לאותו" נשארת לפני הסמן, אז ההשלמה צריכה להיות המשך ',
+      ),
+    ).toBe(true);
+  });
+
+  it("flags other common EN meta/preamble openers", () => {
+    expect(isCommentaryLine("As an AI, I can't have feelings")).toBe(true);
+    expect(isCommentaryLine("Note: this is just a suggestion")).toBe(true);
+    expect(isCommentaryLine("Explanation: it rhymes with night")).toBe(true);
+    expect(isCommentaryLine("This line sets up the chorus nicely")).toBe(true);
+    expect(isCommentaryLine("Here's a line: walking into tomorrow")).toBe(true);
+    expect(isCommentaryLine("Sure, here's a suggestion:")).toBe(true);
+    expect(isCommentaryLine("Okay, here's the next line:")).toBe(true);
+    expect(isCommentaryLine("Wait, that's not a rhyme with mark.")).toBe(true);
+    // Colon framing, not the bare noun — "Let me offer a line for you" (no
+    // colon) is too close to the must-not-drop "I'll write a line about
+    // you" to use bare "line" as a signal any more (see the must-not-drop
+    // table below).
+    expect(isCommentaryLine("Let me offer a line:")).toBe(true);
+    expect(isCommentaryLine("I think this suggestion rhymes better")).toBe(
+      true,
+    );
+    expect(isCommentaryLine("I'll offer a quick suggestion:")).toBe(true);
+  });
+
+  it("flags other common HE meta/preamble openers", () => {
+    expect(isCommentaryLine("הנה שורה: הולך לאיבוד בלילה")).toBe(true);
+    expect(isCommentaryLine("בטח, הנה הצעה לשורה הבאה")).toBe(true);
+    expect(isCommentaryLine("אוקיי, הנה ההשלמה:")).toBe(true);
+    // Colon framing, not the bare noun — "אני מציע שורה חדשה כאן" (no
+    // colon) is too close to the must-not-drop "אני מציע שורה בלי סוף" to
+    // use bare "שורה" as a signal any more (see the must-not-drop table
+    // below).
+    expect(isCommentaryLine("אני מציע שורה:")).toBe(true);
+  });
+
+  it("does NOT flag a table of real lyric lines that merely start with the same words", () => {
+    const realLyrics = [
+      // EN — each starts with an opener word that's ambiguous on its own,
+      // but has no second signal (mention of line/lyric/suggestion/etc, or
+      // a trailing colon), so it must read as ordinary lyrics.
+      "Here comes the sun",
+      "Wait for me",
+      "Sure as the rain",
+      "I think of you every night",
+      "I'll write your name in the sand",
+      "Let me love you",
+      "Hmm hmm hmm",
+      "Okay, I'm leaving",
+      "Certainly not the way I planned it",
+      "I'll carry you home tonight",
+      // HE — same idea, Hebrew openers with no second signal.
+      "הנה אני",
+      "בטח שאני אוהב",
+      "רגע לפני שהשמש שוקעת",
+      "אוקיי אני הולך",
+      "אני מציע לך את הלב שלי",
+    ];
+    for (const line of realLyrics) {
+      expect(isCommentaryLine(line)).toBe(false);
+    }
+  });
+
+  it("does not flag an ordinary line with no opener at all", () => {
+    expect(isCommentaryLine("a brand new line of lyrics")).toBe(false);
+    expect(isCommentaryLine("")).toBe(false);
+    expect(isCommentaryLine("   ")).toBe(false);
+  });
+
+  // ── must-not-drop (R6 review §1.3/1.5): 31 real lyric lines the old
+  // bare-noun SECOND_SIGNAL_RE (lines?/verse/rhyme/opening/מילה/שור[הת])
+  // used to flag as commentary, which firstLyricLine would then drop and
+  // checkFormat would then fail. All 31, verbatim from
+  // /workspace/pr-prompts/fp31.txt. The hard constraint is "never drop a
+  // real lyric" — every one of these must stay a plain lyric line, forever,
+  // regardless of how SECOND_SIGNAL_RE is tightened further.
+  it("does NOT drop any of the 31 recorded false-positive lyric lines", () => {
+    const mustNotDrop = [
+      // EN (19) — I'll / Wait / Here's / Sure / Okay / Let me / I think /
+      // Hmm + a bare lyric-vocabulary word (line/verse/rhyme/opening).
+      "I'll walk the line",
+      "I will walk the line",
+      "I'll draw the line tonight",
+      "I'll write a line about you",
+      "I'll find a rhyme for your name",
+      "I'll sing this verse again",
+      "I'll wait for the opening door",
+      "Wait in line for me",
+      "Wait at the end of the line",
+      "Wait for the last verse",
+      "Here's a line I never crossed",
+      "Here is the line I draw",
+      "Sure, I remember every line",
+      "Sure, this verse is mine",
+      "Okay, I'll walk the line",
+      "Let me walk the line",
+      "Let me finish this verse",
+      "I think this line is drawn in sand",
+      "Hmm, a quiet line of light",
+      // HE (12) — הנה / רגע / אוקיי / בטח / אני מציע + מילה or שור[הת] or
+      // (lone) נחשוב.
+      "הנה מילה של אהבה",
+      "הנה מילה אחת שאמרת",
+      "הנה שורה של אור",
+      "הנה שורת זהב בלילה",
+      "רגע, מילה אחת לפני שתלכי",
+      "רגע נחשוב על מה שהיה",
+      "אוקיי, זו המילה האחרונה",
+      "בטח יש מילה שעוד לא אמרתי",
+      "אני מציע מילה טובה לדרך",
+      "אני מציע שורה בלי סוף",
+      "הנה אני בשורה הראשונה",
+      "רגע לפני השורה האחרונה",
+    ];
+    expect(mustNotDrop.length).toBe(31);
+    for (const line of mustNotDrop) {
+      expect(isCommentaryLine(line)).toBe(false);
+      expect(sanitizeLyricsOutput(line, "next_line")).toBe(line);
+    }
+  });
+});
+
+describe("sanitizeLyricsOutput (commentary preamble, R6-fix)", () => {
+  it("skips the recorded EN preamble and keeps the real opening line", () => {
+    expect(
+      sanitizeLyricsOutput(
+        "The lyrics are empty, so I'll offer one striking opening line.\n\nEvery morning I wake up counting the ways the light gets in",
+        "next_line",
+      ),
+    ).toBe("Every morning I wake up counting the ways the light gets in");
+    expect(
+      sanitizeLyricsOutput(
+        "The lyrics are empty, so I'll write a striking opening line.\n\nEvery morning the coffee cools before I've tasted it",
+        "next_line",
+      ),
+    ).toBe("Every morning the coffee cools before I've tasted it");
+  });
+
+  it("skips the recorded HE preamble and keeps the real opening line", () => {
+    expect(
+      sanitizeLyricsOutput(
+        "שיר פתיחה על התחלה חדשה, ואין עדיין אף שורה. אז הנה שורת פתיחה:\n\nהבוקר פותח דלת שלא ידענו שקיימת",
+        "next_line",
+      ),
+    ).toBe("הבוקר פותח דלת שלא ידענו שקיימת");
+  });
+
+  it("returns empty (does not fabricate) when every line is commentary", () => {
+    // Recorded he-completion-long t4: both lines are self-talk about the
+    // task itself ("wait, let's think... to complete the whole line" /
+    // "the word 'to-that' remains before the cursor..."), never actually
+    // writing a completion. sanitizeLyricsOutput must not fall back to
+    // returning that commentary text as if it were the suggestion — the
+    // app already treats "" as "no suggestion" (idle, no ghost text, no
+    // insertion — see LyricsAiOverlay.tsx), so "" is the safe choice here,
+    // and checkFormat (scripts/lyrics-eval/checks.ts) then fails the trial
+    // honestly as "empty output".
+    expect(
+      sanitizeLyricsOutput(
+        'רגע, נחשוב: זה "אותו" + סיום, כדי להשלים לשורה שלמה. \n\nהמילה "לאותו" נשארת לפני הסמן, אז ההשלמה צריכה להיות המשך ',
+        "completion",
+      ),
+    ).toBe("");
+  });
+
+  it("does not drop a real lyric line that happens to start with an ambiguous word", () => {
+    expect(sanitizeLyricsOutput("Wait for me", "next_line")).toBe(
+      "Wait for me",
+    );
+    expect(sanitizeLyricsOutput("הנה אני", "next_line")).toBe("הנה אני");
+  });
+
+  // ── mid-line preamble that doesn't start with a listed opener (recorded
+  // b5635b3 en-edge-empty t1) ──────────────────────────────────────────────
+
+  it("skips the recorded b563 mid-line preamble ('our whole song is blank, so here is...') and keeps the real line", () => {
+    expect(
+      sanitizeLyricsOutput(
+        "Our whole song is blank, so here is a striking opening line:\n\nDust is settling on the window where your handwriting used to be",
+        "next_line",
+      ),
+    ).toBe("Dust is settling on the window where your handwriting used to be");
+  });
+
+  it("does not flag real lyrics that merely echo pieces of that preamble's wording", () => {
+    for (const line of [
+      "The lyrics are written on my hands",
+      "The lyrics are a map I can't read",
+      "I lost my way, so here is where I stand",
+    ]) {
+      expect(isCommentaryLine(line)).toBe(false);
+      expect(sanitizeLyricsOutput(line, "next_line")).toBe(line);
+    }
+  });
+});
+
 // ── sanitizePartialLyricsOutput (#79: streaming ghost text) ────────────────
 
 describe("sanitizePartialLyricsOutput", () => {
@@ -309,6 +534,68 @@ describe("sanitizePartialLyricsOutput", () => {
       if (raw.slice(0, i).includes("\n")) {
         expect(partial).toBe("night I told you I'd leave, and didn't");
       }
+    }
+  });
+
+  // ── commentary/preamble lines while streaming (R6-fix) ──────────────────
+
+  it("drops a fully-streamed leading commentary line, moving on to the real line", () => {
+    expect(
+      sanitizePartialLyricsOutput(
+        "The lyrics are empty, so I'll offer one striking opening line.\nEvery morning",
+      ),
+    ).toBe("Every morning");
+    expect(
+      sanitizePartialLyricsOutput(
+        "שיר פתיחה על התחלה חדשה, ואין עדיין אף שורה. אז הנה שורת פתיחה:\nהבוקר פותח",
+      ),
+    ).toBe("הבוקר פותח");
+  });
+
+  it("holds back a still-streaming commentary line rather than flashing it", () => {
+    // Resolves as soon as the defining substring streams in — "As an AI"
+    // is never a real lyric opener, so holding back from the start is
+    // safe.
+    expect(sanitizePartialLyricsOutput("As an AI, I don't")).toBe("");
+    // The ambiguous opener "The lyrics are" only resolves into commentary
+    // once its second signal (the ", so" clause) has also streamed in.
+    expect(sanitizePartialLyricsOutput("The lyrics are empty, so")).toBe("");
+  });
+
+  it("never permanently holds back a real lyric line that starts with an ambiguous opener", () => {
+    // These never satisfy isCommentaryLine (no second signal ever
+    // appears), so once the full line has streamed in it must be shown in
+    // full — unlike a genuine label/numbering prefix (a pre-existing,
+    // separate holdback — see looksLikeUnresolvedPrefix), nothing about
+    // isCommentaryLine keeps these held back once all their text is in.
+    for (const line of [
+      "Wait for me",
+      "Sure as the rain",
+      "Okay, I'm leaving",
+      "I'll write your name in the sand",
+      "הנה אני",
+      "בטח שאני אוהב",
+    ]) {
+      expect(sanitizePartialLyricsOutput(line)).toBe(line);
+    }
+  });
+
+  it("never goes blank mid-stream on a real lyric that merely contains bare lyric vocabulary (R6 review §1.3)", () => {
+    // Before SECOND_SIGNAL_RE was narrowed, these streamed normally and then
+    // the WHOLE line became "" the instant "line"/"מילה" finished streaming
+    // in — a real lyric appearing then vanishing. A still-ambiguous label
+    // prefix (e.g. a lone "ה", which could still become "הצעה"/"השלמה") is
+    // legitimately held back by the pre-existing, unrelated label holdback
+    // (looksLikeUnresolvedPrefix) — that's not a regression. What must never
+    // happen is the text going blank AFTER it was already shown.
+    for (const line of ["I'll walk the line", "הנה מילה של אהבה"]) {
+      let sawNonEmpty = false;
+      for (let i = 1; i <= line.length; i++) {
+        const partial = sanitizePartialLyricsOutput(line.slice(0, i));
+        if (partial !== "") sawNonEmpty = true;
+        else expect(sawNonEmpty).toBe(false);
+      }
+      expect(sanitizePartialLyricsOutput(line)).toBe(line);
     }
   });
 });
