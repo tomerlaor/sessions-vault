@@ -138,12 +138,41 @@ function lastWordOf(line: string): string {
   return words[words.length - 1] ?? "";
 }
 
-// Case/width-insensitive comparison for two line-ending words, used to tell
-// a genuine rhyme (different words that happen to sound alike) apart from a
-// refrain or epistrophe (the SAME word or line repeated verbatim, e.g. a
-// chorus line that's just typed twice) — the latter is not a closed couplet.
-function norm(word: string): string {
-  return word.normalize("NFKC").toLowerCase();
+// Hebrew maqaf and other word-break marks (U+05BE paseq, U+05C0 sof pasuq,
+// U+05C3, U+05C6 nun hafukha) are not niqqud — mapped to a space so the
+// words on either side don't glue together. Niqqud/cantillation (vowel
+// points, dagesh, sheva, etc) are U+0591-U+05C7 and dropped entirely. ASCII
+// \u escapes so this can't be mangled by source-encoding normalization —
+// same convention as lyrics-sanitize.ts's copy-guard normLine.
+const WORD_BREAK_PUNCTUATION_RE = /[\u05BE\u05C0\u05C3\u05C6]/g;
+const NIQQUD_RE = /[\u0591-\u05C7]/g;
+
+// Normalizes a whole line so two lines that are really the same line —
+// differing only in case, niqqud, punctuation, or a leftover chord/section
+// bracket — compare equal. Mirrors lyrics-sanitize.ts's copy-guard
+// normLine (and evals-r6/rescore/guard.mts's normLine) so the app, the
+// eval, and this rhyme-scheme logic all agree on what counts as "the same
+// line".
+function normLine(line: string): string {
+  return line
+    .normalize("NFKC")
+    .replace(BRACKET_TOKEN_RE, " ")
+    .replace(WORD_BREAK_PUNCTUATION_RE, " ")
+    .replace(NIQQUD_RE, "")
+    .toLowerCase()
+    .replace(/[\p{P}\p{S}]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Tells a refrain/epistrophe (the SAME line repeated verbatim, e.g. a
+// chorus line typed twice) apart from a genuine identical-rhyme couplet
+// (two DIFFERENT lines that merely end in the same word, e.g. "...night" /
+// "...night" as distinct lines) — only the former is excluded from closing
+// a couplet or extending a monorhyme run; the latter is a legitimate,
+// closed couplet.
+function sameLine(a: string, b: string): boolean {
+  return !!a && !!b && normLine(a) === normLine(b);
 }
 
 // A single line is never enough to invent a scheme from. Two lines that
@@ -217,22 +246,29 @@ export function nextLineTargets(
     // target. Genuine two-line couplets (A A B B, where the third-from-last
     // line breaks the rhyme) still get no target. If the couplet is open --
     // including when there's only one line so far -- target the last
-    // finished line. An identical end word (or identical line) between the
-    // two -- a repeated chorus line, not a rhyme -- is a refrain/epistrophe,
-    // never a couplet: `doRhyme` is skipped entirely in that case so it
-    // can't close the pair (nor extend a monorhyme run).
+    // finished line. An identical FULL LINE repeated verbatim between the
+    // two (a refrain/epistrophe, e.g. a chorus line typed twice) is not a
+    // couplet even though its end word trivially "rhymes" with itself:
+    // `doRhyme` is skipped entirely in that case so it can't close the pair
+    // (nor extend a monorhyme run). Two DIFFERENT lines that merely end in
+    // the same word are a legitimate identical-rhyme couplet and DO close
+    // normally -- `sameLine` compares the whole line, not just the end
+    // word, so only a genuine repeat is excluded.
     const rhymeFn = rhymesFor(lang);
-    const last = lastWordOf(lines[lines.length - 1]);
-    const prev = lines.length >= 2 ? lastWordOf(lines[lines.length - 2]) : "";
-    const prev2 = lines.length >= 3 ? lastWordOf(lines[lines.length - 3]) : "";
+    const lastLine = lines[lines.length - 1];
+    const prevLine = lines.length >= 2 ? lines[lines.length - 2] : "";
+    const prev2Line = lines.length >= 3 ? lines[lines.length - 3] : "";
+    const last = lastWordOf(lastLine);
+    const prev = lastWordOf(prevLine);
+    const prev2 = lastWordOf(prev2Line);
     const lastPairRhymes =
       lines.length >= 2 &&
-      norm(prev) !== norm(last) &&
+      !sameLine(prevLine, lastLine) &&
       doRhyme(rhymeFn, prev, last);
     const monorhymeRun =
       lastPairRhymes &&
       lines.length >= 3 &&
-      norm(prev2) !== norm(prev) &&
+      !sameLine(prev2Line, prevLine) &&
       doRhyme(rhymeFn, prev2, prev);
     const closed = lastPairRhymes && !monorhymeRun;
     rhymeWith = closed ? undefined : last || undefined;
