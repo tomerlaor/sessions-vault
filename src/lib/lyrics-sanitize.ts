@@ -93,8 +93,25 @@ function stripWrappingQuotes(s: string): string {
 // its own ("Wait for me", "Sure as the rain", "I'll write your name in the
 // sand", "Let me love you", "Hmm hmm hmm", "Okay, I'm leaving", "הנה אני",
 // "בטח שאני אוהב") and therefore requires a SECOND signal elsewhere in the
-// line — a trailing colon, or an explicit mention of the line/suggestion
-// itself — before it counts as commentary.
+// line before it counts as commentary.
+//
+// That second signal (SECOND_SIGNAL_RE) deliberately does NOT include bare
+// lyric vocabulary like "line(s)", "verse", "rhyme", "opening", "מילה" or
+// "שור[הת]" — those are ordinary words a real lyric uses constantly, and
+// combined with a common opener they used to over-trigger: "I'll walk the
+// line", "Wait for the last verse", "I'll find a rhyme for your name",
+// "Here's a line I never crossed", "הנה מילה של אהבה", "הנה שורה של אור",
+// "רגע נחשוב על מה שהיה" are all real lyric lines that must stay untouched
+// (see the "must not drop" table in tests/lyrics-sanitize.test.ts). Only a
+// TIGHTER meta phrase counts as a second signal: a trailing colon, one of
+// those nouns immediately followed by a colon ("line:"/"שורה:" — "Here's a
+// line: walking into tomorrow", "הנה שורה: הולך לאיבוד בלילה"), "opening
+// line"/"next line"/"שורת פתיחה", "rhymes with"/"not a rhyme" ("Wait,
+// that's not a rhyme with mark."), "נחשוב:" with a colon (self-talk, vs. the
+// plain lyric "רגע נחשוב על מה שהיה" with no colon), or "להשלים"
+// (completing-the-line phrasing). "lyrics", "suggestion", "option" and
+// "completion" stay bare signals, unneedingly tightened, because they
+// aren't ordinary lyric vocabulary the way "line"/"verse"/"rhyme" are.
 //
 // Deliberately NOT matched, by design:
 //   - "אז" ("so") alone as a second signal — far too common in ordinary
@@ -117,10 +134,35 @@ function stripWrappingQuotes(s: string): string {
 // letter" (true at end-of-string too, which is what we want here since
 // every Hebrew opener below is checked against a trimmed line).
 const HEB_END = "(?![\\u05D0-\\u05EA])";
+// Bare nouns like "line(s)", "verse", "rhyme", "opening", "מילה" and
+// "שור[הת]" used to count as a second signal on their own — but they're
+// ordinary lyric vocabulary too, so combined with a common opener (I'll,
+// Wait, Here's, הנה, רגע, ...) they over-triggered on real lyrics: "I'll
+// walk the line", "Wait for the last verse", "I'll find a rhyme for your
+// name", "הנה מילה של אהבה", "הנה שורה של אור", "רגע נחשוב על מה שהיה". Only
+// a TIGHTER meta phrase counts now: a trailing colon, one of those nouns
+// immediately followed by a colon ("line:", "שורה:" — "Here's a line:
+// walking into tomorrow", "הנה שורה: הולך לאיבוד בלילה"), "opening
+// line"/"next line"/"שורת פתיחה", "rhymes with"/"not a rhyme" ("Wait,
+// that's not a rhyme with mark."), lone נחשוב followed by a colon (self-talk
+// "רגע, נחשוב: ..." vs. the plain lyric "רגע נחשוב על מה שהיה"), or
+// "להשלים" (completing-the-line phrasing). "lyrics", "suggestion", "option"
+// and "completion" stay bare — they're not ordinary lyric vocabulary, so
+// they're safe without tightening ("I'll offer a quick suggestion:", "בטח,
+// הנה הצעה לשורה הבאה").
 const SECOND_SIGNAL_RE = new RegExp(
   ":\\s*$" +
-    "|\\b(?:lines?|lyrics?|suggestions?|options?|opening|completion|verse|rhyme)\\b" +
-    "|שור[הת]|הצעה|השלמה|נחשוב|מילה",
+    "|\\b(?:lyrics?|suggestions?|options?|completion)\\b" +
+    "|\\b(?:lines?|verse|rhyme|opening)\\s*:" +
+    "|\\bopening\\s+line\\b" +
+    "|\\bnext\\s+line\\b" +
+    "|\\brhymes?\\s+with\\b" +
+    "|\\bnot\\s+a\\s+rhyme\\b" +
+    "|הצעה|השלמה" +
+    "|שור[הת]\\s*:" +
+    "|שורת\\s+פתיחה" +
+    "|נחשוב\\s*:" +
+    "|להשלים",
   "i",
 );
 
@@ -133,6 +175,16 @@ const STRONG_COMMENTARY_RE = [
   /^this (?:line|suggestion)\b/i,
   // "The lyrics are empty, so I'll offer/write..." (recorded en-edge-empty).
   /^the lyrics are\b.*,\s*so\b/i,
+  // "Our whole song is blank, so here is a striking opening line:" (recorded
+  // b563 en-edge-empty) — a mid-line preamble that doesn't start with any
+  // listed opener, so it needs its own standalone pattern rather than
+  // relying on AMBIGUOUS_COMMENTARY_OPENER_RE + SECOND_SIGNAL_RE. Requires
+  // BOTH the draft described as blank/empty AND the "so here's/here is" (or
+  // a trailing "opening line:") tell, so it never fires on a real lyric
+  // that merely happens to contain "so" or "here is" ("I lost my way, so
+  // here is where I stand" has no song/draft/lyrics-is-blank clause, so it
+  // stays unflagged).
+  /\b(?:song|draft|lyrics?)\b[^.\n]{0,30}\b(?:is|are)\s+(?:blank|empty)\b[^.\n]{0,40}(?:,\s*so\s+here(?:'s|\s+is)\b|opening\s+line\s*:\s*$)/i,
   // "An opening song about a new beginning... so here's an opening line:"
   // (recorded he-edge-empty) — a line describing the song itself, never a
   // real lyric.

@@ -252,7 +252,11 @@ describe("isCommentaryLine", () => {
     expect(isCommentaryLine("Sure, here's a suggestion:")).toBe(true);
     expect(isCommentaryLine("Okay, here's the next line:")).toBe(true);
     expect(isCommentaryLine("Wait, that's not a rhyme with mark.")).toBe(true);
-    expect(isCommentaryLine("Let me offer a line for you")).toBe(true);
+    // Colon framing, not the bare noun — "Let me offer a line for you" (no
+    // colon) is too close to the must-not-drop "I'll write a line about
+    // you" to use bare "line" as a signal any more (see the must-not-drop
+    // table below).
+    expect(isCommentaryLine("Let me offer a line:")).toBe(true);
     expect(isCommentaryLine("I think this suggestion rhymes better")).toBe(
       true,
     );
@@ -263,7 +267,11 @@ describe("isCommentaryLine", () => {
     expect(isCommentaryLine("הנה שורה: הולך לאיבוד בלילה")).toBe(true);
     expect(isCommentaryLine("בטח, הנה הצעה לשורה הבאה")).toBe(true);
     expect(isCommentaryLine("אוקיי, הנה ההשלמה:")).toBe(true);
-    expect(isCommentaryLine("אני מציע שורה חדשה כאן")).toBe(true);
+    // Colon framing, not the bare noun — "אני מציע שורה חדשה כאן" (no
+    // colon) is too close to the must-not-drop "אני מציע שורה בלי סוף" to
+    // use bare "שורה" as a signal any more (see the must-not-drop table
+    // below).
+    expect(isCommentaryLine("אני מציע שורה:")).toBe(true);
   });
 
   it("does NOT flag a table of real lyric lines that merely start with the same words", () => {
@@ -297,6 +305,58 @@ describe("isCommentaryLine", () => {
     expect(isCommentaryLine("a brand new line of lyrics")).toBe(false);
     expect(isCommentaryLine("")).toBe(false);
     expect(isCommentaryLine("   ")).toBe(false);
+  });
+
+  // ── must-not-drop (R6 review §1.3/1.5): 31 real lyric lines the old
+  // bare-noun SECOND_SIGNAL_RE (lines?/verse/rhyme/opening/מילה/שור[הת])
+  // used to flag as commentary, which firstLyricLine would then drop and
+  // checkFormat would then fail. All 31, verbatim from
+  // /workspace/pr-prompts/fp31.txt. The hard constraint is "never drop a
+  // real lyric" — every one of these must stay a plain lyric line, forever,
+  // regardless of how SECOND_SIGNAL_RE is tightened further.
+  it("does NOT drop any of the 31 recorded false-positive lyric lines", () => {
+    const mustNotDrop = [
+      // EN (19) — I'll / Wait / Here's / Sure / Okay / Let me / I think /
+      // Hmm + a bare lyric-vocabulary word (line/verse/rhyme/opening).
+      "I'll walk the line",
+      "I will walk the line",
+      "I'll draw the line tonight",
+      "I'll write a line about you",
+      "I'll find a rhyme for your name",
+      "I'll sing this verse again",
+      "I'll wait for the opening door",
+      "Wait in line for me",
+      "Wait at the end of the line",
+      "Wait for the last verse",
+      "Here's a line I never crossed",
+      "Here is the line I draw",
+      "Sure, I remember every line",
+      "Sure, this verse is mine",
+      "Okay, I'll walk the line",
+      "Let me walk the line",
+      "Let me finish this verse",
+      "I think this line is drawn in sand",
+      "Hmm, a quiet line of light",
+      // HE (12) — הנה / רגע / אוקיי / בטח / אני מציע + מילה or שור[הת] or
+      // (lone) נחשוב.
+      "הנה מילה של אהבה",
+      "הנה מילה אחת שאמרת",
+      "הנה שורה של אור",
+      "הנה שורת זהב בלילה",
+      "רגע, מילה אחת לפני שתלכי",
+      "רגע נחשוב על מה שהיה",
+      "אוקיי, זו המילה האחרונה",
+      "בטח יש מילה שעוד לא אמרתי",
+      "אני מציע מילה טובה לדרך",
+      "אני מציע שורה בלי סוף",
+      "הנה אני בשורה הראשונה",
+      "רגע לפני השורה האחרונה",
+    ];
+    expect(mustNotDrop.length).toBe(31);
+    for (const line of mustNotDrop) {
+      expect(isCommentaryLine(line)).toBe(false);
+      expect(sanitizeLyricsOutput(line, "next_line")).toBe(line);
+    }
   });
 });
 
@@ -348,6 +408,29 @@ describe("sanitizeLyricsOutput (commentary preamble, R6-fix)", () => {
       "Wait for me",
     );
     expect(sanitizeLyricsOutput("הנה אני", "next_line")).toBe("הנה אני");
+  });
+
+  // ── mid-line preamble that doesn't start with a listed opener (recorded
+  // b5635b3 en-edge-empty t1) ──────────────────────────────────────────────
+
+  it("skips the recorded b563 mid-line preamble ('our whole song is blank, so here is...') and keeps the real line", () => {
+    expect(
+      sanitizeLyricsOutput(
+        "Our whole song is blank, so here is a striking opening line:\n\nDust is settling on the window where your handwriting used to be",
+        "next_line",
+      ),
+    ).toBe("Dust is settling on the window where your handwriting used to be");
+  });
+
+  it("does not flag real lyrics that merely echo pieces of that preamble's wording", () => {
+    for (const line of [
+      "The lyrics are written on my hands",
+      "The lyrics are a map I can't read",
+      "I lost my way, so here is where I stand",
+    ]) {
+      expect(isCommentaryLine(line)).toBe(false);
+      expect(sanitizeLyricsOutput(line, "next_line")).toBe(line);
+    }
   });
 });
 
@@ -493,6 +576,25 @@ describe("sanitizePartialLyricsOutput", () => {
       "הנה אני",
       "בטח שאני אוהב",
     ]) {
+      expect(sanitizePartialLyricsOutput(line)).toBe(line);
+    }
+  });
+
+  it("never goes blank mid-stream on a real lyric that merely contains bare lyric vocabulary (R6 review §1.3)", () => {
+    // Before SECOND_SIGNAL_RE was narrowed, these streamed normally and then
+    // the WHOLE line became "" the instant "line"/"מילה" finished streaming
+    // in — a real lyric appearing then vanishing. A still-ambiguous label
+    // prefix (e.g. a lone "ה", which could still become "הצעה"/"השלמה") is
+    // legitimately held back by the pre-existing, unrelated label holdback
+    // (looksLikeUnresolvedPrefix) — that's not a regression. What must never
+    // happen is the text going blank AFTER it was already shown.
+    for (const line of ["I'll walk the line", "הנה מילה של אהבה"]) {
+      let sawNonEmpty = false;
+      for (let i = 1; i <= line.length; i++) {
+        const partial = sanitizePartialLyricsOutput(line.slice(0, i));
+        if (partial !== "") sawNonEmpty = true;
+        else expect(sawNonEmpty).toBe(false);
+      }
       expect(sanitizePartialLyricsOutput(line)).toBe(line);
     }
   });

@@ -150,8 +150,13 @@ const LABEL_RE =
 // them when a second signal (a mention of the line/suggestion itself, or a
 // trailing colon) is also present — see that function's doc comment in
 // src/lib/lyrics-sanitize.ts for the full tradeoff. "the lyrics are" is
-// kept here as a plain substring because it's safe unconditionally: no
-// real lyric is self-referential about "the lyrics" this way.
+// deliberately NOT included here even as a plain substring: isCommentaryLine
+// only treats it as strong together with a following ", so" clause, so a
+// bare substring match here would fail real lyrics the sanitizer keeps
+// ("The lyrics are written on my hands", "The lyrics are a map I can't
+// read"). The strong ", so" pattern (via isCommentaryLine below) is enough
+// to catch the actual preamble shape ("The lyrics are empty, so I'll offer
+// one striking opening line.").
 const META_PHRASES = [
   "here is",
   "here's",
@@ -162,7 +167,6 @@ const META_PHRASES = [
   "note:",
   "explanation:",
   "as an ai",
-  "the lyrics are",
 ];
 
 export function checkFormat(
