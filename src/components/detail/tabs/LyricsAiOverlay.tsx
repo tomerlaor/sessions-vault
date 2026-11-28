@@ -36,6 +36,7 @@ import {
   normalizeNextWordOptions,
   PROMPT_VERSION,
   sanitizePopupSuggestions,
+  verifyNextWordRhymes,
 } from "../../../lib/lyrics-ai";
 import { smartJoinCompletion } from "../../../lib/lyrics-join";
 import {
@@ -429,9 +430,12 @@ const LyricsAiOverlay = forwardRef<LyricsAiOverlayHandle, Props>(
               }, 6000);
               return;
             }
-            const options = normalizeNextWordOptions(
-              result.value.options,
-              lineTextBeforeCursor,
+            const options = verifyNextWordRhymes(
+              normalizeNextWordOptions(
+                result.value.options,
+                lineTextBeforeCursor,
+              ),
+              baseInput,
             );
             if (options.length === 0) {
               setStatus("idle");

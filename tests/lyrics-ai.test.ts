@@ -7,6 +7,7 @@ import {
   buildNextWordOptionsPrompt,
   normalizeNextWordOptions,
   sanitizePopupSuggestions,
+  verifyNextWordRhymes,
 } from "../src/lib/lyrics-ai";
 import { loadEnglishDict } from "../src/lib/prosody";
 import { loadFixtures } from "../scripts/lyrics-eval/fixtures";
@@ -535,6 +536,174 @@ describe("next_word options", () => {
       kind: "continuation" as const,
     }));
     expect(normalizeNextWordOptions(many, "x ")).toHaveLength(5);
+  });
+});
+
+describe("verifyNextWordRhymes", () => {
+  // Builds an Omit<LyricsSuggestionInput, "mode"> from a fixture the same
+  // way scripts/lyrics-eval/runner.ts's deriveCursorInfo does: every
+  // next_word fixture's cursor sits at the end of the lyrics, so
+  // currentLine/textBeforeCursor are just the text after the last newline.
+  function inputFromFixture(
+    id: string,
+  ): Parameters<typeof verifyNextWordRhymes>[1] {
+    const f = fixture(id);
+    const lineStart = f.lyrics.lastIndexOf("\n") + 1;
+    const currentLine = f.lyrics.slice(lineStart);
+    return {
+      lyrics: f.lyrics,
+      currentLine,
+      textBeforeCursor: currentLine,
+      selectionStart: f.cursor,
+      selectionEnd: f.cursor,
+      title: "Eval Song",
+      bpm: f.bpm ?? null,
+      key: f.key ?? null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      songContext: f.songContext ?? null,
+    };
+  }
+
+  it("English: keeps the badge only for options that actually rhyme with the soft, position-based target (woke)", () => {
+    // en-next-word-rhyme: a single finished line ending in "woke" — a soft,
+    // position-based target (see impliedRhymeTarget). "spoke"/"smoke" are
+    // real rhymes; "deep"/"dark" are the kind of unrelated word the model
+    // tags "rhyme" in practice despite no actual rhyme (the bug this fixes).
+    const out = verifyNextWordRhymes(
+      [
+        { text: " spoke", kind: "rhyme" },
+        { text: " smoke", kind: "rhyme" },
+        { text: " deep", kind: "rhyme" },
+        { text: " dark", kind: "rhyme" },
+        { text: " tears", kind: "continuation" },
+      ],
+      inputFromFixture("en-next-word-rhyme"),
+    );
+    expect(out).toEqual([
+      { text: " spoke", kind: "rhyme" },
+      { text: " smoke", kind: "rhyme" },
+      { text: " deep", kind: "continuation" },
+      { text: " dark", kind: "continuation" },
+      { text: " tears", kind: "continuation" },
+    ]);
+  });
+
+  it("English: keeps the badge for real rhymes and drops it for a non-rhyme against a different target (goodbyes)", () => {
+    // en-next-word-context: single finished line ending in "goodbyes".
+    // "skies"/"cries" are real rhymes; "coat" (a candidate actually seen
+    // tagged kind="rhyme" against this kind of target in recorded evals)
+    // isn't.
+    const out = verifyNextWordRhymes(
+      [
+        { text: " skies", kind: "rhyme" },
+        { text: " cries", kind: "rhyme" },
+        { text: " coat", kind: "rhyme" },
+      ],
+      inputFromFixture("en-next-word-context"),
+    );
+    expect(out).toEqual([
+      { text: " skies", kind: "rhyme" },
+      { text: " cries", kind: "rhyme" },
+      { text: " coat", kind: "continuation" },
+    ]);
+  });
+
+  it("keeps the badge for either candidate when the rhyme scheme isn't settled yet (altWord)", () => {
+    // Two finished lines ending in "road" and "sky", neither rhyming with
+    // the other — freeVerseRhymeCandidates' k=2 case, which gives
+    // impliedRhymeTarget both a primary word and an altWord. An option
+    // tagged "rhyme" should keep the badge whichever of the two it matches.
+    const lyrics = "I walk along the road\nThinking of the sky\nUnder the ";
+    const input: Parameters<typeof verifyNextWordRhymes>[1] = {
+      lyrics,
+      currentLine: "Under the ",
+      textBeforeCursor: "Under the ",
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      songContext: null,
+    };
+    const out = verifyNextWordRhymes(
+      [
+        { text: " code", kind: "rhyme" }, // rhymes with "road" (target.word)
+        { text: " fly", kind: "rhyme" }, // rhymes with "sky" (target.altWord)
+        { text: " cat", kind: "rhyme" }, // rhymes with neither
+      ],
+      input,
+    );
+    expect(out).toEqual([
+      { text: " code", kind: "rhyme" },
+      { text: " fly", kind: "rhyme" },
+      { text: " cat", kind: "continuation" },
+    ]);
+  });
+
+  it("downgrades every rhyme-tagged option when there is no rhyme target at all", () => {
+    // No finished lines anywhere yet (the cursor is on the very first,
+    // still-in-progress line) — impliedRhymeTarget returns undefined, so
+    // nothing can be verified and every kind="rhyme" tag is downgraded.
+    const lyrics = "I walk ";
+    const input: Parameters<typeof verifyNextWordRhymes>[1] = {
+      lyrics,
+      currentLine: lyrics,
+      textBeforeCursor: lyrics,
+      selectionStart: lyrics.length,
+      selectionEnd: lyrics.length,
+      title: "T",
+      bpm: null,
+      key: null,
+      timeSignature: null,
+      globalProfile: null,
+      projectProfile: null,
+      recentAccepted: [],
+      songContext: null,
+    };
+    const out = verifyNextWordRhymes(
+      [
+        { text: " slowly", kind: "rhyme" },
+        { text: " quietly", kind: "continuation" },
+      ],
+      input,
+    );
+    expect(out).toEqual([
+      { text: " slowly", kind: "continuation" },
+      { text: " quietly", kind: "continuation" },
+    ]);
+  });
+
+  it("leaves non-rhyme-kind options untouched even when their last word would actually rhyme", () => {
+    const out = verifyNextWordRhymes(
+      [{ text: " spoke", kind: "continuation" }],
+      inputFromFixture("en-next-word-rhyme"),
+    );
+    expect(out).toEqual([{ text: " spoke", kind: "continuation" }]);
+  });
+
+  it("Hebrew: keeps the badge for a real rhyme and drops it for a non-rhyme against the same target (פרידות)", () => {
+    // he-next-word-context: single finished line ending in "פרידות".
+    // "תמונות" shares the -ות suffix (a real rhyme per prosody/he.ts);
+    // "ארון" is the kind of unrelated word recorded evals show the model
+    // tagging kind="rhyme" despite no actual rhyme.
+    const out = verifyNextWordRhymes(
+      [
+        { text: " תמונות", kind: "rhyme" },
+        { text: " ארון", kind: "rhyme" },
+      ],
+      inputFromFixture("he-next-word-context"),
+    );
+    expect(out).toEqual([
+      { text: " תמונות", kind: "rhyme" },
+      { text: " ארון", kind: "continuation" },
+    ]);
   });
 });
 
