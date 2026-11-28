@@ -367,6 +367,59 @@ describe("nextLineTargets", () => {
     expect(targets.rhymeWith).toBe("מגיע");
   });
 
+  it("AABB: a repeated chorus line is still a refrain even with case/punctuation differences (en)", () => {
+    // Same underlying line, typed twice with different case and trailing
+    // punctuation -- normLine's NFKC/lowercase/punctuation-strip treats
+    // them as identical, so this is still a refrain, not a closed couplet.
+    const lyrics =
+      "We rise again when the morning COMES!\nWe rise again when the morning comes";
+    const targets = nextLineTargets(lyrics, lyrics.length);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBe("comes");
+  });
+
+  it("AABB: a repeated chorus line is still a refrain even with niqqud differences (he)", () => {
+    // The second line is the same words, fully unvocalized; the first adds
+    // niqqud to its last word only (מַגִּיע vs מגיע) -- stripping niqqud
+    // makes the two lines identical, so this is still a refrain.
+    const lyrics = "אנחנו קמים כשהבוקר מַגִּיע\nאנחנו קמים כשהבוקר מגיע";
+    const targets = nextLineTargets(lyrics, lyrics.length);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBe("מגיע");
+  });
+
+  it("AABB: two different lines that merely end in the same word close the couplet (identical rhyme, en)", () => {
+    // "gone"/"gone" are the same word, but these are two genuinely
+    // different lines -- a legitimate identical-rhyme couplet, not a
+    // refrain, so it closes normally and the next line gets no target.
+    const lyrics =
+      "I called your name, but you're gone\nNow I'm singing this song, and you're gone";
+    const targets = nextLineTargets(lyrics, lyrics.length);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBeUndefined();
+  });
+
+  it("AABB: two different lines that merely end in the same word close the couplet (identical rhyme, he)", () => {
+    const lyrics = "הלכתי לבד ברחוב בלילה\nאת מחזיקה אותי קרוב בלילה";
+    const targets = nextLineTargets(lyrics, lyrics.length);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBeUndefined();
+  });
+
+  it("AABB: a monorhyme run still extends when the first pair shares an end word but are different lines", () => {
+    // "night"/"night" end the first two lines, but they're different
+    // lines (an identical-rhyme couplet, not a refrain) -- so this is a
+    // genuine 3-line monorhyme run (night/night/light) and the next line
+    // should still target "light", not fall silent.
+    const lyrics =
+      "I walk alone into the night\n" +
+      "You hold me close through the night\n" +
+      "Now there's nothing left but a dying light";
+    const targets = nextLineTargets(lyrics, lyrics.length);
+    expect(targets.scheme).toBe("AABB");
+    expect(targets.rhymeWith).toBe("light");
+  });
+
   it("omits rhymeWith and syllables for empty lyrics", () => {
     const f = fixture("en-edge-empty");
     const targets = nextLineTargets(f.lyrics, f.cursor);
