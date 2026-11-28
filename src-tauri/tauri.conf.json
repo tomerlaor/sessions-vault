@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SessionsVault",
+  "productName": "SeshKi",
   "version": "0.2.0",
   "identifier": "com.tomerlaor.sessionsvault",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "SessionsVault",
+        "title": "SeshKi",
         "width": 1200,
         "height": 800,
         "minWidth": 800,

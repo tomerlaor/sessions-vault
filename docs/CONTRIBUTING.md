@@ -1,4 +1,4 @@
-# Contributing to SessionsVault
+# Contributing to SeshKi
 
 Thanks for your interest in contributing. Here's everything you need to know.
 

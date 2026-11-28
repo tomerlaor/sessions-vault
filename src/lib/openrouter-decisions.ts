@@ -232,7 +232,7 @@ export async function callOpenRouterDecisions(
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${cfg.apiKey}`,
-      "X-Title": "Sessions",
+      "X-Title": "SeshKi",
     },
     body: JSON.stringify(requestBody),
     signal: opts.signal,

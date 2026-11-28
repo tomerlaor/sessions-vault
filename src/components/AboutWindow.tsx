@@ -103,7 +103,7 @@ export function AboutWindow({ onClose }: Props) {
           </svg>
 
           <h1 id="about-title" className="about-name">
-            Sessions<span>Vault</span>
+            Sesh<span>Ki</span>
           </h1>
 
           <p className="about-version">v{version} · Apache 2.0</p>

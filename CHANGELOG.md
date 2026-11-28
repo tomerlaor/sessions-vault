@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Features
+
+* rename the app from SessionsVault to SeshKi (display name only; package/crate names, bundle identifier, and keychain service names are unchanged)
+
 ### Bug Fixes
 
 * Existing users will be asked for AI cloud consent once more, because consent is now tied to the current provider (lyrics helper and Tab Agent).
