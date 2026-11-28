@@ -5,6 +5,7 @@ import {
   currentSection,
   loadEnglishDict,
   nextLineTargets,
+  rhymes,
   type ProsodyLang,
 } from "./prosody";
 import {
@@ -1166,6 +1167,43 @@ export function normalizeNextWordOptions(
     ...cleaned.filter((o) => o.kind === "rhyme"),
   ];
   return ordered.slice(0, 5);
+}
+
+// The model's kind="rhyme" tag is unreliable (recorded evals: only ~1 in 15
+// tagged options actually rhymed) — before a caller shows the "rhyme" badge
+// for an option, re-check it against the app's own dictionary-backed rhyme
+// engine instead of trusting the model's tag. Mirrors exactly how
+// buildNextWordOptionsPrompt computes the rhyme target and the prompt
+// language, so "what was asked for" and "what's verified" never drift
+// apart. An option verifies if its last word rhymes ("perfect" or "slant")
+// with target.word or, when present, target.altWord — the same acceptance
+// scripts/lyrics-eval/checks.ts's rhymes() uses. If there is no rhyme
+// target at all (impliedRhymeTarget returned undefined), nothing can be
+// verified, so every kind="rhyme" option is downgraded. Unverified options
+// are downgraded to "continuation", not dropped, so they still show as a
+// normal option.
+export function verifyNextWordRhymes(
+  options: NextWordOption[],
+  input: Omit<LyricsSuggestionInput, "mode">,
+): NextWordOption[] {
+  const hebrew = detectHebrewContext(input);
+  const lang: ProsodyLang = hebrew ? "he" : "en";
+  const { draft, cursor } = draftBeforeCurrentLine(
+    input.lyrics,
+    input.selectionStart,
+  );
+  const target = impliedRhymeTarget(draft, cursor);
+
+  return options.map((o) => {
+    if (o.kind !== "rhyme") return o;
+    const word = target ? stripTrailingPunct(lastWord(o.text)) : "";
+    const matches = (candidate: string) =>
+      !!word && rhymes(word, candidate, lang) !== "none";
+    const verified =
+      !!target &&
+      (matches(target.word) || (!!target.altWord && matches(target.altWord)));
+    return verified ? o : { ...o, kind: "continuation" };
+  });
 }
 
 // Cleans every popup suggestion for display the same way the ghost-text
